@@ -1,85 +1,91 @@
+//! Transcoders perform cypering/decyphering of the read or write stream, when
+//! each byte is replaced with a different exactly one byte. Transcoders can
+//! have a handshake phase.
+
+pub mod dumb;
+
 use std::io::{Read, Write};
 use std::{io, slice};
 
 // We pass to it a VecDeque instance as a reader
-pub struct EncryptedStream<R, W, D, E>
+pub struct TranscodedStream<R, W, D, E>
 where
     R: Read + Send,
     W: Write + Send,
-    D: Decrypt,
-    E: Encrypt,
+    D: Decode,
+    E: Encode,
 {
     reader: R,
     writer: W,
-    decryptor: D,
-    encryptor: E,
+    decoder: D,
+    encoder: E,
 }
 
-/// In-place slice encryptor
-pub trait Encrypt: Send + Sized {
+/// In-place slice encoder
+pub trait Encode: Send + Sized {
     fn encrypt_iter<'me, 'slice>(
         &'me mut self,
         buf: &'slice [u8],
-    ) -> EncryptIter<'slice, 'me, Self> {
-        EncryptIter {
+    ) -> EncodeIter<'slice, 'me, Self> {
+        EncodeIter {
             slice: buf.into_iter(),
-            encryptor: self,
+            encoder: self,
         }
     }
     fn encrypt_byte(&mut self, byte: u8) -> u8;
 }
 
-pub struct EncryptIter<'slice, 'encryptor, E>
+pub struct EncodeIter<'slice, 'encryptor, E>
 where
-    E: 'encryptor + Encrypt,
+    E: 'encryptor + Encode,
 {
     pub(self) slice: slice::Iter<'slice, u8>,
-    pub(self) encryptor: &'encryptor mut E,
+    pub(self) encoder: &'encryptor mut E,
 }
 
-impl<'slice, 'encryptor, E> Iterator for EncryptIter<'slice, 'encryptor, E>
+impl<'slice, 'encryptor, E> Iterator for EncodeIter<'slice, 'encryptor, E>
 where
-    E: 'encryptor + Encrypt,
+    E: 'encryptor + Encode,
 {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.slice
             .next()
-            .map(|byte| self.encryptor.encrypt_byte(*byte))
+            .map(|byte| self.encoder.encrypt_byte(*byte))
     }
 }
 
-/// In-place slice decryptor
-pub trait Decrypt: Send {
+/// In-place slice decoder
+pub trait Decode: Send {
     fn decrypt(&mut self, buf: &mut [u8]) -> io::Result<usize>;
 }
 
-impl<R, W, D, E> Read for EncryptedStream<R, W, D, E>
+impl<R, W, D, E> Read for TranscodedStream<R, W, D, E>
 where
     R: Read + Send,
     W: Write + Send,
-    D: Decrypt,
-    E: Encrypt,
+    D: Decode,
+    E: Encode,
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let size1 = self.reader.read(buf)?;
-        let size2 = self.decryptor.decrypt(buf)?;
+        let size2 = self.decoder.decrypt(buf)?;
         debug_assert_eq!(size1, size2);
         Ok(size1)
     }
 }
 
-impl<R, W, D, E> Write for EncryptedStream<R, W, D, E>
+impl<R, W, D, E> Write for TranscodedStream<R, W, D, E>
 where
     R: Read + Send,
     W: Write + Send,
-    D: Decrypt,
-    E: Encrypt,
+    D: Decode,
+    E: Encode,
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut len = 0usize;
-        for byte in self.encryptor.encrypt_iter(buf) {
+        for byte in self.encoder.encrypt_iter(buf) {
             self.writer.write_all(&[byte])?;
             len += 1;
         }
