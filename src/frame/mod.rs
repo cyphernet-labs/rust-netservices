@@ -49,7 +49,8 @@ where
 {
     type Item = F;
 
-    // TODO: Handle errors somehow
+    // TODO: Ensure that if the buffer does not contain a whole frame
+    //       the reader position has not advanced.
     fn next(&mut self) -> Option<Self::Item> {
         debug_assert!(Self::BYTE_LEN <= (usize::BITS / 8) as usize);
         let mut len = [0u8; (usize::BITS / 8u32) as usize];
