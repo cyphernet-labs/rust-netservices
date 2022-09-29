@@ -1,6 +1,7 @@
 use super::FramedStream;
 use crate::frame::Frame;
 use crate::transcode::dumb::{DumbDecoder, DumbEncoder};
+use std::convert::Infallible;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DumbFrame64Kb {
@@ -8,7 +9,7 @@ pub enum DumbFrame64Kb {
 }
 
 impl Frame for DumbFrame64Kb {
-    type Error = ();
+    type Error = Infallible;
 
     fn parse(payload: &[u8]) -> Result<Self, Self::Error> {
         Ok(Self::Dumb(payload.to_vec()))

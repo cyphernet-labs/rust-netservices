@@ -2,11 +2,39 @@
 
 use super::FramedStream;
 use crate::frame::Frame;
+use std::convert::Infallible;
+
+impl Frame for Vec<u8> {
+    type Error = Infallible;
+
+    fn parse(payload: &[u8]) -> Result<Self, Self::Error> {
+        Ok(payload.to_vec())
+    }
+}
+
+impl Frame for Box<[u8]> {
+    type Error = Infallible;
+
+    fn parse(payload: &[u8]) -> Result<Self, Self::Error> {
+        Ok(Box::from(payload))
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Multiplexed<Payload: Frame> {
     pub channel: u16,
     pub payload: Payload,
+}
+
+impl<Payload> Iterator for Multiplexed<Payload>
+where
+    Payload: Frame + Iterator<Item = u8>,
+{
+    type Item = Payload::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.payload.next()
+    }
 }
 
 #[derive(Debug)]
@@ -32,3 +60,5 @@ impl<Payload: Frame> Frame for Multiplexed<Payload> {
 
 pub type Multiplexed64KbFrames<R, W, D, E, Payload> =
     FramedStream<R, W, D, E, Multiplexed<Payload>, 2u8>;
+
+pub type Multiplexed64KbData<R, W, D, E> = FramedStream<R, W, D, E, Multiplexed<Box<[u8]>>, 2u8>;
