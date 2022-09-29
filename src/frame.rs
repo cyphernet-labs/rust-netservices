@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::marker::PhantomData;
 
-use crate::transcode::{Decrypt, Encrypt, EncryptedStream};
+use crate::transcode::{Decode, Encode, TranscodedStream};
 
 pub trait Frame: Sized {
     type Error;
@@ -16,11 +16,11 @@ pub struct FramedStream<R, W, D, E, F, const FRAME_PREFIX_BYTES: u8>
 where
     R: Read + Send,
     W: Write + Send,
-    D: Decrypt,
-    E: Encrypt,
+    D: Decode,
+    E: Encode,
     F: Frame,
 {
-    stream: EncryptedStream<R, W, D, E>,
+    stream: TranscodedStream<R, W, D, E>,
     _phantom: PhantomData<F>,
 }
 
@@ -28,8 +28,8 @@ impl<R, W, D, E, F, const FRAME_PREFIX_BYTES: u8> FramedStream<R, W, D, E, F, FR
 where
     R: Read + Send,
     W: Write + Send,
-    D: Decrypt,
-    E: Encrypt,
+    D: Decode,
+    E: Encode,
     F: Frame,
 {
     const BYTE_LEN: usize = FRAME_PREFIX_BYTES as usize;
@@ -40,8 +40,8 @@ impl<R, W, D, E, F, const FRAME_PREFIX_BYTES: u8> Iterator
 where
     R: Read + Send,
     W: Write + Send,
-    D: Decrypt,
-    E: Encrypt,
+    D: Decode,
+    E: Encode,
     F: Frame,
 {
     type Item = F;
