@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "noise_xk"
+name = "streampipes"
 version = "0.1.0"

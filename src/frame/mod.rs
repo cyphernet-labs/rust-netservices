@@ -3,6 +3,7 @@ pub mod mux;
 
 use std::io::{Read, Write};
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 
 use crate::transcode::{Decode, Encode, TranscodedStream};
 
@@ -23,8 +24,38 @@ where
     E: Encode,
     F: Frame,
 {
-    stream: TranscodedStream<R, W, D, E>,
+    inner: TranscodedStream<R, W, D, E>,
     _phantom: PhantomData<F>,
+}
+
+impl<R, W, D, E, F, const FRAME_PREFIX_BYTES: u8> Deref
+    for FramedStream<R, W, D, E, F, FRAME_PREFIX_BYTES>
+where
+    R: Read + Send,
+    W: Write + Send,
+    D: Decode,
+    E: Encode,
+    F: Frame,
+{
+    type Target = TranscodedStream<R, W, D, E>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<R, W, D, E, F, const FRAME_PREFIX_BYTES: u8> DerefMut
+    for FramedStream<R, W, D, E, F, FRAME_PREFIX_BYTES>
+where
+    R: Read + Send,
+    W: Write + Send,
+    D: Decode,
+    E: Encode,
+    F: Frame,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
 }
 
 impl<R, W, D, E, F, const FRAME_PREFIX_BYTES: u8> FramedStream<R, W, D, E, F, FRAME_PREFIX_BYTES>
@@ -35,11 +66,16 @@ where
     E: Encode,
     F: Frame,
 {
-    const BYTE_LEN: usize = FRAME_PREFIX_BYTES as usize;
+    pub fn with(reader: R, writer: W, decoder: D, encoder: E) -> Self {
+        Self {
+            inner: TranscodedStream::with(reader, writer, decoder, encoder),
+            _phantom: Default::default(),
+        }
+    }
 }
 
-impl<R, W, D, E, F, const FRAME_PREFIX_BYTES: u8> Iterator
-    for FramedStream<R, W, D, E, F, FRAME_PREFIX_BYTES>
+impl<'me, R, W, D, E, F, const FRAME_PREFIX_BYTES: u8> Iterator
+    for &'me mut FramedStream<R, W, D, E, F, FRAME_PREFIX_BYTES>
 where
     R: Read + Send,
     W: Write + Send,
@@ -52,12 +88,14 @@ where
     // TODO: Ensure that if the buffer does not contain a whole frame
     //       the reader position has not advanced.
     fn next(&mut self) -> Option<Self::Item> {
-        debug_assert!(Self::BYTE_LEN <= (usize::BITS / 8) as usize);
+        debug_assert!(FRAME_PREFIX_BYTES <= (usize::BITS / 8) as u8);
         let mut len = [0u8; (usize::BITS / 8u32) as usize];
-        self.stream.read_exact(&mut len[..Self::BYTE_LEN]).ok()?;
+        self.inner
+            .read_exact(&mut len[..(FRAME_PREFIX_BYTES as usize)])
+            .ok()?;
         let len = usize::from_le_bytes(len);
         let mut buf = vec![0u8; len as usize];
-        self.stream.read_exact(&mut buf).ok()?;
+        self.inner.read_exact(&mut buf).ok()?;
         F::parse(&buf).ok()
     }
 }

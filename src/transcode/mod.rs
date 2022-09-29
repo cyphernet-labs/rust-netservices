@@ -21,6 +21,23 @@ where
     encoder: E,
 }
 
+impl<R, W, D, E> TranscodedStream<R, W, D, E>
+where
+    R: Read + Send,
+    W: Write + Send,
+    D: Decode,
+    E: Encode,
+{
+    pub fn with(reader: R, writer: W, decoder: D, encoder: E) -> Self {
+        Self {
+            reader,
+            writer,
+            decoder,
+            encoder,
+        }
+    }
+}
+
 /// In-place slice encoder
 pub trait Encode: Send + Sized {
     fn encrypt_iter<'me, 'slice>(
@@ -69,7 +86,8 @@ where
     E: Encode,
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let size1 = self.reader.read(buf)?;
+        self.reader.read_exact(buf)?;
+        let size1 = buf.len();
         let size2 = self.decoder.decrypt(buf)?;
         debug_assert_eq!(size1, size2);
         Ok(size1)
