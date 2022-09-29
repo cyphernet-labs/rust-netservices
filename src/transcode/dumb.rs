@@ -1,10 +1,9 @@
 //! Dumb transcoder which does nothing to the data. Useful for testing purposes.
 //! It also does some dumb three-staged handshake.
 
-use crate::transcode::TranscodedStream;
 use std::io;
 
-use super::{Decode, Encode};
+use super::{Decode, Encode, TranscodedStream};
 
 pub type DumbTranscodedStream<R, W> = TranscodedStream<R, W, DumbDecoder, DumbEncoder>;
 
