@@ -1,3 +1,5 @@
+pub mod dumb;
+
 use std::io::{Read, Write};
 use std::marker::PhantomData;
 
