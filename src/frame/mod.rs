@@ -1,4 +1,5 @@
 pub mod dumb;
+pub mod mux;
 
 use std::io::{Read, Write};
 use std::marker::PhantomData;
