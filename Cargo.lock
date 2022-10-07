@@ -3,5 +3,9 @@
 version = 3
 
 [[package]]
+name = "pollnode"
+version = "0.1.0"
+
+[[package]]
 name = "streampipes"
 version = "0.1.0"

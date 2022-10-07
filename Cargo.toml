@@ -1,14 +1,3 @@
-[package]
-name = "streampipes"
-description = "Composible stream pipelining, tunneling and transcoding"
-version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-#noise_xk = { path = "../noise_xk" }
-
-[features]
-default = []
-#all = ["noise_xk"]
+[workspace]
+members = ["pollnode", "streampipes"]
+default-members = ["pollnode", "streampipes"]
