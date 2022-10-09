@@ -3,11 +3,16 @@ extern crate amplify;
 #[macro_use]
 extern crate clap;
 
-use cyphernet::addr::{UniversalAddr, SocketAddr, ProxyError};
+use std::path::{PathBuf};
+use cyphernet::addr::{UniversalAddr, SocketAddr, ProxyError, PeerAddr};
 use clap::{Parser};
+use ed25519_compact::{KeyPair, SecretKey};
 
 pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
+
+pub const DEFAULT_DIR: &'static str = "~/.nsh";
+pub const DEFAULT_ID_FILE: &'static str = "id_ed25519";
 
 #[derive(Clone, Debug)]
 #[derive(Parser)]
@@ -16,6 +21,14 @@ struct Args {
     /// Verbosity level
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
+
+    /// Start as a daemon listening on a specific socket.
+    #[arg(short, long)]
+    pub listen: Option<Option<SocketAddr<DEFAULT_PORT>>>,
+
+    /// Path to an identity (key) file.
+    #[arg(short, long)]
+    pub id: Option<PathBuf>,
 
     /// SOCKS5 proxy, as IPv4 or IPv6 socket. If port is not given, it defaults
     /// to 9050.
@@ -34,7 +47,7 @@ struct Args {
     /// argument, or as a prefix to the remote host address here, in form of
     /// `socks5h://<proxy_address>/<remote_host>`.
     #[arg()]
-    pub remote_host: UniversalAddr<SocketAddr<DEFAULT_PORT>>,
+    pub remote_host: UniversalAddr<PeerAddr<SecretKey, SocketAddr<DEFAULT_PORT>>>,
 
     /// Command to execute on the remote host
     #[arg()]
@@ -42,7 +55,8 @@ struct Args {
 }
 
 struct Config {
-    pub remote_host: UniversalAddr<SocketAddr<DEFAULT_PORT>>,
+    pub id: KeyPair,
+    pub remote_host: UniversalAddr<PeerAddr<SecretKey, SocketAddr<DEFAULT_PORT>>>,
     pub command: String
 }
 
