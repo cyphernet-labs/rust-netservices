@@ -206,10 +206,11 @@ checksum = "f3b7eb4404b8195a9abb6356f4ac07d8ba267045c8d6d220ac4dc992e6cc75df"
 [[package]]
 name = "cyphernet"
 version = "0.1.0"
-source = "git+https://github.com/Internet2-WG/rust-cyphernet#5589029f59ba73d89d905d706e6de088a7f97c00"
+source = "git+https://github.com/Internet2-WG/rust-cyphernet#7e998f93c310bf5967703414373b3238c6bd4399"
 dependencies = [
  "amplify_derive",
  "data-encoding",
+ "ed25519-compact",
  "socks",
 ]
 
@@ -231,12 +232,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ed25519"
+version = "1.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e9c280362032ea4203659fc489832d0204ef09f247a0506f170dafcac08c369"
+dependencies = [
+ "signature",
+]
+
+[[package]]
 name = "ed25519-compact"
 version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e18997d4604542d0736fae2c5ad6de987f0a50530cbcc14a7ce5a685328a252d"
 dependencies = [
  "ct-codecs",
+ "ed25519",
  "getrandom",
 ]
 
@@ -351,6 +362,7 @@ dependencies = [
  "amplify",
  "clap",
  "cyphernet",
+ "ed25519-compact",
  "ntls",
  "pollnode",
  "streampipes",
@@ -467,6 +479,12 @@ dependencies = [
  "cpufeatures",
  "digest",
 ]
+
+[[package]]
+name = "signature"
+version = "1.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74233d3b3b2f6d4b006dc19dee745e73e2a6bfb6f93607cd3b02bd5b00797d7c"
 
 [[package]]
 name = "socket2"
