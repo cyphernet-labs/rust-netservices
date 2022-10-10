@@ -19,7 +19,7 @@ struct Args {
 
     /// SOCKS5 proxy, as IPv4 or IPv6 socket. If port is not given, it defaults
     /// to 9050.
-    #[arg(short = '5', long, value_parser = clap::value_parser!(String))]
+    #[arg(short = '5', long)]
     pub socks5: Option<SocketAddr<DEFAULT_SOCKS5_PORT>>,
 
     /// Address of the remote host to connect.
@@ -33,7 +33,7 @@ struct Args {
     /// If SOCKS5 proxy is used, either it has to be provided as `--socks5`
     /// argument, or as a prefix to the remote host address here, in form of
     /// `socks5h://<proxy_address>/<remote_host>`.
-    #[arg(value_parser = clap::value_parser!(String))]
+    #[arg()]
     pub remote_host: UniversalAddr<SocketAddr<DEFAULT_PORT>>,
 
     /// Command to execute on the remote host
@@ -65,6 +65,8 @@ fn main() -> Result<(), ProxyError> {
     let args = Args::parse();
 
     let config = Config::try_from(args)?;
+
+    println!("Connecting to {} ...", config.remote_host);
 
     Ok(())
 }
