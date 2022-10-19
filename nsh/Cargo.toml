@@ -16,5 +16,7 @@ streampipes = { path = "../streampipes" }
 pollnode = { path = "../pollnode" }
 cyphernet = { git = "https://github.com/Internet2-WG/rust-cyphernet", features = ["ed25519"] }
 ntls = { git = "https://github.com/Internet2-WG/ntls" }
-ed25519-compact = { version = "1.0.16", features = ["ed25519", "x25519", "pem", "ct-codecs"] }
+ed25519-compact = { version = "2.0.2", features = ["ed25519", "x25519", "pem", "ct-codecs"] }
 clap = { version = "4.0.11", features = ["derive"] }
+shellexpand = "2.1.2"
+nakamoto-net-poll = "0.3.0"

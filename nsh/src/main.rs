@@ -1,13 +1,11 @@
 #[macro_use]
 extern crate amplify;
-#[macro_use]
-extern crate clap;
 
-use std::net;
-use std::path::{PathBuf};
-use cyphernet::addr::{UniversalAddr, SocketAddr, ProxyError, PeerAddr};
-use clap::{Parser};
-use ed25519_compact::{KeyPair, SecretKey};
+use clap::Parser;
+use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
+use cyphernet::crypto::ed25519::Curve25519;
+use std::path::PathBuf;
+use std::{fs, net};
 
 pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
@@ -15,8 +13,7 @@ pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
 pub const DEFAULT_DIR: &'static str = "~/.nsh";
 pub const DEFAULT_ID_FILE: &'static str = "id_ed25519";
 
-#[derive(Clone, Debug)]
-#[derive(Parser)]
+#[derive(Clone, Debug, Parser)]
 #[command(author, version, about)]
 struct Args {
     /// Verbosity level
@@ -50,53 +47,69 @@ struct Args {
     /// argument, or as a prefix to the remote host address here, in form of
     /// `socks5h://<proxy_address>/<remote_host>`.
     #[arg(conflicts_with = "listen", required_unless_present = "listen")]
-    pub remote_host: Option<UniversalAddr<PeerAddr<SecretKey, SocketAddr<DEFAULT_PORT>>>>,
+    pub remote_host: Option<UniversalAddr<PeerAddr<Curve25519, SocketAddr<DEFAULT_PORT>>>>,
 
     /// Command to execute on the remote host
     #[arg(conflicts_with = "listen", required_unless_present = "listen")]
-    pub command: Option<String>
+    pub command: Option<String>,
 }
 
 enum Command {
     Listen(net::SocketAddr),
     Connect {
-        remote_host: UniversalAddr<PeerAddr<SecretKey, net::SocketAddr>>,
-        remote_command: String
+        remote_host: UniversalAddr<PeerAddr<Curve25519, net::SocketAddr>>,
+        remote_command: String,
     },
 }
 
 struct Config {
-    pub id: KeyPair,
-    pub command: Command
+    pub node_keys: LocalNode<Curve25519>,
+    pub command: Command,
 }
 
 #[derive(Debug, Display, Error, From)]
 #[display(inner)]
 pub enum AppError {
     #[from]
-    Proxy(ProxyError)
+    Proxy(ProxyError),
+
+    #[from]
+    Io(std::io::Error),
+
+    #[from]
+    Curve25519(ed25519_compact::Error),
 }
 
 impl TryFrom<Args> for Config {
     type Error = AppError;
 
     fn try_from(args: Args) -> Result<Self, Self::Error> {
-        let mut remote_host = args.remote_host;
-        if let Some(proxy) = args.socks5 {
-            remote_host = remote_host.try_proxy(proxy.into())?;
-        }
-
         let command = if let Some(listen) = args.listen {
             let local_socket = listen.unwrap_or_else(SocketAddr::localhost).into();
             Command::Listen(local_socket)
         } else {
-            let remote_host = args.remote_host.expect("clap library broken");
-            // Merge SOCKS5 information
-            // Resolve to default port
+            let mut remote_host = args.remote_host.expect("clap library broken");
+            if let Some(proxy) = args.socks5 {
+                remote_host = remote_host.try_proxy(proxy.into())?;
+            }
+            Command::Connect {
+                remote_host: remote_host.into(),
+                remote_command: args.command.expect("clap library broken"),
+            }
         };
 
+        let id_path = args.id.unwrap_or_else(|| {
+            let mut dir = PathBuf::from(DEFAULT_DIR);
+            dir.push(DEFAULT_ID_FILE);
+            dir
+        });
+        let id_path = shellexpand::tilde(&id_path.to_string_lossy()).to_string();
+        let id_pem = fs::read_to_string(id_path)?;
+        let id = ed25519_compact::SecretKey::from_pem(&id_pem)?;
+
         Ok(Config {
-            command: args.command.unwrap_or_else(|| s!("nsh"))
+            node_keys: LocalNode::from(id.into()),
+            command,
         })
     }
 }
@@ -109,13 +122,14 @@ fn main() -> Result<(), AppError> {
     let config = Config::try_from(args)?;
 
     match config.command {
-        Command::Listen() => {
-
+        Command::Listen(_) => {}
+        Command::Connect {
+            remote_host,
+            remote_command,
+        } => {
+            println!("Connecting to {} ...", remote_host);
         }
-        Command::Connect { .. } => {}
     }
-
-    println!("Connecting to {} ...", config.remote_host);
 
     Ok(())
 }
