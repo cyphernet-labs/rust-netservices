@@ -1,11 +1,17 @@
 #[macro_use]
 extern crate amplify;
+#[macro_use]
+extern crate log;
 
-use clap::Parser;
-use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
-use cyphernet::crypto::ed25519::Curve25519;
+use std::net::TcpStream;
 use std::path::PathBuf;
 use std::{fs, net};
+
+use clap::Parser;
+use crossbeam_channel as chan;
+use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
+use cyphernet::crypto::ed25519::Curve25519;
+use nakamoto_net::{Io, Link, LocalTime, Reactor as _};
 
 pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
@@ -78,6 +84,9 @@ pub enum AppError {
 
     #[from]
     Curve25519(ed25519_compact::Error),
+
+    #[from]
+    Nakamoto(nakamoto_net::error::Error),
 }
 
 impl TryFrom<Args> for Config {
@@ -122,14 +131,95 @@ fn main() -> Result<(), AppError> {
     let config = Config::try_from(args)?;
 
     match config.command {
-        Command::Listen(_) => {}
+        Command::Listen(socket_addr) => {
+            println!("Listening on {} ...", socket_addr);
+
+            let (handle, commands) = chan::unbounded::<ProtocolCmd>();
+            let (shutdown, shutdown_recv) = chan::bounded(1);
+            let (listening_send, listening) = chan::bounded(1);
+            let mut reactor = Reactor::new(shutdown_recv, listening_send)?;
+            let protocol = Protocol {};
+            let events = Events {};
+            reactor.run(&[socket_addr], protocol, events, commands)?;
+        }
         Command::Connect {
             remote_host,
             remote_command,
         } => {
             println!("Connecting to {} ...", remote_host);
+            // let socket_addr = net::SocketAddr::from(remote_host);
+            let stream = TcpStream::connect(&remote_host)?;
         }
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub enum ProtocolEvent {}
+#[derive(Debug, Clone)]
+pub enum ProtocolCmd {}
+#[derive(Debug, Display)]
+#[display(doc_comments)]
+pub enum DisconnectReason {}
+impl From<DisconnectReason> for nakamoto_net::DisconnectReason<DisconnectReason> {
+    fn from(reason: DisconnectReason) -> Self {
+        nakamoto_net::DisconnectReason::Protocol(reason)
+    }
+}
+
+pub struct Protocol {}
+
+impl nakamoto_net::Protocol for Protocol {
+    type Event = ProtocolEvent;
+    type Command = ProtocolCmd;
+    type DisconnectReason = DisconnectReason;
+
+    fn received_bytes(&mut self, addr: &net::SocketAddr, bytes: &[u8]) {
+        todo!()
+    }
+
+    fn attempted(&mut self, addr: &net::SocketAddr) {
+        todo!()
+    }
+
+    fn connected(&mut self, addr: net::SocketAddr, local_addr: &net::SocketAddr, link: Link) {
+        todo!()
+    }
+
+    fn disconnected(
+        &mut self,
+        addr: &net::SocketAddr,
+        reason: nakamoto_net::DisconnectReason<Self::DisconnectReason>,
+    ) {
+        todo!()
+    }
+
+    fn command(&mut self, cmd: Self::Command) {
+        todo!()
+    }
+
+    fn tick(&mut self, local_time: LocalTime) {
+        todo!()
+    }
+
+    fn wake(&mut self) {
+        todo!()
+    }
+}
+
+impl Iterator for Protocol {
+    type Item = Io<ProtocolEvent, DisconnectReason>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!()
+    }
+}
+
+pub struct Events {}
+
+impl nakamoto_net::Publisher<ProtocolEvent> for Events {
+    fn publish(&mut self, e: ProtocolEvent) {
+        info!("Received event {:?}", e);
+    }
 }
