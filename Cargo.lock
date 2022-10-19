@@ -429,8 +429,11 @@ version = "0.1.0"
 dependencies = [
  "amplify",
  "clap",
+ "crossbeam-channel",
  "cyphernet",
  "ed25519-compact 2.0.2",
+ "log",
+ "nakamoto-net",
  "nakamoto-net-poll",
  "ntls",
  "pollnode",
