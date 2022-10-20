@@ -212,7 +212,7 @@ checksum = "f3b7eb4404b8195a9abb6356f4ac07d8ba267045c8d6d220ac4dc992e6cc75df"
 [[package]]
 name = "cyphernet"
 version = "0.1.0"
-source = "git+https://github.com/Internet2-WG/rust-cyphernet#6124caa95a6ec58f55622b818cd5eb12db9d6c8a"
+source = "git+https://github.com/Internet2-WG/rust-cyphernet#52ab0315dbd3369a6464fb8f66a4387231150516"
 dependencies = [
  "amplify_derive",
  "data-encoding",

@@ -38,6 +38,18 @@ where
     }
 }
 
+impl<R, W, D, E> TranscodedStream<R, W, D, E>
+where
+    R: Read + Write + Send,
+    W: Write + Send,
+    D: Decode,
+    E: Encode,
+{
+    pub fn push_bytes(&mut self, bytes: impl AsRef<[u8]>) -> io::Result<usize> {
+        self.reader.write(bytes.as_ref())
+    }
+}
+
 /// In-place slice encoder
 pub trait Encode: Send + Sized {
     fn encrypt_iter<'me, 'slice>(
