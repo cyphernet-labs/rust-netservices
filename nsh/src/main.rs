@@ -3,15 +3,19 @@ extern crate amplify;
 #[macro_use]
 extern crate log;
 
+use std::collections::{HashMap, VecDeque};
+use std::io::Read;
 use std::net::TcpStream;
 use std::path::PathBuf;
-use std::{fs, net};
+use std::{fs, io, net};
 
 use clap::Parser;
 use crossbeam_channel as chan;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::Curve25519;
 use nakamoto_net::{Io, Link, LocalTime, Reactor as _};
+use streampipes::frame::dumb::DumbFramed64KbStream;
+use streampipes::transcode::dumb::{DumbDecoder, DumbEncoder, DumbTranscodedStream};
 
 pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
@@ -80,7 +84,7 @@ pub enum AppError {
     Proxy(ProxyError),
 
     #[from]
-    Io(std::io::Error),
+    Io(io::Error),
 
     #[from]
     Curve25519(ed25519_compact::Error),
@@ -103,7 +107,7 @@ impl TryFrom<Args> for Config {
             }
             Command::Connect {
                 remote_host: remote_host.into(),
-                remote_command: args.command.expect("clap library broken"),
+                remote_command: args.command.unwrap_or_else(|| s!("bash")),
             }
         };
 
@@ -123,34 +127,36 @@ impl TryFrom<Args> for Config {
     }
 }
 
-type Reactor = nakamoto_net_poll::Reactor<net::TcpStream>;
+type Reactor = nakamoto_net_poll::Reactor<TcpStream>;
+type Stream = DumbTranscodedStream<io::Cursor<Vec<u8>>, Vec<u8>>;
 
 fn main() -> Result<(), AppError> {
     let args = Args::parse();
 
     let config = Config::try_from(args)?;
 
-    match config.command {
+    let (handle, commands) = chan::unbounded::<ProtocolCmd>();
+    let (shutdown, shutdown_recv) = chan::bounded(1);
+    let (listening_send, listening) = chan::bounded(1);
+    let mut reactor = Reactor::new(shutdown_recv, listening_send)?;
+    let mut protocol = Protocol::default();
+    let events = Events {};
+
+    let listen_sockets = match config.command {
         Command::Listen(socket_addr) => {
             println!("Listening on {} ...", socket_addr);
-
-            let (handle, commands) = chan::unbounded::<ProtocolCmd>();
-            let (shutdown, shutdown_recv) = chan::bounded(1);
-            let (listening_send, listening) = chan::bounded(1);
-            let mut reactor = Reactor::new(shutdown_recv, listening_send)?;
-            let protocol = Protocol {};
-            let events = Events {};
-            reactor.run(&[socket_addr], protocol, events, commands)?;
+            vec![socket_addr]
         }
         Command::Connect {
             remote_host,
-            remote_command,
+            remote_command: _,
         } => {
             println!("Connecting to {} ...", remote_host);
-            // let socket_addr = net::SocketAddr::from(remote_host);
-            let stream = TcpStream::connect(&remote_host)?;
+            protocol.connect(remote_host.into());
+            vec![]
         }
-    }
+    };
+    reactor.run(&listen_sockets, protocol, events, commands)?;
 
     Ok(())
 }
@@ -168,7 +174,17 @@ impl From<DisconnectReason> for nakamoto_net::DisconnectReason<DisconnectReason>
     }
 }
 
-pub struct Protocol {}
+#[derive(Default)]
+pub struct Protocol {
+    connect_queue: VecDeque<net::SocketAddr>,
+    streams: HashMap<net::SocketAddr, Stream>,
+}
+
+impl Protocol {
+    pub fn connect(&mut self, socket_addr: net::SocketAddr) {
+        self.connect_queue.push_back(socket_addr);
+    }
+}
 
 impl nakamoto_net::Protocol for Protocol {
     type Event = ProtocolEvent;
@@ -176,43 +192,68 @@ impl nakamoto_net::Protocol for Protocol {
     type DisconnectReason = DisconnectReason;
 
     fn received_bytes(&mut self, addr: &net::SocketAddr, bytes: &[u8]) {
-        todo!()
+        let stream = self.streams.get_mut(addr).expect("unknown remote peer");
+        stream.push_bytes(bytes).expect("buffer overflow");
+
+        // Printout the received data
+        let mut buf = vec![0u8; bytes.len()];
+        loop {
+            let len = stream.read(&mut buf).expect("in-memory reading");
+            if len == 0 {
+                break;
+            }
+            let data = String::from_utf8_lossy(&buf[..len]);
+            println!("{}", data);
+        }
     }
 
-    fn attempted(&mut self, addr: &net::SocketAddr) {
-        todo!()
-    }
+    fn attempted(&mut self, addr: &net::SocketAddr) {}
 
-    fn connected(&mut self, addr: net::SocketAddr, local_addr: &net::SocketAddr, link: Link) {
-        todo!()
+    fn connected(&mut self, addr: net::SocketAddr, _local_addr: &net::SocketAddr, link: Link) {
+        debug_assert_eq!(
+            link,
+            Link::Inbound,
+            "Reactor implementation can only accept incoming connections"
+        );
+
+        let reader = io::Cursor::new(Vec::<u8>::new());
+        let writer = Vec::<u8>::new();
+        let stream = Stream::with(reader, writer, DumbDecoder, DumbEncoder);
+        if self.streams.insert(addr, stream).is_some() {
+            warn!(
+                "Repeated incoming connection from peer {}, resetting tunnel",
+                addr
+            );
+        }
+
+        // TODO: Perform handshake
     }
 
     fn disconnected(
         &mut self,
         addr: &net::SocketAddr,
-        reason: nakamoto_net::DisconnectReason<Self::DisconnectReason>,
+        _reason: nakamoto_net::DisconnectReason<Self::DisconnectReason>,
     ) {
-        todo!()
+        self.streams.remove(addr).expect("unknown remote peer");
     }
 
     fn command(&mut self, cmd: Self::Command) {
-        todo!()
+        panic!("Commands are not supported")
     }
 
-    fn tick(&mut self, local_time: LocalTime) {
-        todo!()
-    }
+    fn tick(&mut self, local_time: LocalTime) {}
 
-    fn wake(&mut self) {
-        todo!()
-    }
+    fn wake(&mut self) {}
 }
 
 impl Iterator for Protocol {
     type Item = Io<ProtocolEvent, DisconnectReason>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        if let Some(socket_addr) = self.connect_queue.pop_front() {
+            return Some(Io::Connect(socket_addr));
+        }
+        None
     }
 }
 
