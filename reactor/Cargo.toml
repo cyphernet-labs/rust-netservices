@@ -9,3 +9,10 @@ edition = "2021"
 [dependencies]
 amplify = "3.13.0"
 crossbeam-channel = "0.5.6"
+popol = { version = "1.0.0", git = "https://github.com/Internet2-WG/popol", branch = "api", optional = true }
+socket2 = "0.4"
+libc = "0.2.71"
+
+[features]
+default = []
+all = ["popol"]
