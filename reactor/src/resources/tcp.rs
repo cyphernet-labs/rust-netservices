@@ -1,13 +1,38 @@
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::Arc;
 use std::time::Duration;
 use std::{io, net, time};
 
-use crate::{Resource, ResourceAddr};
+use crate::{OnDemand, Resource, ResourceAddr};
 
 /// Maximum time to wait when reading from a socket.
 const READ_TIMEOUT: time::Duration = Duration::from_secs(6);
 /// Maximum time to wait when writing to a socket.
 const WRITE_TIMEOUT: time::Duration = Duration::from_secs(3);
+
+/// Disconnect reason originating either from the network interface or provided
+/// by the network protocol state machine in form of
+/// [`ReactorDispatch::DisconnectPeer`] instruction.
+#[derive(Debug, Clone)]
+pub enum DisconnectReason {
+    /// Error while dialing the remote. This error occurs before a connection is
+    /// even established. Errors of this kind are usually not transient.
+    DialError(Arc<io::Error>),
+
+    /// Error with an underlying established connection. Sometimes, reconnecting
+    /// after such an error is possible.
+    ConnectionError(Arc<io::Error>),
+
+    /// Peer was disconnected due to a request from the network protocol
+    /// business logic.
+    OnDemand,
+}
+
+impl OnDemand for DisconnectReason {
+    fn on_demand() -> Self {
+        Self::OnDemand
+    }
+}
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum TcpConnector {
@@ -17,6 +42,7 @@ pub enum TcpConnector {
 
 impl ResourceAddr for TcpConnector {}
 
+#[derive(Debug)]
 pub enum TcpSocket {
     Listener(net::TcpListener),
     Stream(net::TcpStream),
@@ -34,6 +60,7 @@ impl TcpSocket {
 
 impl Resource for TcpSocket {
     type Addr = TcpConnector;
+    type DisconnectReason = DisconnectReason;
     type Error = io::Error;
 
     fn addr(&self) -> Self::Addr {
@@ -96,6 +123,31 @@ impl AsRawFd for TcpSocket {
         match self {
             TcpSocket::Listener(listener) => listener.as_raw_fd(),
             TcpSocket::Stream(stream) => stream.as_raw_fd(),
+        }
+    }
+}
+
+impl io::Read for TcpSocket {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            TcpSocket::Listener(_) => Err(io::ErrorKind::NotConnected.into()),
+            TcpSocket::Stream(stream) => stream.read(buf),
+        }
+    }
+}
+
+impl io::Write for TcpSocket {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            TcpSocket::Listener(_) => Err(io::ErrorKind::NotConnected.into()),
+            TcpSocket::Stream(stream) => stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            TcpSocket::Listener(_) => Err(io::ErrorKind::NotConnected.into()),
+            TcpSocket::Stream(stream) => stream.flush(),
         }
     }
 }
