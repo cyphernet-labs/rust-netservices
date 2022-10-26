@@ -373,9 +373,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.136"
+version = "0.2.137"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55edcf6c0bb319052dea84732cf99db461780fd5e8d3eb46ab6ff312ab31f197"
+checksum = "fc7fcc620a3bff7cdd7a365be3376c97191aeaccc2a603e600951e452615bf89"
 
 [[package]]
 name = "log"
@@ -494,7 +494,7 @@ dependencies = [
 [[package]]
 name = "popol"
 version = "1.0.0"
-source = "git+https://github.com/Internet2-WG/popol?branch=api#b3c6e6c7542c43e14634c1afe22d37cb59753483"
+source = "git+https://github.com/Internet2-WG/popol?branch=api#02b8d4089bd234f3d9d46ef27f6e64cfbc45118a"
 dependencies = [
  "libc",
 ]
