@@ -114,7 +114,7 @@ where
         if self.poll.wait_timeout(timeout)? {
             // Nb. The way this is currently used basically ignores which keys have
             // timed out. So as long as *something* timed out, we wake the service.
-            self.timeouts.check(&mut timeouts);
+            self.timeouts.check_now(&mut timeouts);
 
             if !timeouts.is_empty() {
                 timeouts.clear();
@@ -232,11 +232,13 @@ impl<K> TimeoutManager<K> {
     pub fn register(&mut self, key: K, time: Instant) -> bool {
         // If this timeout is too close to a pre-existing timeout,
         // don't register it.
-        if self
-            .timeouts
-            .iter()
-            .any(|(_, t)| *t + self.threshold >= time)
-        {
+        if self.timeouts.iter().any(|(_, t)| {
+            if *t < time {
+                time.duration_since(*t) < self.threshold
+            } else {
+                t.duration_since(time) < self.threshold
+            }
+        }) {
             return false;
         }
 
@@ -264,7 +266,7 @@ impl<K> TimeoutManager<K> {
     /// assert!(tm.next(now) <= Some(Duration::from_millis(8)));
     ///
     /// // ... sleep for a millisecond ...
-    /// now.elapse(LocalDuration::from_millis(1));
+    /// now += Duration::from_millis(1);
     ///
     /// // Now we don't need to wait as long!
     /// assert!(tm.next(now).unwrap() <= Duration::from_millis(7));
@@ -279,6 +281,22 @@ impl<K> TimeoutManager<K> {
                 Duration::from_secs(0)
             }
         })
+    }
+
+    /// Given a specific time, add to the input vector keys that
+    /// have timed out by that time. Returns the number of keys that timed out.
+    pub fn check(&mut self, time: Instant, fired: &mut Vec<K>) -> usize {
+        let before = fired.len();
+
+        while let Some((k, t)) = self.timeouts.pop() {
+            if time >= t {
+                fired.push(k);
+            } else {
+                self.timeouts.push((k, t));
+                break;
+            }
+        }
+        fired.len() - before
     }
 
     /// Given the current time, add to the input vector keys that
@@ -298,91 +316,47 @@ impl<K> TimeoutManager<K> {
     ///
     /// let mut timeouts = Vec::new();
     ///
-    /// assert_eq!(tm.check(&mut timeouts), 2);
+    /// assert_eq!(tm.check(now + Duration::from_millis(21), &mut timeouts), 2);
     /// assert_eq!(timeouts, vec![0xA, 0xB]);
     /// assert_eq!(tm.len(), 2);
     /// ```
-    pub fn check(&mut self, fired: &mut Vec<K>) -> usize {
-        let now = Instant::now();
-
-        let before = fired.len();
-
-        while let Some((k, t)) = self.timeouts.pop() {
-            if now >= t {
-                fired.push(k);
-            } else {
-                self.timeouts.push((k, t));
-                break;
-            }
-        }
-        fired.len() - before
+    pub fn check_now(&mut self, fired: &mut Vec<K>) -> usize {
+        self.check(Instant::now(), fired)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use quickcheck_macros::quickcheck;
-
-    #[quickcheck]
-    fn properties(timeouts: Vec<u64>, threshold: u64) -> bool {
-        let threshold = LocalDuration::from_secs(threshold);
-        let mut tm = TimeoutManager::new(threshold);
-        let mut now = LocalTime::now();
-
-        for t in timeouts {
-            tm.register(t, now + LocalDuration::from_secs(t));
-        }
-
-        let mut woken = Vec::new();
-        while let Some(delta) = tm.next(now) {
-            now.elapse(delta);
-            assert!(tm.check(now, &mut woken) > 0);
-        }
-
-        let sorted = woken.windows(2).all(|w| w[0] <= w[1]);
-        let granular = woken.windows(2).all(|w| w[1] - w[0] >= threshold.as_secs());
-
-        sorted && granular
-    }
 
     #[test]
     fn test_wake() {
-        let mut tm = TimeoutManager::new(LocalDuration::from_secs(0));
-        let now = LocalTime::now();
+        let mut tm = TimeoutManager::new(Duration::from_secs(0));
+        let now = Instant::now();
 
-        tm.register(0xA, now + LocalDuration::from_millis(8));
-        tm.register(0xB, now + LocalDuration::from_millis(16));
-        tm.register(0xC, now + LocalDuration::from_millis(64));
-        tm.register(0xD, now + LocalDuration::from_millis(72));
+        tm.register(0xA, now + Duration::from_millis(8));
+        tm.register(0xB, now + Duration::from_millis(16));
+        tm.register(0xC, now + Duration::from_millis(64));
+        tm.register(0xD, now + Duration::from_millis(72));
 
         let mut timeouts = Vec::new();
 
         assert_eq!(tm.check(now, &mut timeouts), 0);
         assert_eq!(timeouts, vec![]);
         assert_eq!(tm.len(), 4);
-        assert_eq!(
-            tm.check(now + LocalDuration::from_millis(9), &mut timeouts),
-            1
-        );
+        assert_eq!(tm.check(now + Duration::from_millis(9), &mut timeouts), 1);
         assert_eq!(timeouts, vec![0xA]);
         assert_eq!(tm.len(), 3, "one timeout has expired");
 
         timeouts.clear();
 
-        assert_eq!(
-            tm.check(now + LocalDuration::from_millis(66), &mut timeouts),
-            2
-        );
+        assert_eq!(tm.check(now + Duration::from_millis(66), &mut timeouts), 2);
         assert_eq!(timeouts, vec![0xB, 0xC]);
         assert_eq!(tm.len(), 1, "another two timeouts have expired");
 
         timeouts.clear();
 
-        assert_eq!(
-            tm.check(now + LocalDuration::from_millis(96), &mut timeouts),
-            1
-        );
+        assert_eq!(tm.check(now + Duration::from_millis(96), &mut timeouts), 1);
         assert_eq!(timeouts, vec![0xD]);
         assert!(tm.is_empty(), "all timeouts have expired");
     }
