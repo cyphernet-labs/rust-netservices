@@ -550,6 +550,7 @@ dependencies = [
  "libc",
  "popol 1.0.0",
  "socket2",
+ "streampipes",
 ]
 
 [[package]]
