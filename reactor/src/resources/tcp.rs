@@ -1,8 +1,8 @@
-use std::io::{Read, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io, net};
+use streampipes::NetStream;
 
 use crate::resources::FdResource;
 use crate::{ConnDirection, InputEvent, OnDemand, Resource, ResourceAddr};
@@ -39,29 +39,29 @@ impl OnDemand for DisconnectReason {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum TcpLocator {
+pub enum TcpLocator<A: From<net::SocketAddr>> {
     Listener(net::SocketAddr),
-    Connection(net::SocketAddr),
+    Connection(A),
 }
 
-impl ResourceAddr for TcpLocator {}
+impl<A: From<net::SocketAddr> + Send + Eq + Clone> ResourceAddr for TcpLocator<A> {}
 
-impl TcpLocator {
+impl<A: From<net::SocketAddr>> TcpLocator<A> {
     pub fn socket_addr(&self) -> net::SocketAddr {
         match self {
-            TcpLocator::Listener(addr) | TcpLocator::Connection(addr) => *addr,
+            TcpLocator::Listener(addr) | TcpLocator::Connection(addr) => *addr.into(),
         }
     }
 }
 
 // TODO: Make generic by the stream type allowing composition of streams
 #[derive(Debug)]
-pub enum TcpSocket {
+pub enum TcpSocket<S: NetStream = net::TcpStream> {
     Listener(net::TcpListener),
-    Stream(net::TcpStream),
+    Stream(S),
 }
 
-impl TcpSocket {
+impl<S: NetStream> TcpSocket<S> {
     pub fn listen(addr: impl Into<net::SocketAddr>) -> io::Result<Self> {
         TcpSocket::connect(&TcpLocator::Listener(addr.into()))
     }
@@ -71,8 +71,8 @@ impl TcpSocket {
     }
 }
 
-impl Resource for TcpSocket {
-    type Addr = TcpLocator;
+impl<S: NetStream> Resource for TcpSocket<S> {
+    type Addr = TcpLocator<S::Addr>;
     type DisconnectReason = DisconnectReason;
     type Error = io::Error;
 
@@ -140,7 +140,7 @@ impl Resource for TcpSocket {
     }
 }
 
-impl FdResource for TcpSocket {
+impl<S: NetStream> FdResource for TcpSocket<S> {
     fn handle_readable(
         &mut self,
         events: &mut Vec<InputEvent<Self>>,
@@ -205,7 +205,7 @@ impl FdResource for TcpSocket {
     }
 }
 
-impl AsRawFd for TcpSocket {
+impl<S: NetStream> AsRawFd for TcpSocket<S> {
     fn as_raw_fd(&self) -> RawFd {
         match self {
             TcpSocket::Listener(listener) => listener.as_raw_fd(),
@@ -214,7 +214,7 @@ impl AsRawFd for TcpSocket {
     }
 }
 
-impl io::Read for TcpSocket {
+impl<S: NetStream> io::Read for TcpSocket<S> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self {
             TcpSocket::Listener(_) => Err(io::ErrorKind::NotConnected.into()),
@@ -223,7 +223,7 @@ impl io::Read for TcpSocket {
     }
 }
 
-impl io::Write for TcpSocket {
+impl<S: NetStream> io::Write for TcpSocket<S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self {
             TcpSocket::Listener(_) => Err(io::ErrorKind::NotConnected.into()),

@@ -5,4 +5,7 @@
 
 pub mod channel;
 pub mod frame;
+pub mod stream;
 pub mod transcode;
+
+pub use stream::NetStream;

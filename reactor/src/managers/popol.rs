@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 use std::time::{Duration, Instant};
 use std::{io, net};
+use streampipes::NetStream;
 
 use super::TimeoutManager;
 use crate::resources::tcp::TcpSocket;
@@ -22,7 +23,10 @@ where
     timeouts: TimeoutManager<()>,
 }
 
-impl PollManager<TcpSocket> {
+impl<S: NetStream> PollManager<TcpSocket<S>>
+where
+    S::Addr: Hash,
+{
     pub fn new(
         listen: &impl net::ToSocketAddrs,
         connect: &impl net::ToSocketAddrs,
@@ -30,13 +34,13 @@ impl PollManager<TcpSocket> {
         let mut poll = popol::Poll::new();
 
         for addr in listen.to_socket_addrs()? {
-            let socket = TcpSocket::listen(addr)?;
+            let socket = TcpSocket::<S>::listen(addr)?;
             let key = TcpLocator::Listener(addr);
             poll.register(key, &socket, popol::event::ALL);
         }
 
         for addr in connect.to_socket_addrs()? {
-            let socket = TcpSocket::dial(addr)?;
+            let socket = TcpSocket::<S>::dial(addr)?;
             let key = TcpLocator::Connection(addr);
             poll.register(key, &socket, popol::event::ALL);
         }
