@@ -5,7 +5,7 @@ use std::{io, net};
 
 use super::TimeoutManager;
 use crate::resources::tcp::TcpSocket;
-use crate::resources::{FdResource, TcpConnector};
+use crate::resources::{FdResource, TcpLocator};
 use crate::{InputEvent, OnDemand, Resource, ResourceMgr};
 
 /// Maximum amount of time to wait for i/o.
@@ -31,13 +31,13 @@ impl PollManager<TcpSocket> {
 
         for addr in listen.to_socket_addrs()? {
             let socket = TcpSocket::listen(addr)?;
-            let key = TcpConnector::Listen(addr);
+            let key = TcpLocator::Listener(addr);
             poll.register(key, &socket, popol::event::ALL);
         }
 
         for addr in connect.to_socket_addrs()? {
             let socket = TcpSocket::dial(addr)?;
-            let key = TcpConnector::Connect(addr);
+            let key = TcpLocator::Connection(addr);
             poll.register(key, &socket, popol::event::ALL);
         }
 
@@ -129,16 +129,20 @@ where
             let src = self.resources.get_mut(addr).expect("broken resource index");
             let mut events = Vec::with_capacity(2);
             if ev.is_writable() {
-                events.push(src.read_output_event()?);
+                src.handle_writable(&mut events)?;
             }
             if ev.is_readable() {
-                events.push(src.read_input_event()?);
+                src.handle_readable(&mut events)?;
             }
 
             for event in &events {
                 if let InputEvent::Connected { remote_addr, .. } = event {
+                    self.connecting.remove(remote_addr);
+                }
+                if let InputEvent::Disconnected(addr, ..) = event {
                     debug_assert!(
-                        !self.connecting.remove(remote_addr),
+                        // We do not use `self.unregister_resource` here due to borrower checker problem
+                        self.resources.remove(addr).is_some(),
                         "broken connection management"
                     );
                 }
@@ -158,12 +162,24 @@ where
         self
     }
 
+    // Write::write_all for the R must be a non-blocking call which uses internal OS buffer.
+    // (for instance, this is the case for TcpStream and is stated in the io::Write docs).
+    // The actual block happens in Write::flush which is called from R::handle_writable.
+    //
+    // If the underlying resource does not provide buffered write than it should be nested
+    // into a buffered stream type and then provided to the manager as the resource.
     fn send(&mut self, addr: &R::Addr, data: impl AsRef<[u8]>) -> Result<usize, R::Error> {
         self.resources
             .get_mut(addr)
             .expect("broken resource index")
-            .write(data.as_ref())
-            .map_err(R::Error::from)
+            .write_all(data.as_ref())?;
+        /*
+        self.write_queue
+            .entry(addr)
+            .or_default()
+            .push_back(data.as_ref().into());
+         */
+        Ok(data.as_ref().len())
     }
 }
 
