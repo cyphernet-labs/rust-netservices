@@ -6,7 +6,7 @@ use std::time::Duration;
 /// Network stream is an abstraction of TCP stream object which adds
 /// protocol composability.
 pub trait NetStream: io::Write + io::Read + AsRawFd {
-    type Addr: From<SocketAddr>;
+    type Addr: Eq + Send + Clone + Into<SocketAddr>;
     type AddrList: ToSocketAddrs;
     type Inner: NetStream;
 
