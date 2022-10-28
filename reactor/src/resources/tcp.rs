@@ -39,17 +39,21 @@ impl OnDemand for DisconnectReason {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum TcpLocator<A: From<net::SocketAddr>> {
+pub enum TcpLocator<A> {
     Listener(net::SocketAddr),
     Connection(A),
 }
 
-impl<A: From<net::SocketAddr> + Send + Eq + Clone> ResourceAddr for TcpLocator<A> {}
+impl<A: Send + Eq + Clone> ResourceAddr for TcpLocator<A> {}
 
-impl<A: From<net::SocketAddr>> TcpLocator<A> {
+impl<A> TcpLocator<A>
+where
+    net::SocketAddr: From<A>,
+{
     pub fn socket_addr(&self) -> net::SocketAddr {
         match self {
-            TcpLocator::Listener(addr) | TcpLocator::Connection(addr) => *addr.into(),
+            TcpLocator::Listener(addr) => *addr,
+            TcpLocator::Connection(addr) => (*addr).into(),
         }
     }
 }
@@ -61,12 +65,15 @@ pub enum TcpSocket<S: NetStream = net::TcpStream> {
     Stream(S),
 }
 
-impl<S: NetStream> TcpSocket<S> {
+impl<S: NetStream> TcpSocket<S>
+where
+    Self: Resource<Addr = TcpLocator<S::Addr>, Error = io::Error>,
+{
     pub fn listen(addr: impl Into<net::SocketAddr>) -> io::Result<Self> {
         TcpSocket::connect(&TcpLocator::Listener(addr.into()))
     }
 
-    pub fn dial(addr: impl Into<net::SocketAddr>) -> io::Result<Self> {
+    pub fn dial(addr: impl Into<S::Addr>) -> io::Result<Self> {
         TcpSocket::connect(&TcpLocator::Connection(addr.into()))
     }
 }
@@ -100,8 +107,8 @@ impl<S: NetStream> Resource for TcpSocket<S> {
             }
             TcpLocator::Connection(addr) => {
                 use socket2::{Domain, Socket, Type};
-
-                let domain = if addr.is_ipv4() {
+                let socket_addr: net::SocketAddr = (*addr).into();
+                let domain = if socket_addr.is_ipv4() {
                     Domain::IPV4
                 } else {
                     Domain::IPV6
@@ -112,7 +119,7 @@ impl<S: NetStream> Resource for TcpSocket<S> {
                 sock.set_write_timeout(Some(WRITE_TIMEOUT))?;
                 sock.set_nonblocking(true)?;
 
-                match sock.connect(&(*addr).into()) {
+                match sock.connect(&socket_addr.into()) {
                     Ok(()) => {}
                     Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {}
                     Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {

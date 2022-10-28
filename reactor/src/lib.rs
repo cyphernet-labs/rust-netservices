@@ -5,7 +5,7 @@ pub mod managers;
 pub mod resources;
 
 use std::thread::JoinHandle;
-use std::{io, thread};
+use std::{io, net, thread};
 
 use crossbeam_channel as chan;
 
@@ -396,6 +396,14 @@ pub trait ResourceAddr: Eq + ToOwned<Owned = Self> + Send {
     fn connect<R: Resource<Addr = Self>>(&self) -> Result<R, R::Error> {
         R::connect(self)
     }
+}
+
+/// A subtype of the [`ResoucreAddr`] which is used in network connections.
+pub trait NetAddr<'me>
+where
+    Self: ResourceAddr + Sized + 'me,
+    net::SocketAddr: From<Self> + From<&'me Self>,
+{
 }
 
 /// Trait for disconnect reasons which must handle on-demand disconnections
