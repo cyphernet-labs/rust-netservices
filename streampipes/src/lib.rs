@@ -8,8 +8,6 @@ pub mod frame;
 pub mod stream;
 pub mod transcode;
 
-use std::io;
-use std::net::SocketAddr;
 pub use stream::NetStream;
 
 /// Trait for disconnect reasons which must handle on-demand disconnections
@@ -19,8 +17,8 @@ pub trait OnDemand {
     fn on_demand() -> Self;
 }
 
-/// Address of a resource
-pub trait ResourceAddr: Eq + Clone + Send {
+/// Address of a [`Resource`].
+pub trait ResourceAddr: Clone + Eq + Send {
     type Raw: ResourceAddr;
 
     fn to_raw(&self) -> Self::Raw;
@@ -30,9 +28,16 @@ pub trait ResourceAddr: Eq + Clone + Send {
     }
 }
 
-/// Specific resource (network or local) monitored by the reactor for the
-/// I/O events.
-pub trait Resource: io::Read + io::Write {
+/// Any resource (network, local socket, file etc) which can be connected to
+/// or disconnected to and operates I/O.
+///
+/// The resources can be composed; for this reason they expose underlying raw
+/// resource via associated type [`Self::Raw`]. The connection to the resource
+/// always happens through raw resource in [`Self::raw_connection`]. Composed
+/// resources uses it to run more complex protocols for operations with I/O
+/// streams (like encoding, framing etc) by providing higher-level constructors
+/// or using resource managers running handshake protocols.
+pub trait Resource: std::io::Read + std::io::Write {
     /// Address type used by this resource
     type Addr: ResourceAddr<Raw = <Self::Raw as Resource>::Addr>;
 
@@ -51,8 +56,8 @@ pub trait Resource: io::Read + io::Write {
     /// Returns address of the underlying raw resource.
     fn raw_addr(&self) -> <Self::Raw as Resource>::Addr;
 
-    /// Connects the resource with the underlying raw protocol
-    /// (i.e. without handshake).
+    /// Connects the resource with the underlying raw protocol (i.e. without
+    /// handshake).
     fn raw_connection(addr: &Self::Addr) -> Result<Self::Raw, Self::Error>
     where
         Self: Sized;
@@ -61,10 +66,66 @@ pub trait Resource: io::Read + io::Write {
     fn disconnect(&mut self) -> Result<(), Self::Error>;
 }
 
-impl ResourceAddr for SocketAddr {
+impl ResourceAddr for std::net::SocketAddr {
     type Raw = Self;
 
     fn to_raw(&self) -> Self::Raw {
         *self
+    }
+}
+
+impl ResourceAddr for std::net::SocketAddrV4 {
+    type Raw = Self;
+
+    fn to_raw(&self) -> Self::Raw {
+        *self
+    }
+}
+
+impl ResourceAddr for std::net::SocketAddrV6 {
+    type Raw = Self;
+
+    fn to_raw(&self) -> Self::Raw {
+        *self
+    }
+}
+
+impl ResourceAddr for std::net::IpAddr {
+    type Raw = Self;
+
+    fn to_raw(&self) -> Self::Raw {
+        *self
+    }
+}
+
+impl ResourceAddr for std::net::Ipv4Addr {
+    type Raw = Self;
+
+    fn to_raw(&self) -> Self::Raw {
+        *self
+    }
+}
+
+impl ResourceAddr for std::net::Ipv6Addr {
+    type Raw = Self;
+
+    fn to_raw(&self) -> Self::Raw {
+        *self
+    }
+}
+
+impl ResourceAddr for std::path::PathBuf {
+    type Raw = Self;
+
+    fn to_raw(&self) -> Self::Raw {
+        self.clone()
+    }
+}
+
+impl ResourceAddr for String {
+    type Raw = Self;
+
+    fn to_raw(&self) -> Self::Raw {
+        self.clone()
     }
 }
