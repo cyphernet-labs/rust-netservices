@@ -1,16 +1,11 @@
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
-use std::time::Duration;
 use std::{io, net};
-use streampipes::NetStream;
+use streampipes::{NetStream, OnDemand, Resource, ResourceAddr};
 
 use crate::resources::FdResource;
-use crate::{ConnDirection, InputEvent, OnDemand, Resource, ResourceAddr};
+use crate::{ConnDirection, InputEvent};
 
-/// Maximum time to wait when reading from a socket.
-const READ_TIMEOUT: Duration = Duration::from_secs(6);
-/// Maximum time to wait when writing to a socket.
-const WRITE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Size of the read buffer.
 const READ_BUFFER_SIZE: usize = u16::MAX as usize;
 
@@ -44,16 +39,26 @@ pub enum TcpLocator<A> {
     Connection(A),
 }
 
-impl<A: Send + Eq + Clone> ResourceAddr for TcpLocator<A> {}
+impl<A: ResourceAddr> ResourceAddr for TcpLocator<A> {
+    type Raw = TcpLocator<A::Raw>;
+
+    fn to_raw(&self) -> Self::Raw {
+        match self {
+            TcpLocator::Listener(addr) => TcpLocator::Listener(*addr),
+            TcpLocator::Connection(addr) => TcpLocator::Connection(addr.to_raw()),
+        }
+    }
+}
 
 impl<A> TcpLocator<A>
 where
+    A: Clone,
     net::SocketAddr: From<A>,
 {
     pub fn socket_addr(&self) -> net::SocketAddr {
         match self {
             TcpLocator::Listener(addr) => *addr,
-            TcpLocator::Connection(addr) => (*addr).into(),
+            TcpLocator::Connection(addr) => addr.clone().into(),
         }
     }
 }
@@ -69,17 +74,21 @@ impl<S: NetStream> TcpSocket<S>
 where
     Self: Resource<Addr = TcpLocator<S::Addr>, Error = io::Error>,
 {
-    pub fn listen(addr: impl Into<net::SocketAddr>) -> io::Result<Self> {
-        TcpSocket::connect(&TcpLocator::Listener(addr.into()))
+    pub fn listen(addr: impl Into<net::SocketAddr>) -> io::Result<<Self as Resource>::Raw> {
+        TcpSocket::raw_connection(&TcpLocator::Listener(addr.into()))
     }
 
-    pub fn dial(addr: impl Into<S::Addr>) -> io::Result<Self> {
-        TcpSocket::connect(&TcpLocator::Connection(addr.into()))
+    pub fn dial(addr: impl Into<S::Addr>) -> io::Result<<Self as Resource>::Raw> {
+        TcpSocket::raw_connection(&TcpLocator::Connection(addr.into()))
     }
 }
 
-impl<S: NetStream> Resource for TcpSocket<S> {
+impl<S: NetStream> Resource for TcpSocket<S>
+where
+    S::Addr: ResourceAddr,
+{
     type Addr = TcpLocator<S::Addr>;
+    type Raw = TcpSocket<net::TcpStream>;
     type DisconnectReason = DisconnectReason;
     type Error = io::Error;
 
@@ -98,7 +107,23 @@ impl<S: NetStream> Resource for TcpSocket<S> {
         }
     }
 
-    fn connect(addr: &Self::Addr) -> Result<Self, Self::Error> {
+    fn raw_addr(&self) -> <Self::Raw as Resource>::Addr {
+        match self {
+            TcpSocket::Listener(listener) => TcpLocator::Listener(
+                listener
+                    .local_addr()
+                    .expect("TCP listener must have a local address"),
+            ),
+            TcpSocket::Stream(stream) => TcpLocator::Connection(
+                stream
+                    .peer_addr()
+                    .expect("TCP stream must have remote address")
+                    .into(),
+            ),
+        }
+    }
+
+    fn raw_connection(addr: &Self::Addr) -> Result<Self::Raw, Self::Error> {
         match addr {
             TcpLocator::Listener(addr) => {
                 let listener = net::TcpListener::bind(addr)?;
@@ -106,6 +131,8 @@ impl<S: NetStream> Resource for TcpSocket<S> {
                 Ok(TcpSocket::Listener(listener))
             }
             TcpLocator::Connection(addr) => {
+                // TODO: This should be performed by the reactor
+                /*
                 use socket2::{Domain, Socket, Type};
                 let socket_addr: net::SocketAddr = (*addr).into();
                 let domain = if socket_addr.is_ipv4() {
@@ -120,7 +147,7 @@ impl<S: NetStream> Resource for TcpSocket<S> {
                 sock.set_nonblocking(true)?;
 
                 match sock.connect(&socket_addr.into()) {
-                    Ok(()) => {}
+                    Ok(()) => {}net::TcpStream
                     Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {}
                     Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
                         return Err(io::Error::from(io::ErrorKind::AlreadyExists))
@@ -129,6 +156,9 @@ impl<S: NetStream> Resource for TcpSocket<S> {
                     Err(e) => return Err(e),
                 }
                 Ok(TcpSocket::Stream(sock.into()))
+                 */
+                let stream = net::TcpStream::connect::<net::SocketAddr>(addr.clone().into())?;
+                Ok(TcpSocket::Stream(stream))
             }
         }
     }
@@ -187,11 +217,10 @@ impl<S: NetStream> FdResource for TcpSocket<S> {
     ) -> Result<usize, Self::Error> {
         let event = match self {
             TcpSocket::Listener(listener) => {
-                let (conn, socket_addr) = listener.accept()?;
-                conn.set_nonblocking(true)?;
-                InputEvent::Connected {
-                    remote_addr: TcpLocator::Connection(socket_addr),
-                    local_addr: Some(TcpLocator::Connection(conn.local_addr()?)),
+                let (stream, _) = listener.accept()?;
+                stream.set_nonblocking(true)?;
+                InputEvent::RawConnected {
+                    remote_raw: TcpSocket::Stream(stream),
                     direction: ConnDirection::Inbound,
                 }
             }

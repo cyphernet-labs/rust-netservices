@@ -5,9 +5,10 @@ pub mod managers;
 pub mod resources;
 
 use std::thread::JoinHandle;
-use std::{io, net, thread};
+use std::{io, thread};
 
 use crossbeam_channel as chan;
+use streampipes::Resource;
 
 /// Implementation of reactor pattern.
 ///
@@ -213,19 +214,32 @@ impl<R: Resource, M: ResourceMgr<R>, H: Handler<R>> Runtime<R, M, H> {
     fn dispatch(&mut self) -> Result<(), R::Error> {
         let queue = self.resources.read_events()?;
         self.handler.tick();
+
+        let mut new_connections = Vec::new();
+
         for event in queue {
             match event {
-                InputEvent::Connected {
-                    remote_addr,
-                    local_addr,
+                InputEvent::RawConnected {
+                    remote_raw,
                     direction,
-                } => self.handler.connected(remote_addr, local_addr, direction),
+                } => {
+                    new_connections.push((remote_raw, direction));
+                }
                 InputEvent::Disconnected(addr, reason) => self.handler.disconnected(addr, reason),
                 InputEvent::Timer => self.handler.on_timer(),
                 InputEvent::Timeout => { /* Nothing to do here */ }
                 InputEvent::Received(addr, msg) => self.handler.received(addr, msg),
             }
         }
+
+        // Required due to borrow checker
+        for (remote_raw, direction) in new_connections {
+            let resource = self.resources.handshake(remote_raw)?;
+            if let Some(res_ref) = self.resources.register_resource(resource) {
+                self.handler.connected(res_ref, direction)
+            }
+        }
+
         Ok(())
     }
 
@@ -306,12 +320,7 @@ pub trait Handler<R: Resource>: Send {
 
     /// Called whenever a new connection with a peer is established, either
     /// inbound or outbound caused by [`Reactor::connect`] call.
-    fn connected(
-        &mut self,
-        remote_addr: R::Addr,
-        local_addr: Option<R::Addr>,
-        direction: ConnDirection,
-    );
+    fn connected(&mut self, resource: &R, direction: ConnDirection);
 
     /// Called whenever remote peer got disconnected, either because of the
     /// network event or due to a [`Reactor::disconnect`] call.
@@ -356,9 +365,11 @@ pub enum ConnDirection {
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub enum InputEvent<R: Resource> {
     /// A connection to the resource was successfully established.
-    Connected {
-        remote_addr: R::Addr,
-        local_addr: Option<R::Addr>,
+    ///
+    /// This could be a premature (raw) connection since the handshake prcedure
+    /// is not yet performed.
+    RawConnected {
+        remote_raw: R::Raw,
         direction: ConnDirection,
     },
 
@@ -391,52 +402,6 @@ enum ControlEvent<R: Resource> {
     Send(R::Addr, Vec<u8>),
 }
 
-/// Address of the resource
-pub trait ResourceAddr: Eq + ToOwned<Owned = Self> + Send {
-    fn connect<R: Resource<Addr = Self>>(&self) -> Result<R, R::Error> {
-        R::connect(self)
-    }
-}
-
-/// A subtype of the [`ResoucreAddr`] which is used in network connections.
-pub trait NetAddr<'me>
-where
-    Self: ResourceAddr + Sized + 'me,
-    net::SocketAddr: From<Self> + From<&'me Self>,
-{
-}
-
-/// Trait for disconnect reasons which must handle on-demand disconnections
-pub trait OnDemand {
-    /// Constructs variant for disconnect reason which indicates on-demand
-    /// disconnection.
-    fn on_demand() -> Self;
-}
-
-/// Specific resource (network or local) monitored by the reactor for the
-/// I/O events.
-pub trait Resource: io::Read + io::Write {
-    /// Address type used by this resource
-    type Addr: ResourceAddr;
-
-    /// Reasons of resource disconnects
-    type DisconnectReason: OnDemand;
-
-    /// Error type for resource connectivity.
-    type Error;
-
-    /// Returns an address of the resource.
-    fn addr(&self) -> Self::Addr;
-
-    /// Connects the resource
-    fn connect(addr: &Self::Addr) -> Result<Self, Self::Error>
-    where
-        Self: Sized;
-
-    /// Disconnects the resource.
-    fn disconnect(&mut self) -> Result<(), Self::Error>;
-}
-
 /// Implements specific way of managing multiple resources for a reactor.
 /// Blocks on concurrent events from multiple resources.
 pub trait ResourceMgr<R: Resource>: Send {
@@ -459,6 +424,10 @@ pub trait ResourceMgr<R: Resource>: Send {
     /// Must return false if the resource was already connected.
     fn connect_resource(&mut self, addr: &R::Addr) -> Result<bool, R::Error>;
 
+    /// Run handshake protocol with the remote raw resource to construct full
+    /// resource object.
+    fn handshake(&mut self, remote_raw: R::Raw) -> Result<R, R::Error>;
+
     /// Disconnects resource and removes it from the manager.
     ///
     /// The implementations must make sure that [`IoEvent::Disconnected`] is
@@ -467,9 +436,9 @@ pub trait ResourceMgr<R: Resource>: Send {
     /// Must return false if the resource was already connected.
     fn disconnect_resource(&mut self, addr: &R::Addr) -> Result<bool, R::Error>;
 
-    /// Adds already operating/connected resource to the manager. Returns false
-    /// if the resource is already known.
-    fn register_resource(&mut self, resource: R) -> bool;
+    /// Adds already operating/connected resource to the manager. Returns `None`
+    /// if the resource is already known, or a reference to the added resource.
+    fn register_resource(&mut self, resource: R) -> Option<&R>;
 
     /// Removes resource from the manager without disconnecting it or generating
     /// any events. Stops resource monitoring and returns the resource itself
@@ -492,4 +461,10 @@ pub trait ResourceMgr<R: Resource>: Send {
 
     /// Sends data to the resource.
     fn send(&mut self, addr: &R::Addr, data: impl AsRef<[u8]>) -> Result<usize, R::Error>;
+}
+
+/// Concrete implementation of a stateful handshake protocol converting raw
+/// connection to resource into a resource.
+pub trait HandshakeMgr<R: Resource> {
+    fn handshake(&mut self, raw: R::Raw) -> Result<R, R::Error>;
 }
