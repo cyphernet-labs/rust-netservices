@@ -28,8 +28,7 @@ impl<S, H> PollManager<TcpSocket<S>, H>
 where
     S: NetStream + Send,
     H: HandshakeMgr<TcpSocket<S>> + Send,
-    S::Addr: Hash,
-    <S::Addr as ResourceAddr>::Raw: Hash,
+    S::Addr: ResourceAddr<Raw = net::SocketAddr> + Hash,
     TcpLocator<<S::Addr as ResourceAddr>::Raw>: From<TcpLocator<net::SocketAddr>>,
 {
     pub fn new(

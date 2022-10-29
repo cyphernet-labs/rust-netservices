@@ -85,7 +85,7 @@ where
 
 impl<S: NetStream> Resource for TcpSocket<S>
 where
-    S::Addr: ResourceAddr,
+    S::Addr: ResourceAddr<Raw = net::SocketAddr>,
 {
     type Addr = TcpLocator<S::Addr>;
     type Raw = TcpSocket<net::TcpStream>;
@@ -177,7 +177,11 @@ where
     }
 }
 
-impl<S: NetStream> FdResource for TcpSocket<S> {
+impl<S> FdResource for TcpSocket<S>
+where
+    S: NetStream,
+    S::Addr: ResourceAddr<Raw = net::SocketAddr>,
+{
     fn handle_readable(
         &mut self,
         events: &mut Vec<InputEvent<Self>>,
