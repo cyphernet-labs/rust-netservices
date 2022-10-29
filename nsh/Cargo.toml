@@ -19,7 +19,5 @@ ntls = { git = "https://github.com/Internet2-WG/ntls" }
 ed25519-compact = { version = "2.0.2", features = ["ed25519", "x25519", "pem", "ct-codecs"] }
 clap = { version = "4.0.11", features = ["derive"] }
 shellexpand = "2.1.2"
-nakamoto-net = "0.3.0"
-nakamoto-net-poll = "0.3.0"
 crossbeam-channel = "0.5.6"
 log = { version = "0.4.17", features = ["std"] }

@@ -91,7 +91,7 @@ where
     R::Addr: Hash,
     <R::Addr as ResourceAddr>::Raw: Hash + From<<R::Raw as Resource>::Addr>,
 {
-    type EventIterator = Self;
+    type EventIterator = VecDeque<InputEvent<R>>;
 
     fn get(&self, addr: &R::Addr) -> Option<&R> {
         self.resources.get(addr)
@@ -204,15 +204,25 @@ where
             }
         }
 
-        Ok(self)
+        Ok(&mut self.events)
     }
 
     fn events(&mut self) -> &mut Self::EventIterator {
-        self
+        &mut self.events
     }
 
     fn into_events(self) -> Self::EventIterator {
-        self
+        self.events
+    }
+
+    fn split_events(mut self) -> (Self, Self::EventIterator) {
+        let events = self.events;
+        self.events = VecDeque::with_capacity(events.len());
+        (self, events)
+    }
+
+    fn join_events(&mut self, events: Self::EventIterator) {
+        self.events.extend(events)
     }
 
     /// Write::write_all for the R must be a non-blocking call which uses internal OS buffer.

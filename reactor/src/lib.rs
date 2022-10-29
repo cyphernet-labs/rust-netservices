@@ -4,6 +4,7 @@ extern crate amplify;
 pub mod managers;
 pub mod resources;
 
+use std::any::Any;
 use std::thread::JoinHandle;
 use std::{io, thread};
 
@@ -32,12 +33,13 @@ pub struct Reactor<R: Resource> {
 impl<R: Resource> Reactor<R> {
     /// Constructs reactor and runs it in a thread, returning [`Self`] as a
     /// controller exposing the API ([`ReactorApi`]).
-    pub fn with<H: Handler<R>>(
-        resources: impl ResourceMgr<R> + 'static,
+    pub fn with<M: ResourceMgr<R>, H: Handler<R, M>>(
+        resources: M,
         handler_context: H::Context,
     ) -> io::Result<Self>
     where
         R: 'static,
+        M: 'static,
         H::Context: 'static,
     {
         let (shutdown_send, shutdown_recv) = chan::bounded(1);
@@ -66,16 +68,18 @@ impl<R: Resource> Reactor<R> {
         }
     }
 
-    /// To shutdown the reactor just drop it.
-    fn shutdown(&mut self) -> Result<(), chan::SendError<()>> {
-        self.shutdown.send(())
+    /// Joins reactor runtime thread
+    pub fn join(self) -> thread::Result<()> {
+        self.thread.join()
     }
-}
 
-/// To shutdown the reactor just drop it.
-impl<R: Resource> Drop for Reactor<R> {
-    fn drop(&mut self) {
-        self.shutdown().expect("unable to shutdown the reactor");
+    /// Shut downs the reactor
+    fn shutdown(self) -> Result<(), InternalError> {
+        self.shutdown
+            .send(())
+            .map_err(|_| InternalError::ShutdownChanelBroken)?;
+        self.join()?;
+        Ok(())
     }
 }
 
@@ -177,14 +181,14 @@ impl<R: Resource> ReactorApi for Reactor<R> {
 /// dedicated thread by the reactor. It is controlled by sending instructions
 /// through a set of crossbeam channels. [`Reactor`] abstracts that control via
 /// exposing high-level [`ReactorApi`] and [`Controller`] objects.
-struct Runtime<R: Resource, M: ResourceMgr<R>, H: Handler<R>> {
+struct Runtime<R: Resource, M: ResourceMgr<R>, H: Handler<R, M>> {
     resources: M,
     handler: H,
     control: chan::Receiver<ControlEvent<R>>,
     shutdown: chan::Receiver<()>,
 }
 
-impl<R: Resource, M: ResourceMgr<R>, H: Handler<R>> Runtime<R, M, H> {
+impl<R: Resource, M: ResourceMgr<R>, H: Handler<R, M>> Runtime<R, M, H> {
     fn new(
         resources: M,
         handler: H,
@@ -199,21 +203,25 @@ impl<R: Resource, M: ResourceMgr<R>, H: Handler<R>> Runtime<R, M, H> {
         }
     }
 
-    fn run(&mut self) -> ! {
+    fn run(mut self) -> ! {
         loop {
-            self.dispatch()
-                .unwrap_or_else(|err| self.handler.resource_error(err));
+            self = self.dispatch();
             // Should we process control events before dispatching input?
             self.process_control()
-                .unwrap_or_else(|err| self.handler.resource_error(err));
+                .unwrap_or_else(|err| self.handler.resource_error(&mut self.resources, err));
             self.process_shutdown()
-                .unwrap_or_else(|err| self.handler.internal_failure(err));
+                .unwrap_or_else(|err| self.handler.internal_failure(&mut self.resources, err));
         }
     }
 
-    fn dispatch(&mut self) -> Result<(), R::Error> {
-        let queue = self.resources.read_events()?;
-        self.handler.tick();
+    fn dispatch(mut self) -> Self {
+        if let Err(err) = self.resources.read_events() {
+            self.handler.resource_error(&mut self.resources, err);
+        }
+        self.handler.tick(&mut self.resources);
+
+        let (resources, queue) = self.resources.split_events();
+        self.resources = resources;
 
         for event in queue {
             match event {
@@ -222,15 +230,21 @@ impl<R: Resource, M: ResourceMgr<R>, H: Handler<R>> Runtime<R, M, H> {
                 InputEvent::Connected {
                     remote_addr,
                     direction,
-                } => self.handler.connected(remote_addr, direction),
-                InputEvent::Disconnected(addr, reason) => self.handler.disconnected(addr, reason),
-                InputEvent::Timer => self.handler.on_timer(),
+                } => self
+                    .handler
+                    .connected(&mut self.resources, remote_addr, direction),
+                InputEvent::Disconnected(addr, reason) => {
+                    self.handler.disconnected(&mut self.resources, addr, reason)
+                }
+                InputEvent::Timer => self.handler.on_timer(&mut self.resources),
                 InputEvent::Timeout => { /* Nothing to do here */ }
-                InputEvent::Received(addr, msg) => self.handler.received(addr, msg),
+                InputEvent::Received(addr, msg) => {
+                    self.handler.received(&mut self.resources, addr, msg)
+                }
             }
         }
 
-        Ok(())
+        self
     }
 
     fn process_control(&mut self) -> Result<(), R::Error> {
@@ -238,7 +252,7 @@ impl<R: Resource, M: ResourceMgr<R>, H: Handler<R>> Runtime<R, M, H> {
             match self.control.try_recv() {
                 Err(chan::TryRecvError::Disconnected) => {
                     self.handler
-                        .internal_failure(InternalError::ShutdownChanelBroken);
+                        .internal_failure(&mut self.resources, InternalError::ShutdownChanelBroken);
                     break;
                 }
                 Err(chan::TryRecvError::Empty) => break,
@@ -265,7 +279,7 @@ impl<R: Resource, M: ResourceMgr<R>, H: Handler<R>> Runtime<R, M, H> {
     }
 }
 
-#[derive(Debug, Display, Error)]
+#[derive(Debug, Display, Error, From)]
 #[display(doc_comments)]
 pub enum InternalError {
     /// shutdown channel in the reactor is broken
@@ -273,6 +287,10 @@ pub enum InternalError {
 
     /// control channel is broken; unable to send request
     ControlChannelBroken,
+
+    /// error joining runtime
+    #[from]
+    ThreadError(Box<dyn Any + Send + 'static>),
 }
 
 impl<R: Resource> From<chan::SendError<ControlEvent<R>>> for InternalError {
@@ -288,7 +306,7 @@ impl<R: Resource> From<chan::SendError<ControlEvent<R>>> for InternalError {
 ///
 /// If the business logic needs to control the reactor it should save and use
 /// [`Controller`] provided to it upon construction in [`Handler::new`].
-pub trait Handler<R: Resource>: Send {
+pub trait Handler<R: Resource, M: ResourceMgr<R>>: Send {
     type Context: Send;
 
     /// Constructs handler, providing reactor controller and additional data.
@@ -298,7 +316,7 @@ pub trait Handler<R: Resource>: Send {
     fn new(controller: Controller<R>, ctx: Self::Context) -> Self;
 
     /// Called by reactor dispatcher upon receiving message from the remote peer.
-    fn received(&mut self, remote_addr: R::Addr, message: Box<[u8]>);
+    fn received(&mut self, resources: &mut M, remote_addr: R::Addr, message: Box<[u8]>);
 
     /// Connection attempt underway.
     ///
@@ -306,26 +324,31 @@ pub trait Handler<R: Resource>: Send {
     /// and is always called before [`Self::connected`].
     ///
     /// For incoming connections, [`Self::connected`] is called directly.
-    fn attempted(&mut self, remote_addr: R::Addr);
+    fn attempted(&mut self, resources: &mut M, remote_addr: R::Addr);
 
     /// Called whenever a new connection with a peer is established, either
     /// inbound or outbound caused by [`Reactor::connect`] call. Indicates
     /// completion of the handshake protocol.
-    fn connected(&mut self, remote_addr: R::Addr, direction: ConnDirection);
+    fn connected(&mut self, resources: &mut M, remote_addr: R::Addr, direction: ConnDirection);
 
     /// Called whenever remote peer got disconnected, either because of the
     /// network event or due to a [`Reactor::disconnect`] call.
-    fn disconnected(&mut self, remote_addr: R::Addr, reason: R::DisconnectReason);
+    fn disconnected(
+        &mut self,
+        resources: &mut M,
+        remote_addr: R::Addr,
+        reason: R::DisconnectReason,
+    );
 
     /// Called when event loop was interrupted because of the resource manager
     /// timeout.
-    fn timeout(&mut self);
+    fn timeout(&mut self, resources: &mut M);
 
     /// Called upon resource-related error
-    fn resource_error(&mut self, error: R::Error);
+    fn resource_error(&mut self, resources: &mut M, error: R::Error);
 
     /// Called upon internal (non-resource related) failure.
-    fn internal_failure(&mut self, error: InternalError);
+    fn internal_failure(&mut self, resources: &mut M, error: InternalError);
 
     /// Called by the reactor every time the event loop gets data from the network.
     ///
@@ -333,13 +356,13 @@ pub trait Handler<R: Resource>: Send {
     ///
     /// "a regular short, sharp sound, especially that made by a clock or watch, typically
     /// every second."
-    fn tick(&mut self);
+    fn tick(&mut self, resources: &mut M);
 
     /// Called by the reactor after a timeout whenever an [`ReactorDispatch::SetTimer`]
     /// was received by the reactor from this iterator.
     ///
     /// NB: on each of this calls [`Self::tick`] is also called.
-    fn on_timer(&mut self);
+    fn on_timer(&mut self, resources: &mut M);
 }
 
 /// Direction of the resource connection.
@@ -400,7 +423,7 @@ enum ControlEvent<R: Resource> {
 /// Blocks on concurrent events from multiple resources.
 pub trait ResourceMgr<R: Resource>: Send {
     /// Iterator over input events returned by [`Self::read_events`].
-    type EventIterator: Iterator<Item = InputEvent<R>>;
+    type EventIterator: IntoIterator<Item = InputEvent<R>>;
 
     /// Detects whether a given resource is known to the manager.
     fn has(&self, addr: &R::Addr) -> bool {
@@ -452,6 +475,14 @@ pub trait ResourceMgr<R: Resource>: Send {
     /// Converts the self into an iterator over events generated by all
     /// _previous_ calls to [`Self::read_events`] and which were not yet consumed.
     fn into_events(self) -> Self::EventIterator;
+
+    /// Extract events queue from the self
+    fn split_events(self) -> (Self, Self::EventIterator)
+    where
+        Self: Sized;
+
+    /// Pushes unconsumed events back
+    fn join_events(&mut self, events: Self::EventIterator);
 
     /// Sends data to the resource.
     fn send(&mut self, addr: &R::Addr, data: impl AsRef<[u8]>) -> Result<usize, R::Error>;

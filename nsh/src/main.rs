@@ -7,15 +7,20 @@ use std::collections::{HashMap, VecDeque};
 use std::io::Read;
 use std::net::TcpStream;
 use std::path::PathBuf;
+use std::time::Duration;
 use std::{fs, io, net};
 
 use clap::Parser;
 use crossbeam_channel as chan;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::Curve25519;
-use nakamoto_net::{Io, Link, LocalTime, Reactor as _};
+use reactor::managers::popol::PollManager;
+use reactor::resources::tcp_raw::DisconnectReason;
+use reactor::resources::TcpSocket;
+use reactor::{ConnDirection, Controller, InternalError, Reactor};
 use streampipes::frame::dumb::DumbFramed64KbStream;
 use streampipes::transcode::dumb::{DumbDecoder, DumbEncoder, DumbTranscodedStream};
+use streampipes::NetStream;
 
 pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
@@ -90,7 +95,7 @@ pub enum AppError {
     Curve25519(ed25519_compact::Error),
 
     #[from]
-    Nakamoto(nakamoto_net::error::Error),
+    Reactor(InternalError),
 }
 
 impl TryFrom<Args> for Config {
@@ -127,7 +132,6 @@ impl TryFrom<Args> for Config {
     }
 }
 
-type Reactor = nakamoto_net_poll::Reactor<TcpStream>;
 type Stream = DumbTranscodedStream<io::Cursor<Vec<u8>>, Vec<u8>>;
 
 fn main() -> Result<(), AppError> {
@@ -135,132 +139,86 @@ fn main() -> Result<(), AppError> {
 
     let config = Config::try_from(args)?;
 
-    let (handle, commands) = chan::unbounded::<ProtocolCmd>();
-    let (shutdown, shutdown_recv) = chan::bounded(1);
-    let (listening_send, listening) = chan::bounded(1);
-    let mut reactor = Reactor::new(shutdown_recv, listening_send)?;
-    let mut protocol = Protocol::default();
-    let events = Events {};
-
-    let listen_sockets = match config.command {
+    let manager = match config.command {
         Command::Listen(socket_addr) => {
             println!("Listening on {} ...", socket_addr);
-            vec![socket_addr]
+            PollManager::new(&[socket_addr], [])?
         }
         Command::Connect {
             remote_host,
             remote_command: _,
         } => {
             println!("Connecting to {} ...", remote_host);
-            protocol.connect(remote_host.into());
-            vec![]
+            PollManager::new(&[], [remote_host])?
         }
     };
-    reactor.run(&listen_sockets, protocol, events, commands)?;
+
+    let reactor = Reactor::with(manager, ())?;
+    reactor.join()?;
 
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-pub enum ProtocolEvent {}
-#[derive(Debug, Clone)]
-pub enum ProtocolCmd {}
-#[derive(Debug, Display)]
-#[display(doc_comments)]
-pub enum DisconnectReason {}
-impl From<DisconnectReason> for nakamoto_net::DisconnectReason<DisconnectReason> {
-    fn from(reason: DisconnectReason) -> Self {
-        nakamoto_net::DisconnectReason::Protocol(reason)
-    }
-}
+pub type NshAddr = UniversalAddr<PeerAddr<Curve25519, net::SocketAddr>>;
+pub type NshSocket = TcpSocket<NshAddr>;
 
-#[derive(Default)]
-pub struct Protocol {
-    connect_queue: VecDeque<net::SocketAddr>,
-    streams: HashMap<net::SocketAddr, Stream>,
-}
+pub struct NshHandler {}
 
-impl Protocol {
-    pub fn connect(&mut self, socket_addr: net::SocketAddr) {
-        self.connect_queue.push_back(socket_addr);
-    }
-}
+impl reactor::Handler<NshSocket, PollManager<NshSocket>> for NshHandler {
+    type Context = ();
 
-impl nakamoto_net::Protocol for Protocol {
-    type Event = ProtocolEvent;
-    type Command = ProtocolCmd;
-    type DisconnectReason = DisconnectReason;
-
-    fn received_bytes(&mut self, addr: &net::SocketAddr, bytes: &[u8]) {
-        let stream = self.streams.get_mut(addr).expect("unknown remote peer");
-        stream.push_bytes(bytes).expect("buffer overflow");
-
-        // Printout the received data
-        let mut buf = vec![0u8; bytes.len()];
-        loop {
-            let len = stream.read(&mut buf).expect("in-memory reading");
-            if len == 0 {
-                break;
-            }
-            let data = String::from_utf8_lossy(&buf[..len]);
-            println!("{}", data);
-        }
+    fn new(controller: Controller<NshSocket>, ctx: Self::Context) -> Self {
+        todo!()
     }
 
-    fn attempted(&mut self, addr: &net::SocketAddr) {}
+    fn received(
+        &mut self,
+        resources: &mut PollManager<NshSocket>,
+        remote_addr: NshAddr,
+        message: Box<[u8]>,
+    ) {
+        todo!()
+    }
 
-    fn connected(&mut self, addr: net::SocketAddr, _local_addr: &net::SocketAddr, link: Link) {
-        debug_assert_eq!(
-            link,
-            Link::Inbound,
-            "Reactor implementation can only accept incoming connections"
-        );
+    fn attempted(&mut self, resources: &mut PollManager<NshSocket>, remote_addr: NshAddr) {
+        todo!()
+    }
 
-        let reader = io::Cursor::new(Vec::<u8>::new());
-        let writer = Vec::<u8>::new();
-        let stream = Stream::with(reader, writer, DumbDecoder, DumbEncoder);
-        if self.streams.insert(addr, stream).is_some() {
-            warn!(
-                "Repeated incoming connection from peer {}, resetting tunnel",
-                addr
-            );
-        }
-
-        // TODO: Perform handshake
+    fn connected(
+        &mut self,
+        resources: &mut PollManager<NshSocket>,
+        remote_addr: NshAddr,
+        direction: ConnDirection,
+    ) {
+        todo!()
     }
 
     fn disconnected(
         &mut self,
-        addr: &net::SocketAddr,
-        _reason: nakamoto_net::DisconnectReason<Self::DisconnectReason>,
+        resources: &mut PollManager<NshSocket>,
+        remote_addr: NshAddr,
+        reason: DisconnectReason,
     ) {
-        self.streams.remove(addr).expect("unknown remote peer");
+        todo!()
     }
 
-    fn command(&mut self, cmd: Self::Command) {
-        panic!("Commands are not supported")
+    fn timeout(&mut self, resources: &mut PollManager<NshSocket>) {
+        todo!()
     }
 
-    fn tick(&mut self, local_time: LocalTime) {}
-
-    fn wake(&mut self) {}
-}
-
-impl Iterator for Protocol {
-    type Item = Io<ProtocolEvent, DisconnectReason>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(socket_addr) = self.connect_queue.pop_front() {
-            return Some(Io::Connect(socket_addr));
-        }
-        None
+    fn resource_error(&mut self, resources: &mut PollManager<NshSocket>, error: io::Error) {
+        todo!()
     }
-}
 
-pub struct Events {}
+    fn internal_failure(&mut self, resources: &mut PollManager<NshSocket>, error: InternalError) {
+        todo!()
+    }
 
-impl nakamoto_net::Publisher<ProtocolEvent> for Events {
-    fn publish(&mut self, e: ProtocolEvent) {
-        info!("Received event {:?}", e);
+    fn tick(&mut self, resources: &mut PollManager<NshSocket>) {
+        todo!()
+    }
+
+    fn on_timer(&mut self, resources: &mut PollManager<NshSocket>) {
+        todo!()
     }
 }
