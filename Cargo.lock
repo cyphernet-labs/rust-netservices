@@ -309,15 +309,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fastrand"
-version = "1.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7a407cfaa3385c4ae6b23e84623d48c2798d06e3e6a1878f7f59f17b3f86499"
-dependencies = [
- "instant",
-]
-
-[[package]]
 name = "generic-array"
 version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -363,15 +354,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "instant"
-version = "0.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a5bbe824c507c5da5956355e86a746d82e0e1464f65d862cc5e71da70e94b2c"
-dependencies = [
- "cfg-if",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.137"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -398,32 +380,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nakamoto-net"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5e6dff585126c1582b4316cc13ba81db656693c95ea7caa6f62da6d5c0c0228"
-dependencies = [
- "crossbeam-channel",
- "fastrand",
- "log",
- "thiserror",
-]
-
-[[package]]
-name = "nakamoto-net-poll"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5675172c3901f77994f44f8f5d95f72bde6211c494d0a1ed3585bf8bc1f864c6"
-dependencies = [
- "crossbeam-channel",
- "libc",
- "log",
- "nakamoto-net",
- "popol 0.5.0",
- "socket2",
-]
-
-[[package]]
 name = "nsh"
 version = "0.1.0"
 dependencies = [
@@ -433,8 +389,6 @@ dependencies = [
  "cyphernet",
  "ed25519-compact 2.0.2",
  "log",
- "nakamoto-net",
- "nakamoto-net-poll",
  "ntls",
  "reactor",
  "shellexpand",
@@ -480,15 +434,6 @@ dependencies = [
  "cpufeatures",
  "opaque-debug",
  "universal-hash",
-]
-
-[[package]]
-name = "popol"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dac9010e6fc2d991bbf3c362433214c28f7f1a82151b6b1de8dd69d27211495"
-dependencies = [
- "libc",
 ]
 
 [[package]]
@@ -548,7 +493,7 @@ dependencies = [
  "amplify",
  "crossbeam-channel",
  "libc",
- "popol 1.0.0",
+ "popol",
  "socket2",
  "streampipes",
 ]
