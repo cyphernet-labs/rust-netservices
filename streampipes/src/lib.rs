@@ -34,7 +34,7 @@ pub trait ResourceAddr: Eq + Clone + Send {
 /// I/O events.
 pub trait Resource: io::Read + io::Write {
     /// Address type used by this resource
-    type Addr: ResourceAddr;
+    type Addr: ResourceAddr<Raw = <Self::Raw as Resource>::Addr>;
 
     /// Underlying raw resource type
     type Raw: Resource;
