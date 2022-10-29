@@ -12,6 +12,18 @@ use crate::{HandshakeMgr, InputEvent, ResourceMgr};
 /// Maximum amount of time to wait for i/o.
 const WAIT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
+/// Manager for a set of resources which are polled for an event loop by the
+/// reactor by using [`popol`] library.
+///
+/// Able to perform handshake protocol on resource connection, upgrading the
+/// resource address from [`R::Addr::Raw`] to [`R::Addr`]. For this purpose it
+/// co-operates with the reactor runtume, which manages the handshake workflow.
+/// TODO: Move this to Handler type and manage by the Runtime
+///
+/// Does not perform buffered write operations for the underlying resources
+/// (see [`Self::send`] for the explanations). If non-blocking buffering must
+/// be performed than a dedicated [`Resource`] type should be used which handles
+/// the buffering internally.
 pub struct PollManager<R: FdResource, H: HandshakeMgr<R>>
 where
     R::Addr: Hash,
@@ -20,6 +32,8 @@ where
     connecting: HashMap<<R::Addr as ResourceAddr>::Raw, R::Raw>,
     handshake_mgr: H,
     events: VecDeque<InputEvent<R>>,
+    // We need this since [`popol::Poll`] keeps track of resources as of raw
+    // file descriptors.
     resources: HashMap<R::Addr, R>,
     timeouts: TimeoutManager<()>,
 }
@@ -185,12 +199,12 @@ where
         self
     }
 
-    // Write::write_all for the R must be a non-blocking call which uses internal OS buffer.
-    // (for instance, this is the case for TcpStream and is stated in the io::Write docs).
-    // The actual block happens in Write::flush which is called from R::handle_writable.
-    //
-    // If the underlying resource does not provide buffered write than it should be nested
-    // into a buffered stream type and then provided to the manager as the resource.
+    /// Write::write_all for the R must be a non-blocking call which uses internal OS buffer.
+    /// (for instance, this is the case for TcpStream and is stated in the io::Write docs).
+    /// The actual block happens in Write::flush which is called from R::handle_writable.
+    ///
+    /// If the underlying resource does not provide buffered write than it should be nested
+    /// into a buffered stream type and then provided to the manager as the resource.
     fn send(&mut self, addr: &R::Addr, data: impl AsRef<[u8]>) -> Result<usize, R::Error> {
         self.resources
             .get_mut(addr)

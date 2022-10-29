@@ -15,7 +15,7 @@ use streampipes::Resource;
 /// Reactor manages multiple resources of homogenous type `R` (resource can be a
 /// TCP connections, file descriptors or any other blocking resource). It does
 /// concurrent read of the I/O events from the resources using
-/// [`ResourceMgr::try_read_events`] method, and dispatches events to a
+/// [`ResourceMgr::read_events`] method, and dispatches events to a
 /// [`Handler`] in synchronous demultiplexed way. Finally, it can be controlled
 /// from any outside thread - or from the handler - by using [`ReactorApi`] and
 /// [`Controllers`] constructed by [`Reactor::controller`]. This includes ability
@@ -366,8 +366,8 @@ pub enum ConnDirection {
 pub enum InputEvent<R: Resource> {
     /// A connection to the resource was successfully established.
     ///
-    /// This could be a premature (raw) connection since the handshake prcedure
-    /// is not yet performed.
+    /// The event notifies about a premature (raw) connection since the h
+    /// handshake is not yet performed by the resource manager.
     RawConnected {
         remote_raw: R::Raw,
         direction: ConnDirection,

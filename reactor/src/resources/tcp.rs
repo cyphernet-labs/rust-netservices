@@ -63,28 +63,41 @@ where
     }
 }
 
-// TODO: Make generic by the stream type allowing composition of streams
+/// Generalized TCP socket able to receive incoming connections (i.e. listen on
+/// a socket) -- or connect to a remote socket and run arbitrary transport-level
+/// protocol (doing encoding, framing etc) inside of it. The transport-level
+/// protocol is maintained by a type parameter `S`, which should be a network
+/// stream (see [`NetStream`]).
 #[derive(Debug)]
 pub enum TcpSocket<S: NetStream = net::TcpStream> {
     Listener(net::TcpListener),
     Stream(S),
 }
 
+/// Convenience functions to listen or connect to a remote socket using
+/// [`TcpLocator`] address type.
 impl<S: NetStream> TcpSocket<S>
 where
     Self: Resource<Addr = TcpLocator<S::Addr>, Error = io::Error>,
 {
+    /// Create a TCP socket by binding to a local socket and accepting
+    /// connections on it. Blocks on `bind` syscall.
     pub fn listen(addr: impl Into<net::SocketAddr>) -> io::Result<<Self as Resource>::Raw> {
         TcpSocket::raw_connection(&TcpLocator::Listener(addr.into()))
     }
 
+    /// Create a TCP socket by connecting to a remote peer. Blocks for the time
+    /// of connection establishment.
     pub fn dial(addr: impl Into<S::Addr>) -> io::Result<<Self as Resource>::Raw> {
         TcpSocket::raw_connection(&TcpLocator::Connection(addr.into()))
     }
 }
 
-impl<S: NetStream> Resource for TcpSocket<S>
+/// Implementation of the generic TCP socket as a resource for all types backed
+/// by raw [`net::SocketAddr`].
+impl<S> Resource for TcpSocket<S>
 where
+    S: NetStream,
     S::Addr: ResourceAddr<Raw = net::SocketAddr>,
 {
     type Addr = TcpLocator<S::Addr>;
@@ -108,26 +121,15 @@ where
     }
 
     fn raw_addr(&self) -> <Self::Raw as Resource>::Addr {
-        match self {
-            TcpSocket::Listener(listener) => TcpLocator::Listener(
-                listener
-                    .local_addr()
-                    .expect("TCP listener must have a local address"),
-            ),
-            TcpSocket::Stream(stream) => TcpLocator::Connection(
-                stream
-                    .peer_addr()
-                    .expect("TCP stream must have remote address")
-                    .into(),
-            ),
-        }
+        self.addr().to_raw()
     }
 
     fn raw_connection(addr: &Self::Addr) -> Result<Self::Raw, Self::Error> {
         match addr {
             TcpLocator::Listener(addr) => {
                 let listener = net::TcpListener::bind(addr)?;
-                listener.set_nonblocking(true)?;
+                // TODO: This should be performed by the reactor
+                // listener.set_nonblocking(true)?;
                 Ok(TcpSocket::Listener(listener))
             }
             TcpLocator::Connection(addr) => {
@@ -177,6 +179,9 @@ where
     }
 }
 
+/// Implementation of the generic TCP socket as a file descriptor-backed
+/// resource which can be read and written to for all types backed by raw
+/// [`net::SocketAddr`].
 impl<S> FdResource for TcpSocket<S>
 where
     S: NetStream,
