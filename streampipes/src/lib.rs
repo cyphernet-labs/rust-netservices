@@ -129,9 +129,3 @@ impl ResourceAddr for String {
         self.clone()
     }
 }
-
-/// Concrete implementation of a stateful handshake protocol converting raw
-/// connection to resource into a resource.
-pub trait HandshakeMgr<R: Resource> {
-    fn handshake(&mut self, raw: R::Raw) -> Result<R, R::Error>;
-}

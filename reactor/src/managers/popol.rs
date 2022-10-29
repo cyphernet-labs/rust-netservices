@@ -5,9 +5,9 @@ use std::{io, net};
 use streampipes::{NetStream, OnDemand, Resource, ResourceAddr};
 
 use super::TimeoutManager;
-use crate::resources::tcp::TcpSocket;
+use crate::resources::tcp_raw::TcpSocket;
 use crate::resources::{FdResource, TcpLocator};
-use crate::{HandshakeMgr, InputEvent, ResourceMgr};
+use crate::{ConnDirection, InputEvent, ResourceMgr};
 
 /// Maximum amount of time to wait for i/o.
 const WAIT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
@@ -22,13 +22,13 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// (see [`Self::send`] for the explanations). If non-blocking buffering must
 /// be performed than a dedicated [`Resource`] type should be used which handles
 /// the buffering internally.
-pub struct PollManager<R: FdResource, H: HandshakeMgr<R>>
+pub struct PollManager<R>
 where
+    R: FdResource,
     R::Addr: Hash,
 {
     poll: popol::Poll<R::Addr>,
     connecting: HashMap<<R::Addr as ResourceAddr>::Raw, R::Raw>,
-    handshake_mgr: H,
     events: VecDeque<InputEvent<R>>,
     // We need this since [`popol::Poll`] keeps track of resources as of raw
     // file descriptors.
@@ -36,17 +36,15 @@ where
     timeouts: TimeoutManager<()>,
 }
 
-impl<S, H> PollManager<TcpSocket<S>, H>
+impl<S> PollManager<TcpSocket<S>>
 where
     S: NetStream + Send,
-    H: HandshakeMgr<TcpSocket<S>> + Send,
     S::Addr: ResourceAddr<Raw = net::SocketAddr> + Hash,
     TcpLocator<<S::Addr as ResourceAddr>::Raw>: From<TcpLocator<net::SocketAddr>>,
 {
     pub fn new(
         listen: &impl net::ToSocketAddrs,
         connect: impl IntoIterator<Item = S::Addr>,
-        handshake_mgr: H,
     ) -> io::Result<Self> {
         let mut poll = popol::Poll::new();
 
@@ -60,7 +58,6 @@ where
         let mut mgr = PollManager {
             poll,
             connecting: empty!(),
-            handshake_mgr,
             events: empty!(),
             resources: empty!(),
             timeouts,
@@ -74,19 +71,19 @@ where
     }
 }
 
-impl<R: FdResource, H: HandshakeMgr<R>> HandshakeMgr<R> for PollManager<R, H>
+impl<R> PollManager<R>
 where
+    R: FdResource,
     R::Addr: Hash,
 {
-    // Directly called for incoming connections
-    fn handshake(&mut self, remote_raw: R::Raw) -> Result<R, R::Error> {
-        self.handshake_mgr.handshake(remote_raw)
+    fn register_raw(&mut self, raw: R::Raw, addr: Option<R::Addr>) {
+        // TODO: Add to poll if an address is present
+        todo!()
     }
 }
 
-impl<R, H> ResourceMgr<R> for PollManager<R, H>
+impl<R> ResourceMgr<R> for PollManager<R>
 where
-    H: HandshakeMgr<R> + Send,
     R: FdResource + Send,
     R::DisconnectReason: Send,
     R::Error: From<io::Error>,
@@ -106,8 +103,7 @@ where
             return Ok(false);
         }
         let raw = R::raw_connection(addr)?;
-        let res = self.handshake(raw)?;
-        self.register_resource(res);
+        self.register_raw(raw, Some(addr.to_owned()));
         Ok(true)
     }
 
@@ -176,20 +172,36 @@ where
                 src.handle_readable(&mut events)?;
             }
 
-            for event in &events {
-                if let InputEvent::Connected { remote_addr, .. } = event {
-                    self.connecting.remove(&remote_addr.to_raw());
+            self.events.reserve(events.len());
+            for event in events {
+                match &event {
+                    InputEvent::Spawn(raw) => {}
+                    InputEvent::Upgraded() => {
+                        // TODO: Move resource to the upgraded protocol
+                    }
+                    InputEvent::Connected { .. } => {}
+                    InputEvent::Disconnected(addr, _) => {
+                        debug_assert!(
+                            // We do not use `self.unregister_resource` here due to borrower checker problem
+                            self.resources.remove(addr).is_some(),
+                            "broken connection management"
+                        );
+                    }
+                    InputEvent::Timeout => {}
+                    InputEvent::Timer => {}
+                    InputEvent::Received(remote_addr, _) => {
+                        if self.connecting.remove(&remote_addr.to_raw()).is_some() {
+                            self.events.push_back(InputEvent::Connected {
+                                remote_addr: remote_addr.to_owned(),
+                                direction: ConnDirection::Outbound,
+                            });
+                        }
+                        // TODO: check raw list and generate inbound connection event
+                        // remove from connecting
+                    }
                 }
-                if let InputEvent::Disconnected(addr, ..) = event {
-                    debug_assert!(
-                        // We do not use `self.unregister_resource` here due to borrower checker problem
-                        self.resources.remove(addr).is_some(),
-                        "broken connection management"
-                    );
-                }
+                self.events.push_back(event);
             }
-
-            self.events.extend(events);
         }
 
         Ok(self)
@@ -224,11 +236,10 @@ where
     }
 }
 
-impl<R, H> Iterator for PollManager<R, H>
+impl<R> Iterator for PollManager<R>
 where
     R: FdResource,
     R::Addr: Hash,
-    H: HandshakeMgr<R>,
 {
     type Item = InputEvent<R>;
 

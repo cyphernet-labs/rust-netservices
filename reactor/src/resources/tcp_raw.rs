@@ -4,7 +4,7 @@ use std::{io, net};
 use streampipes::{NetStream, OnDemand, Resource, ResourceAddr};
 
 use crate::resources::FdResource;
-use crate::{ConnDirection, InputEvent};
+use crate::InputEvent;
 
 /// Size of the read buffer.
 const READ_BUFFER_SIZE: usize = u16::MAX as usize;
@@ -224,29 +224,29 @@ where
         &mut self,
         events: &mut Vec<InputEvent<Self>>,
     ) -> Result<usize, Self::Error> {
-        let event = match self {
+        match self {
             TcpSocket::Listener(listener) => {
                 let (stream, _) = listener.accept()?;
-                stream.set_nonblocking(true)?;
-                InputEvent::Connected {
-                    remote_addr: TcpSocket::Stream(stream),
-                    direction: ConnDirection::Inbound,
-                }
+                // TODO: Move this to the reactor
+                // stream.set_nonblocking(true)?;
+                events.push(InputEvent::Spawn(TcpSocket::Stream(stream)));
+                // We do instant upgrade since the resource does not support handshake
+                events.push(InputEvent::Upgraded());
+                Ok(2)
             }
             TcpSocket::Stream(stream) => {
                 if let Err(err) = stream.flush() {
                     self.disconnect()?;
-                    InputEvent::Disconnected(
+                    events.push(InputEvent::Disconnected(
                         self.addr(),
                         DisconnectReason::ConnectionError(Arc::new(err)),
-                    )
+                    ));
+                    Ok(1)
                 } else {
-                    return Ok(0);
+                    Ok(0)
                 }
             }
-        };
-        events.push(event);
-        Ok(1)
+        }
     }
 }
 

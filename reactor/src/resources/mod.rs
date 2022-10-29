@@ -1,5 +1,5 @@
 pub mod fd;
-pub mod tcp;
+pub mod tcp_raw;
 
 pub use fd::FdResource;
-pub use tcp::{TcpLocator, TcpSocket};
+pub use tcp_raw::{TcpLocator, TcpSocket};
