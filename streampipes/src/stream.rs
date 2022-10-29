@@ -3,10 +3,12 @@ use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
+use crate::ResourceAddr;
+
 /// Network stream is an abstraction of TCP stream object which adds
 /// protocol composability.
 pub trait NetStream: io::Write + io::Read + AsRawFd {
-    type Addr: Eq + Send + Clone + Into<SocketAddr>;
+    type Addr: ResourceAddr + Into<SocketAddr>;
     type AddrList: ToSocketAddrs;
     type Inner: NetStream;
 
@@ -73,6 +75,11 @@ pub trait NetStream: io::Write + io::Read + AsRawFd {
     unsafe fn as_inner(&self) -> &Self::Inner;
     #[doc(hidden)]
     unsafe fn as_inner_mut(&mut self) -> &mut Self::Inner;
+
+    #[doc(hidden)]
+    unsafe fn as_raw(&self) -> &TcpStream;
+    #[doc(hidden)]
+    unsafe fn as_raw_mut(&mut self) -> &mut TcpStream;
 }
 
 impl NetStream for TcpStream {
@@ -92,6 +99,7 @@ impl NetStream for TcpStream {
     {
         TcpStream::connect_timeout(addr, timeout)
     }
+
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
         TcpStream::shutdown(self, how)
     }
@@ -157,6 +165,14 @@ impl NetStream for TcpStream {
     }
 
     unsafe fn as_inner_mut(&mut self) -> &mut Self::Inner {
+        self
+    }
+
+    unsafe fn as_raw(&self) -> &TcpStream {
+        self
+    }
+
+    unsafe fn as_raw_mut(&mut self) -> &mut TcpStream {
         self
     }
 }
