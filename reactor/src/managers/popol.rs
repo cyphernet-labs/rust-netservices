@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 use std::time::{Duration, Instant};
 use std::{io, net};
@@ -7,7 +7,7 @@ use streampipes::{NetStream, OnDemand, Resource, ResourceAddr};
 use super::TimeoutManager;
 use crate::resources::tcp::TcpSocket;
 use crate::resources::{FdResource, TcpLocator};
-use crate::{HandshakeMgr, InputEvent, ResourceMgr};
+use crate::{ConnDirection, InputEvent, ResourceMgr};
 
 /// Maximum amount of time to wait for i/o.
 const WAIT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
@@ -24,13 +24,12 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// (see [`Self::send`] for the explanations). If non-blocking buffering must
 /// be performed than a dedicated [`Resource`] type should be used which handles
 /// the buffering internally.
-pub struct PollManager<R: FdResource, H: HandshakeMgr<R>>
+pub struct PollManager<R: FdResource>
 where
     R::Addr: Hash,
 {
     poll: popol::Poll<R::Addr>,
-    connecting: HashMap<<R::Addr as ResourceAddr>::Raw, R::Raw>,
-    handshake_mgr: H,
+    connecting: HashSet<<R::Addr as ResourceAddr>::Raw>,
     events: VecDeque<InputEvent<R>>,
     // We need this since [`popol::Poll`] keeps track of resources as of raw
     // file descriptors.
@@ -38,17 +37,15 @@ where
     timeouts: TimeoutManager<()>,
 }
 
-impl<S, H> PollManager<TcpSocket<S>, H>
+impl<S> PollManager<TcpSocket<S>>
 where
     S: NetStream + Send,
-    H: HandshakeMgr<TcpSocket<S>> + Send,
     S::Addr: ResourceAddr<Raw = net::SocketAddr> + Hash,
     TcpLocator<<S::Addr as ResourceAddr>::Raw>: From<TcpLocator<net::SocketAddr>>,
 {
     pub fn new(
         listen: &impl net::ToSocketAddrs,
         connect: impl IntoIterator<Item = S::Addr>,
-        handshake_mgr: H,
     ) -> io::Result<Self> {
         let mut poll = popol::Poll::new();
 
@@ -62,23 +59,21 @@ where
         let mut mgr = PollManager {
             poll,
             connecting: empty!(),
-            handshake_mgr,
             events: empty!(),
             resources: empty!(),
             timeouts,
         };
 
         for addr in connect {
-            mgr.connect_resource(&TcpLocator::Connection(addr))?;
+            mgr.connect_raw(&TcpLocator::Connection(addr), ConnDirection::Outbound)?;
         }
 
         Ok(mgr)
     }
 }
 
-impl<R, H> ResourceMgr<R> for PollManager<R, H>
+impl<R> ResourceMgr<R> for PollManager<R>
 where
-    H: HandshakeMgr<R> + Send,
     R: FdResource + Send,
     R::DisconnectReason: Send,
     R::Error: From<io::Error>,
@@ -92,23 +87,20 @@ where
         self.resources.get(addr)
     }
 
-    // Called for outcoming connections
-    fn connect_resource(&mut self, addr: &R::Addr) -> Result<bool, R::Error> {
-        if self.has(addr) || self.connecting.contains_key(&addr.to_raw()) {
-            return Ok(false);
-        }
-        let raw = R::raw_connection(addr)?;
-        let res = self.handshake(raw)?;
-        Ok(self.register_resource(res).is_some())
+    fn is_connecting(&self, addr: &R::Addr) -> bool {
+        self.connecting.contains(&addr.to_raw())
     }
 
-    // Directly called for incoming connections
-    fn handshake(&mut self, remote_raw: R::Raw) -> Result<R, R::Error> {
-        self.handshake_mgr.handshake(remote_raw)
+    fn connect_resource(&mut self, resource: R) -> Option<&R> {
+        let addr = resource.addr();
+        if self.has(&addr) {
+            return None;
+        }
+        Some(self.resources.entry(addr).or_insert(resource))
     }
 
     fn disconnect_resource(&mut self, addr: &R::Addr) -> Result<bool, R::Error> {
-        if !self.has(addr) || self.connecting.contains_key(&addr.to_raw()) {
+        if !self.has(addr) || self.connecting.contains(&addr.to_raw()) {
             return Ok(false);
         }
         self.resources
@@ -121,6 +113,19 @@ where
         self.events.push_back(disconnection_event);
 
         Ok(self.unregister_resource(addr).is_some())
+    }
+
+    fn _register_raw(&mut self, raw: R::Raw, direction: ConnDirection) -> bool {
+        let raw_addr = raw.addr();
+        if self.connecting.contains(&raw_addr) {
+            return false;
+        }
+        self.events.push_back(InputEvent::RawConnected {
+            remote_raw: raw,
+            direction,
+        });
+        self.connecting.insert(raw_addr);
+        true
     }
 
     fn register_resource(&mut self, resource: R) -> Option<&R> {
@@ -174,7 +179,7 @@ where
 
             for event in &events {
                 if let InputEvent::RawConnected { remote_raw, .. } = event {
-                    self.connecting.remove(&remote_raw.addr().into());
+                    self.connecting.remove(&remote_raw.addr());
                 }
                 if let InputEvent::Disconnected(addr, ..) = event {
                     debug_assert!(
@@ -220,11 +225,10 @@ where
     }
 }
 
-impl<R, H> Iterator for PollManager<R, H>
+impl<R> Iterator for PollManager<R>
 where
     R: FdResource,
     R::Addr: Hash,
-    H: HandshakeMgr<R>,
 {
     type Item = InputEvent<R>;
 
