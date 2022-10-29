@@ -228,8 +228,8 @@ where
             TcpSocket::Listener(listener) => {
                 let (stream, _) = listener.accept()?;
                 stream.set_nonblocking(true)?;
-                InputEvent::RawConnected {
-                    remote_raw: TcpSocket::Stream(stream),
+                InputEvent::Connected {
+                    remote_addr: TcpSocket::Stream(stream),
                     direction: ConnDirection::Inbound,
                 }
             }

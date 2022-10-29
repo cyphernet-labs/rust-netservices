@@ -16,9 +16,7 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// reactor by using [`popol`] library.
 ///
 /// Able to perform handshake protocol on resource connection, upgrading the
-/// resource address from [`R::Addr::Raw`] to [`R::Addr`]. For this purpose it
-/// co-operates with the reactor runtume, which manages the handshake workflow.
-/// TODO: Move this to Handler type and manage by the Runtime
+/// resource address from [`R::Addr::Raw`] to [`R::Addr`].
 ///
 /// Does not perform buffered write operations for the underlying resources
 /// (see [`Self::send`] for the explanations). If non-blocking buffering must
@@ -76,6 +74,16 @@ where
     }
 }
 
+impl<R: FdResource, H: HandshakeMgr<R>> HandshakeMgr<R> for PollManager<R, H>
+where
+    R::Addr: Hash,
+{
+    // Directly called for incoming connections
+    fn handshake(&mut self, remote_raw: R::Raw) -> Result<R, R::Error> {
+        self.handshake_mgr.handshake(remote_raw)
+    }
+}
+
 impl<R, H> ResourceMgr<R> for PollManager<R, H>
 where
     H: HandshakeMgr<R> + Send,
@@ -99,12 +107,8 @@ where
         }
         let raw = R::raw_connection(addr)?;
         let res = self.handshake(raw)?;
-        Ok(self.register_resource(res).is_some())
-    }
-
-    // Directly called for incoming connections
-    fn handshake(&mut self, remote_raw: R::Raw) -> Result<R, R::Error> {
-        self.handshake_mgr.handshake(remote_raw)
+        self.register_resource(res);
+        Ok(true)
     }
 
     fn disconnect_resource(&mut self, addr: &R::Addr) -> Result<bool, R::Error> {
@@ -173,8 +177,8 @@ where
             }
 
             for event in &events {
-                if let InputEvent::RawConnected { remote_raw, .. } = event {
-                    self.connecting.remove(&remote_raw.addr().into());
+                if let InputEvent::Connected { remote_addr, .. } = event {
+                    self.connecting.remove(&remote_addr.to_raw());
                 }
                 if let InputEvent::Disconnected(addr, ..) = event {
                     debug_assert!(
