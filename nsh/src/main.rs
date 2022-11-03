@@ -2,7 +2,7 @@
 extern crate amplify;
 
 use std::any::Any;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::{fs, io, net};
@@ -135,7 +135,7 @@ fn main() -> Result<(), AppError> {
 
     let config = Config::try_from(args)?;
 
-    let manager = PollManager::<NshSession>::new();
+    let manager = PollManager::<NshResource>::new();
     let mut reactor = Reactor::with(manager, (), |err| {
         panic!("{}", err);
     })?;
@@ -150,7 +150,8 @@ fn main() -> Result<(), AppError> {
             remote_command: _,
         } => {
             println!("Connecting to {} ...", remote_host);
-            reactor.connect(remote_host)?;
+            let stream = net::TcpStream::connect(remote_host)?;
+            reactor.connect(NshSocket::Stream(stream))?;
         }
     }
     reactor.join()?;
@@ -160,14 +161,24 @@ fn main() -> Result<(), AppError> {
 
 pub type NshAddr = UniversalAddr<PeerAddr<Curve25519, net::SocketAddr>>;
 
-pub struct NshSession {
-    connection: net::TcpStream,
+pub enum NshSocket {
+    Listen(net::SocketAddr),
+    Stream(net::TcpStream),
+}
+
+pub enum NshInner {
+    Listener(net::TcpListener),
+    Connection(net::TcpStream),
+}
+
+pub struct NshResource {
+    inner: NshInner,
     controller: Controller<Self>,
 }
 
-impl Resource for NshSession {
+impl Resource for NshResource {
     type Id = RawFd;
-    type Addr = NshAddr;
+    type Addr = NshSocket;
     type Error = io::Error;
     type Data = Vec<u8>;
     type OutputChannels = ();
@@ -180,22 +191,43 @@ impl Resource for NshSession {
     where
         Self: Sized,
     {
-        let connection = net::TcpStream::connect(addr)?;
-        Ok(Self {
-            connection,
-            controller,
-        })
+        let inner = match addr {
+            NshSocket::Listen(listen) => NshInner::Listener(net::TcpListener::bind(listen)?),
+            NshSocket::Stream(stream) => NshInner::Connection(stream),
+        };
+        Ok(Self { inner, controller })
     }
 
     fn id(&self) -> Self::Id {
-        self.connection.as_raw_fd()
+        match &self.inner {
+            NshInner::Listener(listener) => listener.as_raw_fd(),
+            NshInner::Connection(session) => session.as_raw_fd(),
+        }
     }
 
     fn update_from_io(&mut self, input: bool, output: bool) -> Result<(), Self::Error> {
-        todo!()
+        match self.inner {
+            NshInner::Listener(ref listener) => {
+                let (stream, _) = listener.accept()?;
+                self.controller
+                    .connect(NshSocket::Stream(stream))
+                    .map_err(|_| io::ErrorKind::NotConnected)?;
+            }
+            NshInner::Connection(ref mut session) => {
+                if input { /* TODO: Do read */ }
+                if output {
+                    session.flush()?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn send(&mut self, data: Self::Data) -> Result<(), Self::Error> {
-        self.connection.write_all(&data)
+        match self.inner {
+            NshInner::Listener(_) => panic!("data sent to TCP listener"),
+            NshInner::Connection(ref mut stream) => stream.write(&data)?,
+        };
+        Ok(())
     }
 }
