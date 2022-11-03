@@ -15,5 +15,5 @@ socket2 = "0.4"
 libc = "0.2.71"
 
 [features]
-default = []
+default = ["popol"]
 all = ["popol"]

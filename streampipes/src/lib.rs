@@ -36,7 +36,7 @@ pub trait ResourceAddr: Clone + Eq + Send {
 /// always happens through raw resource in [`Self::raw_connection`]. Composed
 /// resources uses it to run more complex protocols for operations with I/O
 /// streams (like encoding, framing etc) by providing higher-level constructors
-/// or using resource managers running handshake protocols.
+/// or using resource timeout running handshake protocols.
 pub trait Resource: std::io::Read + std::io::Write {
     /// Address type used by this resource
     type Addr: ResourceAddr<Raw = <Self::Raw as Resource>::Addr>;

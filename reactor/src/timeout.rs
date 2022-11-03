@@ -1,6 +1,3 @@
-#[cfg(feature = "popol")]
-pub mod popol;
-
 use std::time::{Duration, Instant};
 
 /// Manages timers and triggers timeouts.
@@ -35,7 +32,7 @@ impl<K> TimeoutManager<K> {
     ///
     /// ```
     /// use std::time::{Duration, Instant};
-    /// use reactor::managers::TimeoutManager;
+    /// use reactor::timeout::TimeoutManager;
     ///
     /// let mut tm = TimeoutManager::new(Duration::from_secs(1));
     /// let now = Instant::now();
@@ -78,7 +75,7 @@ impl<K> TimeoutManager<K> {
     ///
     /// ```
     /// # use std::time::{Duration, Instant};
-    /// use reactor::managers::TimeoutManager;
+    /// use reactor::timeout::TimeoutManager;
     ///
     /// let mut tm = TimeoutManager::new(Duration::from_secs(0));
     /// let mut now = Instant::now();
@@ -129,7 +126,7 @@ impl<K> TimeoutManager<K> {
     ///
     /// ```
     /// use std::time::{Duration, Instant};
-    /// use reactor::managers::TimeoutManager;
+    /// use reactor::timeout::TimeoutManager;
     ///
     /// let mut tm = TimeoutManager::new(Duration::from_secs(0));
     /// let now = Instant::now();

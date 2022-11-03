@@ -1,15 +1,108 @@
 #[macro_use]
 extern crate amplify;
 
-pub mod managers;
-pub mod resources;
+#[cfg(feature = "popol")]
+pub mod popol;
+pub mod timeout;
 
 use std::any::Any;
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 use std::{io, thread};
 
 use crossbeam_channel as chan;
-use streampipes::Resource;
+
+use crate::timeout::TimeoutManager;
+
+/// Information about generated I/O events from the event loop.
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
+pub struct IoSrc<S> {
+    pub source: S,
+    pub input: bool,
+    pub output: bool,
+}
+
+/// Resource is an I/O item operated by the [`crate::Reactor`]. It should
+/// encompass all application-specific business logic for working with I/O
+/// data and can operate as a state machine, advancing on I/O events via
+/// calls to [`Resource::update_from_io`], dispatched by the reactor runtime.
+/// Resources should handle such things as handshake, encryption, data encoding,
+/// etc. and may execute their business logic by calling the reactor via
+/// [`Controller`] handler provided during the resource construction. In such a
+/// way they may create new resources and register them with the reactor,
+/// disconnect other resources or send a data to them in a non-blocking way.
+/// If a resource needs to perform extensive or blocking operation it is advised
+/// to use dedicated worker threads. While this can be handled by the resource
+/// internally, if the worker thread pool is desired it can be talked to via
+/// set of channels specified as [`Resource::OutputChannels`] associated type
+/// and provided to the resource upon its construction.
+pub trait Resource {
+    type Id: Clone + Eq + Ord + Hash + Send;
+    type Addr: Send;
+    type Error;
+    type Data: Send;
+    type OutputChannels: Clone + Send;
+
+    fn with(
+        addr: Self::Addr,
+        controller: Controller<Self>,
+        output_channels: Self::OutputChannels,
+    ) -> Result<Self, Self::Error>
+    where
+        Self: Sized;
+
+    fn id(&self) -> Self::Id;
+
+    /// Performs input and/or output operations basing on the flags provided.
+    /// For instance, flushes write queue or reads the data and executes
+    /// certain business logic on the data read.
+    ///
+    /// Advances the state of the resources basing on the results of the I/O.
+    fn update_from_io(&mut self, input: bool, output: bool) -> Result<(), Self::Error>;
+
+    /// Queues data for sending. The actual sent happens when a [`Self::io`]
+    /// with `output` flag set is run.
+    fn send(&mut self, data: Self::Data) -> Result<(), Self::Error>;
+}
+
+/// Implements specific way of managing multiple resources for a reactor.
+/// Blocks on concurrent events from multiple resources.
+pub trait IoManager<R: Resource>: Iterator<Item = IoSrc<R::Id>> + Send {
+    /// Detects whether a resource under the given id is known to the manager.
+    fn has_resource(&self, id: &R::Id) -> bool;
+
+    /// Adds already operating/connected resource to the manager.
+    ///
+    /// # I/O
+    ///
+    /// Implementations must not block on the operation or generate any I/O
+    /// events.
+    fn register_resource(&mut self, resource: &R);
+
+    /// Removes resource from the manager without disconnecting it or generating
+    /// any events. Stops resource monitoring and returns the resource itself
+    /// (like connection or a TCP stream). May be used later to insert resource
+    /// back to the manager with [`Self::register_resource`].
+    ///
+    /// # I/O
+    ///
+    /// Implementations must not block on the operation or generate any I/O
+    /// events.
+    fn unregister_resource(&mut self, id: &R::Id);
+
+    /// Reads events from all resources under this manager.
+    ///
+    /// # Returns
+    ///
+    /// Whether the function has timed out.
+    ///
+    /// # I/O
+    ///
+    /// Blocks on the read operation or until the timeout.
+    fn io_events(&mut self, timeout: Option<Duration>) -> Result<bool, R::Error>;
+}
 
 /// Implementation of reactor pattern.
 ///
@@ -33,30 +126,33 @@ pub struct Reactor<R: Resource> {
 impl<R: Resource> Reactor<R> {
     /// Constructs reactor and runs it in a thread, returning [`Self`] as a
     /// controller exposing the API ([`ReactorApi`]).
-    pub fn with<M: ResourceMgr<R>, H: Handler<R, M>>(
-        resources: M,
-        handler_context: H::Context,
+    pub fn with(
+        io: impl IoManager<R> + 'static,
+        output_channels: R::OutputChannels,
+        err_handler: impl Fn(R::Error) + Send + 'static,
     ) -> io::Result<Self>
     where
         R: 'static,
-        M: 'static,
-        H::Context: 'static,
     {
         let (shutdown_send, shutdown_recv) = chan::bounded(1);
         let (control_send, control_recv) = chan::unbounded();
 
-        let controller = Controller {
-            control: control_send.clone(),
-        };
+        let control = control_send.clone();
         let thread = thread::spawn(move || {
-            let handler = H::new(controller, handler_context);
-            let mut dispatcher = Runtime::new(resources, handler, control_recv, shutdown_recv);
-            dispatcher.run()
+            let runtime = Runtime::new(
+                io,
+                output_channels,
+                control_recv,
+                control_send,
+                shutdown_recv,
+                err_handler,
+            );
+            runtime.run()
         });
 
         Ok(Reactor {
             thread,
-            control: control_send,
+            control,
             shutdown: shutdown_send,
         })
     }
@@ -74,7 +170,7 @@ impl<R: Resource> Reactor<R> {
     }
 
     /// Shut downs the reactor
-    fn shutdown(self) -> Result<(), InternalError> {
+    pub fn shutdown(self) -> Result<(), InternalError> {
         self.shutdown
             .send(())
             .map_err(|_| InternalError::ShutdownChanelBroken)?;
@@ -93,8 +189,7 @@ pub trait ReactorApi {
     fn connect(&mut self, addr: <Self::Resource as Resource>::Addr) -> Result<(), InternalError>;
 
     /// Disconnects from a resource, providing a reason.
-    fn disconnect(&mut self, addr: <Self::Resource as Resource>::Addr)
-        -> Result<(), InternalError>;
+    fn disconnect(&mut self, id: <Self::Resource as Resource>::Id) -> Result<(), InternalError>;
 
     /// Set one-time timer which will call [`Handler::on_timer`] upon expiration.
     fn set_timer(&mut self) -> Result<(), InternalError>;
@@ -102,8 +197,8 @@ pub trait ReactorApi {
     /// Send data to the resource.
     fn send(
         &mut self,
-        addr: <Self::Resource as Resource>::Addr,
-        data: Vec<u8>,
+        id: <Self::Resource as Resource>::Id,
+        data: <Self::Resource as Resource>::Data,
     ) -> Result<(), InternalError>;
 }
 
@@ -121,8 +216,8 @@ impl<R: Resource> ReactorApi for chan::Sender<ControlEvent<R>> {
         Ok(())
     }
 
-    fn disconnect(&mut self, addr: R::Addr) -> Result<(), InternalError> {
-        chan::Sender::send(self, ControlEvent::Disconnect(addr))?;
+    fn disconnect(&mut self, id: R::Id) -> Result<(), InternalError> {
+        chan::Sender::send(self, ControlEvent::Disconnect(id))?;
         Ok(())
     }
 
@@ -131,8 +226,8 @@ impl<R: Resource> ReactorApi for chan::Sender<ControlEvent<R>> {
         Ok(())
     }
 
-    fn send(&mut self, addr: R::Addr, data: Vec<u8>) -> Result<(), InternalError> {
-        chan::Sender::send(self, ControlEvent::Send(addr, data))?;
+    fn send(&mut self, id: R::Id, data: R::Data) -> Result<(), InternalError> {
+        chan::Sender::send(self, ControlEvent::Send(id, data))?;
         Ok(())
     }
 }
@@ -144,16 +239,16 @@ impl<R: Resource> ReactorApi for Controller<R> {
         self.control.connect(addr)
     }
 
-    fn disconnect(&mut self, addr: R::Addr) -> Result<(), InternalError> {
-        self.control.disconnect(addr)
+    fn disconnect(&mut self, id: R::Id) -> Result<(), InternalError> {
+        self.control.disconnect(id)
     }
 
     fn set_timer(&mut self) -> Result<(), InternalError> {
         self.control.set_timer()
     }
 
-    fn send(&mut self, addr: R::Addr, data: Vec<u8>) -> Result<(), InternalError> {
-        ReactorApi::send(&mut self.control, addr, data)
+    fn send(&mut self, id: R::Id, data: R::Data) -> Result<(), InternalError> {
+        ReactorApi::send(&mut self.control, id, data)
     }
 }
 
@@ -164,16 +259,16 @@ impl<R: Resource> ReactorApi for Reactor<R> {
         self.control.connect(addr)
     }
 
-    fn disconnect(&mut self, addr: R::Addr) -> Result<(), InternalError> {
-        self.control.disconnect(addr)
+    fn disconnect(&mut self, id: R::Id) -> Result<(), InternalError> {
+        self.control.disconnect(id)
     }
 
     fn set_timer(&mut self) -> Result<(), InternalError> {
         self.control.set_timer()
     }
 
-    fn send(&mut self, addr: R::Addr, data: Vec<u8>) -> Result<(), InternalError> {
-        ReactorApi::send(&mut self.control, addr, data)
+    fn send(&mut self, id: R::Id, data: R::Data) -> Result<(), InternalError> {
+        ReactorApi::send(&mut self.control, id, data)
     }
 }
 
@@ -181,100 +276,104 @@ impl<R: Resource> ReactorApi for Reactor<R> {
 /// dedicated thread by the reactor. It is controlled by sending instructions
 /// through a set of crossbeam channels. [`Reactor`] abstracts that control via
 /// exposing high-level [`ReactorApi`] and [`Controller`] objects.
-struct Runtime<R: Resource, M: ResourceMgr<R>, H: Handler<R, M>> {
-    resources: M,
-    handler: H,
-    control: chan::Receiver<ControlEvent<R>>,
+struct Runtime<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> {
+    resources: HashMap<R::Id, R>,
+    io: IO,
+    err_handler: EH,
+    output_channels: R::OutputChannels,
+    control_recv: chan::Receiver<ControlEvent<R>>,
+    control_send: chan::Sender<ControlEvent<R>>,
     shutdown: chan::Receiver<()>,
+    timeouts: TimeoutManager<()>,
 }
 
-impl<R: Resource, M: ResourceMgr<R>, H: Handler<R, M>> Runtime<R, M, H> {
+impl<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> Runtime<R, IO, EH> {
     fn new(
-        resources: M,
-        handler: H,
-        control: chan::Receiver<ControlEvent<R>>,
+        io: IO,
+        output_channels: R::OutputChannels,
+        control_recv: chan::Receiver<ControlEvent<R>>,
+        control_send: chan::Sender<ControlEvent<R>>,
         shutdown: chan::Receiver<()>,
+        err_handler: EH,
     ) -> Self {
         Runtime {
-            resources,
-            handler,
-            control,
+            io,
+            output_channels,
+            resources: empty!(),
+            control_recv,
+            control_send,
             shutdown,
+            err_handler,
+            timeouts: TimeoutManager::new(Duration::from_secs(0)),
         }
     }
 
     fn run(mut self) -> ! {
         loop {
-            self = self.dispatch();
-            // Should we process control events before dispatching input?
-            self.process_control()
-                .unwrap_or_else(|err| self.handler.resource_error(&mut self.resources, err));
-            self.process_shutdown()
-                .unwrap_or_else(|err| self.handler.internal_failure(&mut self.resources, err));
-        }
-    }
-
-    fn dispatch(mut self) -> Self {
-        if let Err(err) = self.resources.read_events() {
-            self.handler.resource_error(&mut self.resources, err);
-        }
-        self.handler.tick(&mut self.resources);
-
-        let (resources, queue) = self.resources.split_events();
-        self.resources = resources;
-
-        for event in queue {
-            match event {
-                InputEvent::Spawn(_) => { /* Nothing to do here */ }
-                InputEvent::Upgraded() => { /* Nothing to do here */ }
-                InputEvent::Connected {
-                    remote_addr,
-                    direction,
-                } => self
-                    .handler
-                    .connected(&mut self.resources, remote_addr, direction),
-                InputEvent::Disconnected(addr, reason) => {
-                    self.handler.disconnected(&mut self.resources, addr, reason)
-                }
-                InputEvent::Timer => self.handler.on_timer(&mut self.resources),
-                InputEvent::Timeout => { /* Nothing to do here */ }
-                InputEvent::Received(addr, msg) => {
-                    self.handler.received(&mut self.resources, addr, msg)
-                }
+            let now = Instant::now();
+            if let Err(err) = self.io.io_events(self.timeouts.next(now)) {
+                // We ignore events here since it is up to the user to drop the
+                // error channel and ignore them
+                let _ = (self.err_handler)(err);
             }
+            // TODO: Should we process control events before dispatching input?
+            self.process_control();
+            self.process_shutdown();
         }
-
-        self
     }
 
-    fn process_control(&mut self) -> Result<(), R::Error> {
+    fn process_control(&mut self) {
         loop {
-            match self.control.try_recv() {
+            match self.control_recv.try_recv() {
                 Err(chan::TryRecvError::Disconnected) => {
-                    self.handler
-                        .internal_failure(&mut self.resources, InternalError::ShutdownChanelBroken);
-                    break;
+                    panic!("reactor shutdown channel was dropper")
                 }
                 Err(chan::TryRecvError::Empty) => break,
                 Ok(event) => match event {
-                    ControlEvent::Connect(_) => {}
-                    ControlEvent::Disconnect(_) => {}
-                    ControlEvent::SetTimer() => {}
-                    ControlEvent::Send(_, _) => {}
+                    ControlEvent::Connect(addr) => {
+                        let controller = Controller {
+                            control: self.control_send.clone(),
+                        };
+                        match R::with(addr, controller, self.output_channels.clone()) {
+                            Err(err) => (self.err_handler)(err),
+                            Ok(resource) => {
+                                self.io.register_resource(&resource);
+                                self.resources.insert(resource.id(), resource);
+                            }
+                        };
+                        // TODO: Consider to error to the user if the resource was already present
+                    }
+                    ControlEvent::Disconnect(id) => {
+                        self.io.unregister_resource(&id);
+                        self.resources.remove(&id);
+                        // TODO: Don't we need to shutdown the resource?
+                        // TODO: Consider to error to the user if the resource is not found
+                    }
+                    ControlEvent::SetTimer() => {
+                        // TODO: Add timeout manager
+                    }
+                    ControlEvent::Send(id, data) => {
+                        if let Some(resource) = self.resources.get_mut(&id) {
+                            let _ = resource.send(data);
+                        }
+                        // TODO: Consider to error to the user if the resource is not found
+                    }
                 },
             }
         }
-        Ok(())
     }
 
-    fn process_shutdown(&mut self) -> Result<(), InternalError> {
+    fn process_shutdown(&mut self) {
         match self.shutdown.try_recv() {
-            Err(chan::TryRecvError::Empty) => Ok(()),
+            Err(chan::TryRecvError::Empty) => {
+                // Nothing to do here
+            }
             Ok(()) => {
                 // TODO: Disconnect all resources
-                Ok(())
             }
-            Err(chan::TryRecvError::Disconnected) => Err(InternalError::ShutdownChanelBroken),
+            Err(chan::TryRecvError::Disconnected) => {
+                panic!("reactor shutdown channel was dropper")
+            }
         }
     }
 }
@@ -299,110 +398,6 @@ impl<R: Resource> From<chan::SendError<ControlEvent<R>>> for InternalError {
     }
 }
 
-/// Handler is a business logic executed by the reactor. It is moved into a
-/// dedicated reactor thread in [`Runtime`] and called upon reactor input events.
-/// The handler object can't and should not be accessed from outside of the
-/// reactor.
-///
-/// If the business logic needs to control the reactor it should save and use
-/// [`Controller`] provided to it upon construction in [`Handler::new`].
-pub trait Handler<R: Resource, M: ResourceMgr<R>>: Send {
-    type Context: Send;
-
-    /// Constructs handler, providing reactor controller and additional data.
-    ///
-    /// Reactor controller is used by the handler to send the data to the resources,
-    /// connect and disconnect resources.
-    fn new(controller: Controller<R>, ctx: Self::Context) -> Self;
-
-    /// Called by reactor dispatcher upon receiving message from the remote peer.
-    fn received(&mut self, resources: &mut M, remote_addr: R::Addr, message: Box<[u8]>);
-
-    /// Connection attempt underway.
-    ///
-    /// This is only encountered when an outgoing connection attempt is made,
-    /// and is always called before [`Self::connected`].
-    ///
-    /// For incoming connections, [`Self::connected`] is called directly.
-    fn attempted(&mut self, resources: &mut M, remote_addr: R::Addr);
-
-    /// Called whenever a new connection with a peer is established, either
-    /// inbound or outbound caused by [`Reactor::connect`] call. Indicates
-    /// completion of the handshake protocol.
-    fn connected(&mut self, resources: &mut M, remote_addr: R::Addr, direction: ConnDirection);
-
-    /// Called whenever remote peer got disconnected, either because of the
-    /// network event or due to a [`Reactor::disconnect`] call.
-    fn disconnected(
-        &mut self,
-        resources: &mut M,
-        remote_addr: R::Addr,
-        reason: R::DisconnectReason,
-    );
-
-    /// Called when event loop was interrupted because of the resource manager
-    /// timeout.
-    fn timeout(&mut self, resources: &mut M);
-
-    /// Called upon resource-related error
-    fn resource_error(&mut self, resources: &mut M, error: R::Error);
-
-    /// Called upon internal (non-resource related) failure.
-    fn internal_failure(&mut self, resources: &mut M, error: InternalError);
-
-    /// Called by the reactor every time the event loop gets data from the network.
-    ///
-    /// Used to update the state machine's internal clock.
-    ///
-    /// "a regular short, sharp sound, especially that made by a clock or watch, typically
-    /// every second."
-    fn tick(&mut self, resources: &mut M);
-
-    /// Called by the reactor after a timeout whenever an [`ReactorDispatch::SetTimer`]
-    /// was received by the reactor from this iterator.
-    ///
-    /// NB: on each of this calls [`Self::tick`] is also called.
-    fn on_timer(&mut self, resources: &mut M);
-}
-
-/// Direction of the resource connection.
-#[derive(Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
-pub enum ConnDirection {
-    /// Inbound connection.
-    Inbound,
-
-    /// Outbound connection.
-    Outbound,
-}
-
-/// Input events generated by the resources monitored in the reactor and used to
-/// generate calls to the [`Handler`].
-#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
-pub enum InputEvent<R: Resource> {
-    Spawn(R::Raw),
-
-    Upgraded(),
-
-    /// A connection to the resource was successfully established. Generated
-    /// only when the handshake protocol was completed.
-    Connected {
-        remote_addr: R::Addr,
-        direction: ConnDirection,
-    },
-
-    /// Resource was disconnected.
-    Disconnected(R::Addr, R::DisconnectReason),
-
-    /// A resource manager timed out on all resource read requests.
-    Timeout,
-
-    /// A timer set with [`ReactorApi::set_timer`] has expired.
-    Timer,
-
-    /// Data received from the resource
-    Received(R::Addr, Box<[u8]>),
-}
-
 /// Events send by [`Controller`] and [`ReactorApi`] to the [`Runtime`].
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 enum ControlEvent<R: Resource> {
@@ -410,80 +405,11 @@ enum ControlEvent<R: Resource> {
     Connect(R::Addr),
 
     /// Request reactor to disconnect from a resource
-    Disconnect(R::Addr),
+    Disconnect(R::Id),
 
     /// Ask reactor to wake up after certain interval
     SetTimer(),
 
     /// Request reactor to send the data to the resource
-    Send(R::Addr, Vec<u8>),
-}
-
-/// Implements specific way of managing multiple resources for a reactor.
-/// Blocks on concurrent events from multiple resources.
-pub trait ResourceMgr<R: Resource>: Send {
-    /// Iterator over input events returned by [`Self::read_events`].
-    type EventIterator: IntoIterator<Item = InputEvent<R>>;
-
-    /// Detects whether a given resource is known to the manager.
-    fn has(&self, addr: &R::Addr) -> bool {
-        self.get(addr).is_some()
-    }
-
-    /// Retrieves a resource reference by its address.
-    fn get(&self, addr: &R::Addr) -> Option<&R>;
-
-    /// Connects new resource and adds it to the manager.
-    ///
-    /// The implementations must make sure that [`InputEvent::Connected`] is
-    /// emit upon successful connection.
-    ///
-    /// Must return false if the resource was already connected.
-    fn connect_resource(&mut self, addr: &R::Addr) -> Result<bool, R::Error>;
-
-    /// Disconnects resource and removes it from the manager.
-    ///
-    /// The implementations must make sure that [`IoEvent::Disconnected`] is
-    /// emit upon successful disconnection.
-    ///
-    /// Must return false if the resource was already connected.
-    fn disconnect_resource(&mut self, addr: &R::Addr) -> Result<bool, R::Error>;
-
-    /// Adds already operating/connected resource to the manager. Returns `None`
-    /// if the resource is already known, or a reference to the added resource.
-    ///
-    /// Should not generate any [`InputEvent`].
-    fn register_resource(&mut self, resource: R) -> Option<&R>;
-
-    /// Removes resource from the manager without disconnecting it or generating
-    /// any events. Stops resource monitoring and returns the resource itself
-    /// (like connection or a TCP stream). May be used later to insert resource
-    /// back to the manager with [`Self::register_resource`].
-    ///
-    /// Should not generate any [`InputEvent`].
-    fn unregister_resource(&mut self, addr: &R::Addr) -> Option<R>;
-
-    /// Reads events from all resources under this manager and return an iterator
-    /// for past and newly generated events. Blocks on the read operation or
-    /// until the timeout.
-    fn read_events(&mut self) -> Result<&mut Self::EventIterator, R::Error>;
-
-    /// Returns iterator over events generated by all _previous_ calls to
-    /// [`Self::read_events`] and which were not yet consumed.
-    fn events(&mut self) -> &mut Self::EventIterator;
-
-    /// Converts the self into an iterator over events generated by all
-    /// _previous_ calls to [`Self::read_events`] and which were not yet consumed.
-    fn into_events(self) -> Self::EventIterator;
-
-    /// Extract events queue from the self
-    fn split_events(self) -> (Self, Self::EventIterator)
-    where
-        Self: Sized;
-
-    /// Pushes unconsumed events back
-    fn join_events(&mut self, events: Self::EventIterator);
-
-    /// Sends data to the resource.
-    fn send(&mut self, addr: &R::Addr, data: impl AsRef<[u8]>) -> Result<usize, R::Error>;
+    Send(R::Id, R::Data),
 }

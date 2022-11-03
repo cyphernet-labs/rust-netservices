@@ -1,26 +1,18 @@
 #[macro_use]
 extern crate amplify;
-#[macro_use]
-extern crate log;
 
-use std::collections::{HashMap, VecDeque};
-use std::io::Read;
-use std::net::TcpStream;
+use std::any::Any;
+use std::io::Write;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
-use std::time::Duration;
 use std::{fs, io, net};
 
 use clap::Parser;
-use crossbeam_channel as chan;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::Curve25519;
-use reactor::managers::popol::PollManager;
-use reactor::resources::tcp_raw::DisconnectReason;
-use reactor::resources::TcpSocket;
-use reactor::{ConnDirection, Controller, InternalError, Reactor};
-use streampipes::frame::dumb::DumbFramed64KbStream;
-use streampipes::transcode::dumb::{DumbDecoder, DumbEncoder, DumbTranscodedStream};
-use streampipes::NetStream;
+use reactor::popol::PollManager;
+use reactor::{Controller, InternalError, Reactor, ReactorApi, Resource};
+use streampipes::transcode::dumb::DumbTranscodedStream;
 
 pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
@@ -96,6 +88,10 @@ pub enum AppError {
 
     #[from]
     Reactor(InternalError),
+
+    #[from]
+    #[display("other error")]
+    Other(Box<dyn Any + Send>),
 }
 
 impl TryFrom<Args> for Config {
@@ -139,86 +135,67 @@ fn main() -> Result<(), AppError> {
 
     let config = Config::try_from(args)?;
 
-    let manager = match config.command {
+    let manager = PollManager::<NshSession>::new();
+    let mut reactor = Reactor::with(manager, (), |err| {
+        panic!("{}", err);
+    })?;
+
+    match config.command {
         Command::Listen(socket_addr) => {
             println!("Listening on {} ...", socket_addr);
-            PollManager::new(&[socket_addr], [])?
+            // TODO: Listen on an address
         }
         Command::Connect {
             remote_host,
             remote_command: _,
         } => {
             println!("Connecting to {} ...", remote_host);
-            PollManager::new(&[], [remote_host])?
+            reactor.connect(remote_host)?;
         }
-    };
-
-    let reactor = Reactor::with(manager, ())?;
+    }
     reactor.join()?;
 
     Ok(())
 }
 
 pub type NshAddr = UniversalAddr<PeerAddr<Curve25519, net::SocketAddr>>;
-pub type NshSocket = TcpSocket<NshAddr>;
 
-pub struct NshHandler {}
+pub struct NshSession {
+    connection: net::TcpStream,
+    controller: Controller<Self>,
+}
 
-impl reactor::Handler<NshSocket, PollManager<NshSocket>> for NshHandler {
-    type Context = ();
+impl Resource for NshSession {
+    type Id = RawFd;
+    type Addr = NshAddr;
+    type Error = io::Error;
+    type Data = Vec<u8>;
+    type OutputChannels = ();
 
-    fn new(controller: Controller<NshSocket>, ctx: Self::Context) -> Self {
+    fn with(
+        addr: Self::Addr,
+        controller: Controller<Self>,
+        output_channels: Self::OutputChannels,
+    ) -> Result<Self, Self::Error>
+    where
+        Self: Sized,
+    {
+        let connection = net::TcpStream::connect(addr)?;
+        Ok(Self {
+            connection,
+            controller,
+        })
+    }
+
+    fn id(&self) -> Self::Id {
+        self.connection.as_raw_fd()
+    }
+
+    fn update_from_io(&mut self, input: bool, output: bool) -> Result<(), Self::Error> {
         todo!()
     }
 
-    fn received(
-        &mut self,
-        resources: &mut PollManager<NshSocket>,
-        remote_addr: NshAddr,
-        message: Box<[u8]>,
-    ) {
-        todo!()
-    }
-
-    fn attempted(&mut self, resources: &mut PollManager<NshSocket>, remote_addr: NshAddr) {
-        todo!()
-    }
-
-    fn connected(
-        &mut self,
-        resources: &mut PollManager<NshSocket>,
-        remote_addr: NshAddr,
-        direction: ConnDirection,
-    ) {
-        todo!()
-    }
-
-    fn disconnected(
-        &mut self,
-        resources: &mut PollManager<NshSocket>,
-        remote_addr: NshAddr,
-        reason: DisconnectReason,
-    ) {
-        todo!()
-    }
-
-    fn timeout(&mut self, resources: &mut PollManager<NshSocket>) {
-        todo!()
-    }
-
-    fn resource_error(&mut self, resources: &mut PollManager<NshSocket>, error: io::Error) {
-        todo!()
-    }
-
-    fn internal_failure(&mut self, resources: &mut PollManager<NshSocket>, error: InternalError) {
-        todo!()
-    }
-
-    fn tick(&mut self, resources: &mut PollManager<NshSocket>) {
-        todo!()
-    }
-
-    fn on_timer(&mut self, resources: &mut PollManager<NshSocket>) {
-        todo!()
+    fn send(&mut self, data: Self::Data) -> Result<(), Self::Error> {
+        self.connection.write_all(&data)
     }
 }
