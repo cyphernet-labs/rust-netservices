@@ -1,6 +1,6 @@
 [package]
-name = "reactor"
-description = "Rust implementation of reactor pattern"
+name = "ioreactor"
+description = "Rust implementation of reactor pattern for I/O resources"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,12 +8,14 @@ edition = "2021"
 
 [dependencies]
 amplify = "3.13.0"
-streampipes = { path = "../streampipes" }
 crossbeam-channel = "0.5.6"
 popol = { version = "1.0.0", git = "https://github.com/Internet2-WG/popol", branch = "api", optional = true }
-socket2 = "0.4"
+polling = { version = "2.4.0", optional = true }
+epoll = { version = "4.3.1", optional = true }
+mio = { version = "0.8.5", optional = true }
+zmq = { version = " 0.9.2", optional = true }
 libc = "0.2.71"
 
 [features]
-default = ["popol"]
-all = ["popol"]
+default = ["all"]
+all = ["popol", "polling", "epoll", "mio", "zmq"]

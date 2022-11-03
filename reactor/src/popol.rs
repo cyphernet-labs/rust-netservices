@@ -39,13 +39,15 @@ where
         self.poll.get(id).is_some()
     }
 
-    fn register_resource(&mut self, resource: &R) {
+    fn register_resource(&mut self, resource: &R) -> Result<(), R::Error> {
         let id = resource.id();
         self.poll.register(id.clone(), &id, popol::event::ALL);
+        Ok(())
     }
 
-    fn unregister_resource(&mut self, id: &R::Id) {
+    fn unregister_resource(&mut self, id: &R::Id) -> Result<(), R::Error> {
         self.poll.unregister(id);
+        Ok(())
     }
 
     fn io_events(&mut self, timeout: Option<Duration>) -> Result<bool, R::Error> {

@@ -10,8 +10,8 @@ use std::{fs, io, net};
 use clap::Parser;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::Curve25519;
-use reactor::popol::PollManager;
-use reactor::{Controller, InternalError, Reactor, ReactorApi, Resource};
+use ioreactor::popol::PollManager;
+use ioreactor::{Controller, InternalError, Reactor, ReactorApi, Resource};
 use streampipes::transcode::dumb::DumbTranscodedStream;
 
 pub const DEFAULT_PORT: u16 = 3232;

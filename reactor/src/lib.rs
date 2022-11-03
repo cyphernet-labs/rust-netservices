@@ -1,9 +1,17 @@
 #[macro_use]
 extern crate amplify;
 
+#[cfg(feature = "epoll")]
+pub mod epoll;
+#[cfg(feature = "mio")]
+pub mod mio;
+#[cfg(feature = "polling")]
+pub mod polling;
 #[cfg(feature = "popol")]
 pub mod popol;
-pub mod timeout;
+mod timeout;
+
+pub use timeout::TimeoutManager;
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -13,8 +21,6 @@ use std::time::{Duration, Instant};
 use std::{io, thread};
 
 use crossbeam_channel as chan;
-
-use crate::timeout::TimeoutManager;
 
 /// Information about generated I/O events from the event loop.
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
@@ -79,7 +85,7 @@ pub trait IoManager<R: Resource>: Iterator<Item = IoSrc<R::Id>> + Send {
     ///
     /// Implementations must not block on the operation or generate any I/O
     /// events.
-    fn register_resource(&mut self, resource: &R);
+    fn register_resource(&mut self, resource: &R) -> Result<(), R::Error>;
 
     /// Removes resource from the manager without disconnecting it or generating
     /// any events. Stops resource monitoring and returns the resource itself
@@ -90,7 +96,7 @@ pub trait IoManager<R: Resource>: Iterator<Item = IoSrc<R::Id>> + Send {
     ///
     /// Implementations must not block on the operation or generate any I/O
     /// events.
-    fn unregister_resource(&mut self, id: &R::Id);
+    fn unregister_resource(&mut self, id: &R::Id) -> Result<(), R::Error>;
 
     /// Reads events from all resources under this manager.
     ///

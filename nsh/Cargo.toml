@@ -13,7 +13,7 @@ rust-version = "1.59.0"
 [dependencies]
 amplify = "3.12.1"
 streampipes = { path = "../streampipes" }
-reactor = { path = "../reactor" }
+ioreactor = { path = "../reactor", features = ["popol"] }
 cyphernet = { git = "https://github.com/Internet2-WG/rust-cyphernet", features = ["ed25519"] }
 ntls = { git = "https://github.com/Internet2-WG/ntls" }
 ed25519-compact = { version = "2.0.2", features = ["ed25519", "x25519", "pem", "ct-codecs"] }
