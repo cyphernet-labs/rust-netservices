@@ -34,6 +34,8 @@ where
     // file descriptors.
     resources: HashMap<R::Addr, R>,
     timeouts: TimeoutManager<()>,
+
+    popol_buf: Vec<popol::Event>,
 }
 
 impl<S> PollManager<TcpSocket<S>>
@@ -149,7 +151,7 @@ where
         let mut timeouts = Vec::with_capacity(32);
 
         // Blocking call
-        if self.poll.wait_timeout(timeout)? {
+        if self.poll.wait_timeout(timeout, &mut self.popol_buf)? {
             // Nb. The way this is currently used basically ignores which keys have
             // timed out. So as long as *something* timed out, we wake the service.
             self.timeouts.check_now(&mut timeouts);
@@ -162,7 +164,7 @@ where
             }
         }
 
-        for (addr, ev) in self.poll.events() {
+        for (addr, ev) in &self.popol_buf {
             let src = self.resources.get_mut(addr).expect("broken resource index");
             let mut events = Vec::with_capacity(2);
             if ev.is_writable() {

@@ -3,6 +3,7 @@ extern crate amplify;
 
 pub mod managers;
 pub mod resources;
+pub mod handshakes;
 
 use std::any::Any;
 use std::thread::JoinHandle;
