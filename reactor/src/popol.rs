@@ -3,7 +3,7 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
-use crate::{IoManager, IoSrc, Resource};
+use crate::{IoEv, IoManager, IoSrc, Resource};
 
 /// Manager for a set of resources which are polled for an event loop by the
 /// reactor by using [`popol`] library.
@@ -59,8 +59,10 @@ where
         for (id, ev) in self.poll.events() {
             self.events.push_back(IoSrc {
                 source: id.clone(),
-                input: ev.is_readable(),
-                output: ev.is_writable(),
+                io: IoEv {
+                    is_readable: ev.is_readable(),
+                    is_writable: ev.is_writable(),
+                },
             })
         }
 

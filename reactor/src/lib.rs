@@ -26,8 +26,14 @@ use crossbeam_channel as chan;
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub struct IoSrc<S> {
     pub source: S,
-    pub input: bool,
-    pub output: bool,
+    pub io: IoEv,
+}
+
+/// Specific I/O events which were received.
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
+pub struct IoEv {
+    pub is_readable: bool,
+    pub is_writable: bool,
 }
 
 /// Resource is an I/O item operated by the [`crate::Reactor`]. It should
@@ -47,7 +53,7 @@ pub struct IoSrc<S> {
 pub trait Resource {
     type Id: Clone + Eq + Ord + Hash + Send;
     type Context: Send;
-    type Data: Send;
+    type Cmd: Send;
     type Error;
 
     fn with(context: Self::Context, controller: Controller<Self>) -> Result<Self, Self::Error>
@@ -61,11 +67,11 @@ pub trait Resource {
     /// certain business logic on the data read.
     ///
     /// Advances the state of the resources basing on the results of the I/O.
-    fn update_from_io(&mut self, input: bool, output: bool) -> Result<(), Self::Error>;
+    fn io_ready(&mut self, io: IoEv) -> Result<(), Self::Error>;
 
-    /// Queues data for sending. The actual sent happens when a [`Self::io`]
-    /// with `output` flag set is run.
-    fn send(&mut self, data: Self::Data) -> Result<(), Self::Error>;
+    /// Called by the reactor [`Runtime`] whenever it receives a command for this
+    /// resource through the [`Controller`] [`ReactorApi`].
+    fn handle_cmd(&mut self, cmd: Self::Cmd) -> Result<(), Self::Error>;
 }
 
 /// Implements specific way of managing multiple resources for a reactor.
@@ -192,7 +198,7 @@ pub trait ReactorApi {
     fn send(
         &mut self,
         id: <Self::Resource as Resource>::Id,
-        data: <Self::Resource as Resource>::Data,
+        data: <Self::Resource as Resource>::Cmd,
     ) -> Result<(), InternalError>;
 }
 
@@ -220,7 +226,7 @@ impl<R: Resource> ReactorApi for chan::Sender<ControlEvent<R>> {
         Ok(())
     }
 
-    fn send(&mut self, id: R::Id, data: R::Data) -> Result<(), InternalError> {
+    fn send(&mut self, id: R::Id, data: R::Cmd) -> Result<(), InternalError> {
         chan::Sender::send(self, ControlEvent::Send(id, data))?;
         Ok(())
     }
@@ -241,7 +247,7 @@ impl<R: Resource> ReactorApi for Controller<R> {
         self.control.set_timer()
     }
 
-    fn send(&mut self, id: R::Id, data: R::Data) -> Result<(), InternalError> {
+    fn send(&mut self, id: R::Id, data: R::Cmd) -> Result<(), InternalError> {
         ReactorApi::send(&mut self.control, id, data)
     }
 }
@@ -261,7 +267,7 @@ impl<R: Resource> ReactorApi for Reactor<R> {
         self.control.set_timer()
     }
 
-    fn send(&mut self, id: R::Id, data: R::Data) -> Result<(), InternalError> {
+    fn send(&mut self, id: R::Id, data: R::Cmd) -> Result<(), InternalError> {
         ReactorApi::send(&mut self.control, id, data)
     }
 }
@@ -345,7 +351,7 @@ impl<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> Runtime<R, IO, EH> {
                     }
                     ControlEvent::Send(id, data) => {
                         if let Some(resource) = self.resources.get_mut(&id) {
-                            let _ = resource.send(data);
+                            let _ = resource.handle_cmd(data);
                         }
                         // TODO: Consider to error to the user if the resource is not found
                     }
@@ -402,5 +408,5 @@ enum ControlEvent<R: Resource> {
     SetTimer(),
 
     /// Request reactor to send the data to the resource
-    Send(R::Id, R::Data),
+    Send(R::Id, R::Cmd),
 }

@@ -132,7 +132,7 @@ fn main() -> Result<(), AppError> {
 
     let config = Config::try_from(args)?;
 
-    let manager = PollManager::<NxkResource>::new();
+    let manager = PollManager::<NxkResource<()>>::new();
     let mut reactor = Reactor::with(manager, |err| {
         panic!("{}", err);
     })?;
@@ -228,12 +228,13 @@ mod noise_xk {
 // TODO: Move to a separate crate
 pub mod nxk_tcp {
     use std::io::{self, Read, Write};
+    use std::marker::PhantomData;
     use std::net;
     use std::os::fd::{AsRawFd, RawFd};
 
     use cyphernet::addr::{LocalNode, PeerAddr, UniversalAddr};
     use cyphernet::crypto::ed25519::Curve25519;
-    use ioreactor::{Controller, ReactorApi, Resource};
+    use ioreactor::{Controller, IoEv, ReactorApi, Resource};
 
     use crate::noise_xk;
 
@@ -318,17 +319,18 @@ pub mod nxk_tcp {
         Session(NxkSession),
     }
 
-    pub struct NxkResource {
+    pub struct NxkResource<C: Send> {
         inner: NxkInner,
         local_node: LocalNode<Curve25519>,
         controller: Controller<Self>,
+        _phantom: PhantomData<C>,
     }
 
-    impl Resource for NxkResource {
+    impl<C: Send> Resource for NxkResource<C> {
         type Id = RawFd;
         type Context = NxkContext;
+        type Cmd = C;
         type Error = io::Error;
-        type Data = Vec<u8>;
 
         fn with(context: Self::Context, controller: Controller<Self>) -> Result<Self, Self::Error>
         where
@@ -349,6 +351,7 @@ pub mod nxk_tcp {
                 inner,
                 controller,
                 local_node: context.local_node,
+                _phantom: none!(),
             })
         }
 
@@ -359,7 +362,7 @@ pub mod nxk_tcp {
             }
         }
 
-        fn update_from_io(&mut self, input: bool, output: bool) -> Result<(), Self::Error> {
+        fn io_ready(&mut self, io: IoEv) -> Result<(), Self::Error> {
             match self.inner {
                 NxkInner::Listener(ref listener) => {
                     let (stream, peer_socket_addr) = listener.accept()?;
@@ -372,8 +375,8 @@ pub mod nxk_tcp {
                         .map_err(|_| io::ErrorKind::NotConnected)?;
                 }
                 NxkInner::Session(ref mut session) => {
-                    if input { /* TODO: Do read */ }
-                    if output {
+                    if io.is_readable { /* TODO: Do read */ }
+                    if io.is_writable {
                         session.flush()?;
                     }
                 }
@@ -381,10 +384,13 @@ pub mod nxk_tcp {
             Ok(())
         }
 
-        fn send(&mut self, data: Self::Data) -> Result<(), Self::Error> {
+        fn handle_cmd(&mut self, cmd: Self::Cmd) -> Result<(), Self::Error> {
             match self.inner {
                 NxkInner::Listener(_) => panic!("data sent to TCP listener"),
-                NxkInner::Session(ref mut stream) => stream.write_all(&data)?,
+                NxkInner::Session(ref mut stream) => {
+                    // TODO: Do writes, like
+                    // stream.write_all(&data)?
+                }
             };
             Ok(())
         }
