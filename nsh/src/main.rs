@@ -63,7 +63,7 @@ struct Args {
 enum Command {
     Listen(net::SocketAddr),
     Connect {
-        remote_host: UniversalAddr<PeerAddr<Curve25519, net::SocketAddr>>,
+        remote_host: NshAddr,
         remote_command: String,
     },
 }
@@ -160,37 +160,38 @@ fn main() -> Result<(), AppError> {
 }
 
 mod noise_xk {
-    use cyphernet::addr::LocalNode;
-    use cyphernet::crypto::Ec;
     use std::io::{self, Read, Write};
     use std::net;
     use std::os::unix::io::{AsRawFd, RawFd};
-    use streampipes::NetStream;
 
-    use crate::NshAddr;
+    use cyphernet::addr::LocalNode;
+    use cyphernet::crypto::Ec;
+    use streampipes::NetStream;
 
     pub struct Stream<EC: Ec, S: streampipes::Stream> {
         stream: S,
         local_node: LocalNode<EC>,
-        remotr_addr: Option<NshAddr>,
+        remote_key: Option<EC::PubKey>,
     }
 
-    impl<EC: Ec> Stream<EC, net::TcpStream> {
-        pub fn connect(nsh_addr: NshAddr, local_node: LocalNode<EC>) -> io::Result<Self> {
-            // TODO: Use socks5
-            let stream = net::TcpStream::connect(&nsh_addr)?;
+    impl<EC: Ec, S: streampipes::Stream> Stream<EC, S> {
+        pub fn connect(
+            stream: S,
+            remote_key: EC::PubKey,
+            local_node: LocalNode<EC>,
+        ) -> io::Result<Self> {
             Ok(Self {
                 stream,
                 local_node,
-                remotr_addr: Some(nsh_addr),
+                remote_key: Some(remote_key),
             })
         }
 
-        pub fn upgrade(tcp_connection: net::TcpStream, local_node: LocalNode<EC>) -> Self {
+        pub fn upgrade(stream: S, local_node: LocalNode<EC>) -> Self {
             Self {
-                stream: tcp_connection,
+                stream,
                 local_node,
-                remotr_addr: None,
+                remote_key: None,
             }
         }
     }
@@ -269,8 +270,11 @@ impl NshSession {
     }
 
     pub fn connect(nsh_addr: NshAddr, local_node: LocalNode<Curve25519>) -> io::Result<Self> {
+        // TODO: Use socks5
+        let tcp_stream = net::TcpStream::connect(&nsh_addr)?;
+        let remote_key = nsh_addr.as_remote_addr().to_pubkey();
         Ok(Self {
-            stream: NoiseXkStream::connect(nsh_addr, local_node)?,
+            stream: NoiseXkStream::connect(tcp_stream, remote_key, local_node)?,
             socket_addr: nsh_addr.to_socket_addr(),
             peer_addr: Some(nsh_addr),
             inbound: false,
