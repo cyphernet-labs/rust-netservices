@@ -4,7 +4,7 @@ use std::io;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::time::Duration;
 
-use crate::{IoManager, IoSrc, Resource};
+use crate::{IoEv, IoManager, IoSrc, Resource};
 
 /// Manager for a set of resources which are polled for an event loop by the
 /// reactor by using [`polling`] library.
@@ -69,8 +69,10 @@ where
         for ev in &self.read_events {
             self.events.push_back(IoSrc {
                 source: unsafe { R::Id::from_raw_fd(ev.key as RawFd) },
-                input: ev.readable,
-                output: ev.writable,
+                io: IoEv {
+                    is_readable: ev.readable,
+                    is_writable: ev.writable,
+                },
             })
         }
         self.read_events.clear();

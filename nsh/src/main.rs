@@ -9,7 +9,7 @@ use clap::Parser;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::Curve25519;
 use ioreactor::popol::PollManager;
-use ioreactor::{InternalError, Reactor, ReactorApi};
+use ioreactor::{Broker, InternalError, Reactor, ReactorApi};
 
 use crate::nxk_tcp::{NxkAddr, NxkContext, NxkMethod, NxkResource};
 
@@ -133,9 +133,8 @@ fn main() -> Result<(), AppError> {
     let config = Config::try_from(args)?;
 
     let manager = PollManager::<NxkResource<()>>::new();
-    let mut reactor = Reactor::with(manager, |err| {
-        panic!("{}", err);
-    })?;
+    let broker = Service {};
+    let mut reactor = Reactor::with(manager, broker)?;
 
     match config.command {
         Command::Listen(socket_addr) => {
@@ -394,5 +393,17 @@ pub mod nxk_tcp {
             };
             Ok(())
         }
+
+        fn handle_err(&mut self, err: Self::Error) -> Result<(), Self::Error> {
+            todo!()
+        }
+    }
+}
+
+pub struct Service {}
+
+impl Broker<NxkResource<()>> for Service {
+    fn handle_err(&mut self, err: io::Error) {
+        panic!("{}", err);
     }
 }

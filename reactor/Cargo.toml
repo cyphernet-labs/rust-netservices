@@ -18,5 +18,5 @@ zmq = { version = " 0.9.2", optional = true }
 libc = "0.2.71"
 
 [features]
-default = ["popol"]
+default = ["popol", "polling"]
 all = ["popol", "polling", "epoll", "mio", "zmq"]

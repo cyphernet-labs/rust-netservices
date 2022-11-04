@@ -67,11 +67,18 @@ pub trait Resource {
     /// certain business logic on the data read.
     ///
     /// Advances the state of the resources basing on the results of the I/O.
+    ///
+    /// The errors returned by this method are forwarded to [`Self::handle_err`].
     fn io_ready(&mut self, io: IoEv) -> Result<(), Self::Error>;
 
     /// Called by the reactor [`Runtime`] whenever it receives a command for this
     /// resource through the [`Controller`] [`ReactorApi`].
+    ///
+    /// The errors returned by this method are forwarded to [`Self::handle_err`].
     fn handle_cmd(&mut self, cmd: Self::Cmd) -> Result<(), Self::Error>;
+
+    /// The errors returned by this method are forwarded to [`Broker::handle_err`].
+    fn handle_err(&mut self, err: Self::Error) -> Result<(), Self::Error>;
 }
 
 /// Implements specific way of managing multiple resources for a reactor.
@@ -111,6 +118,10 @@ pub trait IoManager<R: Resource>: Iterator<Item = IoSrc<R::Id>> + Send {
     fn io_events(&mut self, timeout: Option<Duration>) -> Result<bool, R::Error>;
 }
 
+pub trait Broker<R: Resource>: Send {
+    fn handle_err(&mut self, err: R::Error);
+}
+
 /// Implementation of reactor pattern.
 ///
 /// Reactor manages multiple resources of homogenous type `R` (resource can be a
@@ -135,7 +146,7 @@ impl<R: Resource> Reactor<R> {
     /// controller exposing the API ([`ReactorApi`]).
     pub fn with(
         io: impl IoManager<R> + 'static,
-        err_handler: impl Fn(R::Error) + Send + 'static,
+        broker: impl Broker<R> + 'static,
     ) -> io::Result<Self>
     where
         R: 'static,
@@ -145,7 +156,7 @@ impl<R: Resource> Reactor<R> {
 
         let control = control_send.clone();
         let thread = thread::spawn(move || {
-            let runtime = Runtime::new(io, control_recv, control_send, shutdown_recv, err_handler);
+            let runtime = Runtime::new(io, control_recv, control_send, shutdown_recv, broker);
             runtime.run()
         });
 
@@ -276,23 +287,23 @@ impl<R: Resource> ReactorApi for Reactor<R> {
 /// dedicated thread by the reactor. It is controlled by sending instructions
 /// through a set of crossbeam channels. [`Reactor`] abstracts that control via
 /// exposing high-level [`ReactorApi`] and [`Controller`] objects.
-struct Runtime<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> {
+struct Runtime<R: Resource, IO: IoManager<R>, B: Broker<R>> {
     resources: HashMap<R::Id, R>,
     io: IO,
-    err_handler: EH,
+    broker: B,
     control_recv: chan::Receiver<ControlEvent<R>>,
     control_send: chan::Sender<ControlEvent<R>>,
     shutdown: chan::Receiver<()>,
     timeouts: TimeoutManager<()>,
 }
 
-impl<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> Runtime<R, IO, EH> {
+impl<R: Resource, IO: IoManager<R>, B: Broker<R>> Runtime<R, IO, B> {
     fn new(
         io: IO,
         control_recv: chan::Receiver<ControlEvent<R>>,
         control_send: chan::Sender<ControlEvent<R>>,
         shutdown: chan::Receiver<()>,
-        err_handler: EH,
+        broker: B,
     ) -> Self {
         Runtime {
             io,
@@ -300,7 +311,7 @@ impl<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> Runtime<R, IO, EH> {
             control_recv,
             control_send,
             shutdown,
-            err_handler,
+            broker,
             timeouts: TimeoutManager::new(Duration::from_secs(0)),
         }
     }
@@ -309,9 +320,16 @@ impl<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> Runtime<R, IO, EH> {
         loop {
             let now = Instant::now();
             if let Err(err) = self.io.io_events(self.timeouts.next(now)) {
-                // We ignore events here since it is up to the user to drop the
-                // error channel and ignore them
-                let _ = (self.err_handler)(err);
+                self.broker.handle_err(err);
+            }
+            for ev in &mut self.io {
+                let res = self
+                    .resources
+                    .get_mut(&ev.source)
+                    .expect("resource management inconsistency");
+                res.io_ready(ev.io)
+                    .or_else(|err| res.handle_err(err))
+                    .unwrap_or_else(|err| self.broker.handle_err(err));
             }
             // TODO: Should we process control events before dispatching input?
             self.process_control();
@@ -332,28 +350,34 @@ impl<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> Runtime<R, IO, EH> {
                             control: self.control_send.clone(),
                         };
                         match R::with(context, controller) {
-                            Err(err) => (self.err_handler)(err),
-                            Ok(resource) => {
-                                self.io.register_resource(&resource);
+                            Err(err) => self.broker.handle_err(err),
+                            Ok(mut resource) => {
+                                self.io
+                                    .register_resource(&resource)
+                                    .or_else(|err| resource.handle_err(err))
+                                    .unwrap_or_else(|err| self.broker.handle_err(err));
                                 self.resources.insert(resource.id(), resource);
                             }
                         };
                         // TODO: Consider to error to the user if the resource was already present
                     }
                     ControlEvent::Disconnect(id) => {
-                        self.io.unregister_resource(&id);
+                        self.io
+                            .unregister_resource(&id)
+                            .unwrap_or_else(|err| self.broker.handle_err(err));
                         self.resources.remove(&id);
                         // TODO: Don't we need to shutdown the resource?
-                        // TODO: Consider to error to the user if the resource is not found
                     }
                     ControlEvent::SetTimer() => {
                         // TODO: Add timeout manager
                     }
                     ControlEvent::Send(id, data) => {
                         if let Some(resource) = self.resources.get_mut(&id) {
-                            let _ = resource.handle_cmd(data);
+                            resource
+                                .handle_cmd(data)
+                                .or_else(|err| resource.handle_err(err))
+                                .unwrap_or_else(|err| self.broker.handle_err(err));
                         }
-                        // TODO: Consider to error to the user if the resource is not found
                     }
                 },
             }
