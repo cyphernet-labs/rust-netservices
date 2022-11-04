@@ -46,16 +46,11 @@ pub struct IoSrc<S> {
 /// and provided to the resource upon its construction.
 pub trait Resource {
     type Id: Clone + Eq + Ord + Hash + Send;
-    type Addr: Send;
-    type Error;
+    type Context: Send;
     type Data: Send;
-    type OutputChannels: Clone + Send;
+    type Error;
 
-    fn with(
-        addr: Self::Addr,
-        controller: Controller<Self>,
-        output_channels: Self::OutputChannels,
-    ) -> Result<Self, Self::Error>
+    fn with(context: Self::Context, controller: Controller<Self>) -> Result<Self, Self::Error>
     where
         Self: Sized;
 
@@ -134,7 +129,6 @@ impl<R: Resource> Reactor<R> {
     /// controller exposing the API ([`ReactorApi`]).
     pub fn with(
         io: impl IoManager<R> + 'static,
-        output_channels: R::OutputChannels,
         err_handler: impl Fn(R::Error) + Send + 'static,
     ) -> io::Result<Self>
     where
@@ -145,14 +139,7 @@ impl<R: Resource> Reactor<R> {
 
         let control = control_send.clone();
         let thread = thread::spawn(move || {
-            let runtime = Runtime::new(
-                io,
-                output_channels,
-                control_recv,
-                control_send,
-                shutdown_recv,
-                err_handler,
-            );
+            let runtime = Runtime::new(io, control_recv, control_send, shutdown_recv, err_handler);
             runtime.run()
         });
 
@@ -192,7 +179,8 @@ pub trait ReactorApi {
     type Resource: Resource;
 
     /// Connects new resource and adds it to the manager.
-    fn connect(&mut self, addr: <Self::Resource as Resource>::Addr) -> Result<(), InternalError>;
+    fn connect(&mut self, addr: <Self::Resource as Resource>::Context)
+        -> Result<(), InternalError>;
 
     /// Disconnects from a resource, providing a reason.
     fn disconnect(&mut self, id: <Self::Resource as Resource>::Id) -> Result<(), InternalError>;
@@ -217,7 +205,7 @@ pub struct Controller<R: Resource> {
 impl<R: Resource> ReactorApi for chan::Sender<ControlEvent<R>> {
     type Resource = R;
 
-    fn connect(&mut self, addr: R::Addr) -> Result<(), InternalError> {
+    fn connect(&mut self, addr: R::Context) -> Result<(), InternalError> {
         chan::Sender::send(self, ControlEvent::Connect(addr))?;
         Ok(())
     }
@@ -241,7 +229,7 @@ impl<R: Resource> ReactorApi for chan::Sender<ControlEvent<R>> {
 impl<R: Resource> ReactorApi for Controller<R> {
     type Resource = R;
 
-    fn connect(&mut self, addr: R::Addr) -> Result<(), InternalError> {
+    fn connect(&mut self, addr: R::Context) -> Result<(), InternalError> {
         self.control.connect(addr)
     }
 
@@ -261,7 +249,7 @@ impl<R: Resource> ReactorApi for Controller<R> {
 impl<R: Resource> ReactorApi for Reactor<R> {
     type Resource = R;
 
-    fn connect(&mut self, addr: R::Addr) -> Result<(), InternalError> {
+    fn connect(&mut self, addr: R::Context) -> Result<(), InternalError> {
         self.control.connect(addr)
     }
 
@@ -286,7 +274,6 @@ struct Runtime<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> {
     resources: HashMap<R::Id, R>,
     io: IO,
     err_handler: EH,
-    output_channels: R::OutputChannels,
     control_recv: chan::Receiver<ControlEvent<R>>,
     control_send: chan::Sender<ControlEvent<R>>,
     shutdown: chan::Receiver<()>,
@@ -296,7 +283,6 @@ struct Runtime<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> {
 impl<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> Runtime<R, IO, EH> {
     fn new(
         io: IO,
-        output_channels: R::OutputChannels,
         control_recv: chan::Receiver<ControlEvent<R>>,
         control_send: chan::Sender<ControlEvent<R>>,
         shutdown: chan::Receiver<()>,
@@ -304,7 +290,6 @@ impl<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> Runtime<R, IO, EH> {
     ) -> Self {
         Runtime {
             io,
-            output_channels,
             resources: empty!(),
             control_recv,
             control_send,
@@ -336,11 +321,11 @@ impl<R: Resource, IO: IoManager<R>, EH: Fn(R::Error)> Runtime<R, IO, EH> {
                 }
                 Err(chan::TryRecvError::Empty) => break,
                 Ok(event) => match event {
-                    ControlEvent::Connect(addr) => {
+                    ControlEvent::Connect(context) => {
                         let controller = Controller {
                             control: self.control_send.clone(),
                         };
-                        match R::with(addr, controller, self.output_channels.clone()) {
+                        match R::with(context, controller) {
                             Err(err) => (self.err_handler)(err),
                             Ok(resource) => {
                                 self.io.register_resource(&resource);
@@ -407,8 +392,8 @@ impl<R: Resource> From<chan::SendError<ControlEvent<R>>> for InternalError {
 /// Events send by [`Controller`] and [`ReactorApi`] to the [`Runtime`].
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 enum ControlEvent<R: Resource> {
-    /// Request reactor to connect to the resource by address
-    Connect(R::Addr),
+    /// Request reactor to connect to the resource with some context
+    Connect(R::Context),
 
     /// Request reactor to disconnect from a resource
     Disconnect(R::Id),

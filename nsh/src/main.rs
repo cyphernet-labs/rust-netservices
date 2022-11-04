@@ -2,8 +2,6 @@
 extern crate amplify;
 
 use std::any::Any;
-use std::io::{Read, Write};
-use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::{fs, io, net};
 
@@ -11,7 +9,9 @@ use clap::Parser;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::Curve25519;
 use ioreactor::popol::PollManager;
-use ioreactor::{Controller, InternalError, Reactor, ReactorApi, Resource};
+use ioreactor::{InternalError, Reactor, ReactorApi};
+
+use crate::nxk_tcp::{NxkAddr, NxkContext, NxkMethod, NxkResource};
 
 pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
@@ -63,7 +63,7 @@ struct Args {
 enum Command {
     Listen(net::SocketAddr),
     Connect {
-        remote_host: NshAddr,
+        remote_host: NxkAddr,
         remote_command: String,
     },
 }
@@ -132,8 +132,8 @@ fn main() -> Result<(), AppError> {
 
     let config = Config::try_from(args)?;
 
-    let manager = PollManager::<NshResource>::new();
-    let mut reactor = Reactor::with(manager, (), |err| {
+    let manager = PollManager::<NxkResource>::new();
+    let mut reactor = Reactor::with(manager, |err| {
         panic!("{}", err);
     })?;
 
@@ -147,8 +147,8 @@ fn main() -> Result<(), AppError> {
             remote_command: _,
         } => {
             println!("Connecting to {} ...", remote_host);
-            let nsh_socket = NshSocketInfo {
-                op: NshSocketOp::Connect(remote_host),
+            let nsh_socket = NxkContext {
+                method: NxkMethod::Connect(remote_host),
                 local_node: config.node_keys,
             };
             reactor.connect(nsh_socket)?;
@@ -159,9 +159,10 @@ fn main() -> Result<(), AppError> {
     Ok(())
 }
 
+/// Noise_XK streams (can be any)
+// TODO: Wrap actual noise_xk functionality
 mod noise_xk {
     use std::io::{self, Read, Write};
-    use std::net;
     use std::os::unix::io::{AsRawFd, RawFd};
 
     use cyphernet::addr::LocalNode;
@@ -223,165 +224,169 @@ mod noise_xk {
     }
 }
 
-pub type NshAddr = UniversalAddr<PeerAddr<Curve25519, net::SocketAddr>>;
+/// Noise_XK streams, connections and sessions based on TCP stream
+// TODO: Move to a separate crate
+pub mod nxk_tcp {
+    use std::io::{self, Read, Write};
+    use std::net;
+    use std::os::fd::{AsRawFd, RawFd};
 
-pub enum TcpSocket {
-    Listen(net::SocketAddr),
-    Stream(net::TcpStream),
-}
+    use cyphernet::addr::{LocalNode, PeerAddr, UniversalAddr};
+    use cyphernet::crypto::ed25519::Curve25519;
+    use ioreactor::{Controller, ReactorApi, Resource};
 
-pub enum NshSocketOp {
-    Listen(net::SocketAddr),
-    Accept(net::TcpStream, net::SocketAddr),
-    Connect(NshAddr),
-}
+    use crate::noise_xk;
 
-pub struct NshSocketInfo {
-    pub op: NshSocketOp,
-    pub local_node: LocalNode<Curve25519>,
-}
+    pub type NxkAddr = UniversalAddr<PeerAddr<Curve25519, net::SocketAddr>>;
 
-pub enum TcpInner {
-    Listener(net::TcpListener),
-    Connection(net::TcpStream),
-}
+    pub enum TcpSocket {
+        Listen(net::SocketAddr),
+        Stream(net::TcpStream),
+    }
 
-pub type NoiseXkStream = noise_xk::Stream<Curve25519, net::TcpStream>;
+    pub enum NxkMethod {
+        Listen(net::SocketAddr),
+        Accept(net::TcpStream, net::SocketAddr),
+        Connect(NxkAddr),
+    }
 
-pub struct NshSession {
-    stream: NoiseXkStream,
-    socket_addr: net::SocketAddr,
-    peer_addr: Option<NshAddr>,
-    inbound: bool,
-}
+    pub struct NxkContext {
+        pub method: NxkMethod,
+        pub local_node: LocalNode<Curve25519>,
+    }
 
-impl NshSession {
-    pub fn accept(
-        tcp_stream: net::TcpStream,
-        remote_socket_addr: net::SocketAddr,
+    pub type NxkStream = noise_xk::Stream<Curve25519, net::TcpStream>;
+
+    pub struct NxkSession {
+        stream: NxkStream,
+        socket_addr: net::SocketAddr,
+        peer_addr: Option<NxkAddr>,
+        inbound: bool,
+    }
+
+    impl NxkSession {
+        pub fn accept(
+            tcp_stream: net::TcpStream,
+            remote_socket_addr: net::SocketAddr,
+            local_node: LocalNode<Curve25519>,
+        ) -> Self {
+            Self {
+                stream: NxkStream::upgrade(tcp_stream, local_node),
+                socket_addr: remote_socket_addr,
+                peer_addr: None,
+                inbound: true,
+            }
+        }
+
+        pub fn connect(nsh_addr: NxkAddr, local_node: LocalNode<Curve25519>) -> io::Result<Self> {
+            // TODO: Use socks5
+            let tcp_stream = net::TcpStream::connect(&nsh_addr)?;
+            let remote_key = nsh_addr.as_remote_addr().to_pubkey();
+            Ok(Self {
+                stream: NxkStream::connect(tcp_stream, remote_key, local_node)?,
+                socket_addr: nsh_addr.to_socket_addr(),
+                peer_addr: Some(nsh_addr),
+                inbound: false,
+            })
+        }
+    }
+
+    impl AsRawFd for NxkSession {
+        fn as_raw_fd(&self) -> RawFd {
+            self.stream.as_raw_fd()
+        }
+    }
+
+    impl Read for NxkSession {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.stream.read(buf)
+        }
+    }
+
+    impl Write for NxkSession {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.stream.write(buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.stream.flush()
+        }
+    }
+
+    pub enum NxkInner {
+        Listener(net::TcpListener),
+        Session(NxkSession),
+    }
+
+    pub struct NxkResource {
+        inner: NxkInner,
         local_node: LocalNode<Curve25519>,
-    ) -> Self {
-        Self {
-            stream: NoiseXkStream::upgrade(tcp_stream, local_node),
-            socket_addr: remote_socket_addr,
-            peer_addr: None,
-            inbound: true,
-        }
-    }
-
-    pub fn connect(nsh_addr: NshAddr, local_node: LocalNode<Curve25519>) -> io::Result<Self> {
-        // TODO: Use socks5
-        let tcp_stream = net::TcpStream::connect(&nsh_addr)?;
-        let remote_key = nsh_addr.as_remote_addr().to_pubkey();
-        Ok(Self {
-            stream: NoiseXkStream::connect(tcp_stream, remote_key, local_node)?,
-            socket_addr: nsh_addr.to_socket_addr(),
-            peer_addr: Some(nsh_addr),
-            inbound: false,
-        })
-    }
-}
-
-impl AsRawFd for NshSession {
-    fn as_raw_fd(&self) -> RawFd {
-        self.stream.as_raw_fd()
-    }
-}
-
-impl Read for NshSession {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.stream.read(buf)
-    }
-}
-
-impl Write for NshSession {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.stream.write(buf)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.stream.flush()
-    }
-}
-
-pub enum NshInner {
-    Listener(net::TcpListener),
-    Session(NshSession),
-}
-
-pub struct NshResource {
-    inner: NshInner,
-    local_node: LocalNode<Curve25519>,
-    controller: Controller<Self>,
-}
-
-impl Resource for NshResource {
-    type Id = RawFd;
-    type Addr = NshSocketInfo;
-    type Error = io::Error;
-    type Data = Vec<u8>;
-    type OutputChannels = ();
-
-    fn with(
-        addr: Self::Addr,
         controller: Controller<Self>,
-        output_channels: Self::OutputChannels,
-    ) -> Result<Self, Self::Error>
-    where
-        Self: Sized,
-    {
-        let inner = match addr.op {
-            NshSocketOp::Listen(socket_addr) => {
-                NshInner::Listener(net::TcpListener::bind(socket_addr)?)
-            }
-            NshSocketOp::Accept(tcp_stream, remote_socket_addr) => NshInner::Session(
-                NshSession::accept(tcp_stream, remote_socket_addr, addr.local_node.clone()),
-            ),
-            NshSocketOp::Connect(nsh_addr) => {
-                NshInner::Session(NshSession::connect(nsh_addr, addr.local_node.clone())?)
-            }
-        };
-        Ok(Self {
-            inner,
-            controller,
-            local_node: addr.local_node,
-        })
     }
 
-    fn id(&self) -> Self::Id {
-        match &self.inner {
-            NshInner::Listener(listener) => listener.as_raw_fd(),
-            NshInner::Session(session) => session.as_raw_fd(),
+    impl Resource for NxkResource {
+        type Id = RawFd;
+        type Context = NxkContext;
+        type Error = io::Error;
+        type Data = Vec<u8>;
+
+        fn with(context: Self::Context, controller: Controller<Self>) -> Result<Self, Self::Error>
+        where
+            Self: Sized,
+        {
+            let inner = match context.method {
+                NxkMethod::Listen(socket_addr) => {
+                    NxkInner::Listener(net::TcpListener::bind(socket_addr)?)
+                }
+                NxkMethod::Accept(tcp_stream, remote_socket_addr) => NxkInner::Session(
+                    NxkSession::accept(tcp_stream, remote_socket_addr, context.local_node.clone()),
+                ),
+                NxkMethod::Connect(nsh_addr) => {
+                    NxkInner::Session(NxkSession::connect(nsh_addr, context.local_node.clone())?)
+                }
+            };
+            Ok(Self {
+                inner,
+                controller,
+                local_node: context.local_node,
+            })
         }
-    }
 
-    fn update_from_io(&mut self, input: bool, output: bool) -> Result<(), Self::Error> {
-        match self.inner {
-            NshInner::Listener(ref listener) => {
-                let (stream, peer_socket_addr) = listener.accept()?;
-                let nsh_info = NshSocketInfo {
-                    op: NshSocketOp::Accept(stream, peer_socket_addr),
-                    local_node: self.local_node.clone(),
-                };
-                self.controller
-                    .connect(nsh_info)
-                    .map_err(|_| io::ErrorKind::NotConnected)?;
+        fn id(&self) -> Self::Id {
+            match &self.inner {
+                NxkInner::Listener(listener) => listener.as_raw_fd(),
+                NxkInner::Session(session) => session.as_raw_fd(),
             }
-            NshInner::Session(ref mut session) => {
-                if input { /* TODO: Do read */ }
-                if output {
-                    session.flush()?;
+        }
+
+        fn update_from_io(&mut self, input: bool, output: bool) -> Result<(), Self::Error> {
+            match self.inner {
+                NxkInner::Listener(ref listener) => {
+                    let (stream, peer_socket_addr) = listener.accept()?;
+                    let nsh_info = NxkContext {
+                        method: NxkMethod::Accept(stream, peer_socket_addr),
+                        local_node: self.local_node.clone(),
+                    };
+                    self.controller
+                        .connect(nsh_info)
+                        .map_err(|_| io::ErrorKind::NotConnected)?;
+                }
+                NxkInner::Session(ref mut session) => {
+                    if input { /* TODO: Do read */ }
+                    if output {
+                        session.flush()?;
+                    }
                 }
             }
+            Ok(())
         }
-        Ok(())
-    }
 
-    fn send(&mut self, data: Self::Data) -> Result<(), Self::Error> {
-        match self.inner {
-            NshInner::Listener(_) => panic!("data sent to TCP listener"),
-            NshInner::Session(ref mut stream) => stream.write_all(&data)?,
-        };
-        Ok(())
+        fn send(&mut self, data: Self::Data) -> Result<(), Self::Error> {
+            match self.inner {
+                NxkInner::Listener(_) => panic!("data sent to TCP listener"),
+                NxkInner::Session(ref mut stream) => stream.write_all(&data)?,
+            };
+            Ok(())
+        }
     }
 }
