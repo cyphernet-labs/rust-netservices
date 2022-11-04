@@ -58,7 +58,6 @@ impl<Payload: Frame> Frame for Multiplexed<Payload> {
     }
 }
 
-pub type Multiplexed64KbFrames<R, W, D, E, Payload> =
-    FramedStream<R, W, D, E, Multiplexed<Payload>, 2u8>;
+pub type Multiplexed64KbFrames<S, Payload> = FramedStream<S, Multiplexed<Payload>, 2u8>;
 
-pub type Multiplexed64KbData<R, W, D, E> = Multiplexed64KbFrames<R, W, D, E, Box<[u8]>>;
+pub type Multiplexed64KbData<S> = Multiplexed64KbFrames<S, Box<[u8]>>;

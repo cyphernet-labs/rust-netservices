@@ -392,6 +392,7 @@ dependencies = [
  "mio",
  "polling",
  "popol",
+ "streampipes",
  "zmq",
 ]
 
@@ -631,6 +632,9 @@ dependencies = [
 [[package]]
 name = "streampipes"
 version = "0.1.0"
+dependencies = [
+ "amplify",
+]
 
 [[package]]
 name = "strsim"

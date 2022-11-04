@@ -1,11 +1,10 @@
 pub mod dumb;
 pub mod mux;
 
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
 
-use crate::transcode::{Decode, Encode, TranscodedStream};
+use crate::Stream;
 
 pub trait Frame: Sized {
     type Error;
@@ -16,72 +15,42 @@ pub trait Frame: Sized {
 ///
 /// The stream must follow the format of
 /// <FRAME_PREFIX_BYTES-bit message length in little endian><message payload>.
-pub struct FramedStream<R, W, D, E, F, const FRAME_PREFIX_BYTES: u8>
-where
-    R: Read + Send,
-    W: Write + Send,
-    D: Decode,
-    E: Encode,
-    F: Frame,
-{
-    inner: TranscodedStream<R, W, D, E>,
+pub struct FramedStream<S: Stream, F: Frame, const FRAME_PREFIX_BYTES: u8> {
+    stream: S,
     _phantom: PhantomData<F>,
 }
 
-impl<R, W, D, E, F, const FRAME_PREFIX_BYTES: u8> Deref
-    for FramedStream<R, W, D, E, F, FRAME_PREFIX_BYTES>
-where
-    R: Read + Send,
-    W: Write + Send,
-    D: Decode,
-    E: Encode,
-    F: Frame,
-{
-    type Target = TranscodedStream<R, W, D, E>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<R, W, D, E, F, const FRAME_PREFIX_BYTES: u8> DerefMut
-    for FramedStream<R, W, D, E, F, FRAME_PREFIX_BYTES>
-where
-    R: Read + Send,
-    W: Write + Send,
-    D: Decode,
-    E: Encode,
-    F: Frame,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
-impl<R, W, D, E, F, const FRAME_PREFIX_BYTES: u8> FramedStream<R, W, D, E, F, FRAME_PREFIX_BYTES>
-where
-    R: Read + Send,
-    W: Write + Send,
-    D: Decode,
-    E: Encode,
-    F: Frame,
-{
-    pub fn with(reader: R, writer: W, decoder: D, encoder: E) -> Self {
+impl<S: Stream, F: Frame, const FRAME_PREFIX_BYTES: u8> FramedStream<S, F, FRAME_PREFIX_BYTES> {
+    pub fn with(stream: S) -> Self {
         Self {
-            inner: TranscodedStream::with(reader, writer, decoder, encoder),
+            stream,
             _phantom: Default::default(),
         }
     }
 }
 
-impl<'me, R, W, D, E, F, const FRAME_PREFIX_BYTES: u8> Iterator
-    for &'me mut FramedStream<R, W, D, E, F, FRAME_PREFIX_BYTES>
-where
-    R: Read + Send,
-    W: Write + Send,
-    D: Decode,
-    E: Encode,
-    F: Frame,
+impl<S: Stream, F: Frame, const FRAME_PREFIX_BYTES: u8> Read
+    for FramedStream<S, F, FRAME_PREFIX_BYTES>
+{
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.stream.read(buf)
+    }
+}
+
+impl<S: Stream, F: Frame, const FRAME_PREFIX_BYTES: u8> Write
+    for FramedStream<S, F, FRAME_PREFIX_BYTES>
+{
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.stream.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.flush()
+    }
+}
+
+impl<'me, S: Stream, F: Frame, const FRAME_PREFIX_BYTES: u8> Iterator
+    for &'me mut FramedStream<S, F, FRAME_PREFIX_BYTES>
 {
     type Item = F;
 
@@ -90,12 +59,12 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         debug_assert!(FRAME_PREFIX_BYTES <= (usize::BITS / 8) as u8);
         let mut len = [0u8; (usize::BITS / 8u32) as usize];
-        self.inner
+        self.stream
             .read_exact(&mut len[..(FRAME_PREFIX_BYTES as usize)])
             .ok()?;
         let len = usize::from_le_bytes(len);
         let mut buf = vec![0u8; len as usize];
-        self.inner.read_exact(&mut buf).ok()?;
+        self.stream.read_exact(&mut buf).ok()?;
         F::parse(&buf).ok()
     }
 }
