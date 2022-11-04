@@ -3,9 +3,7 @@
 //! decrypting, encoding/decoding stream data, and conversions of the stream
 //! into packets.
 
-pub mod channel;
 pub mod frame;
-pub mod stream;
-pub mod transcode;
+mod stream;
 
-pub use stream::NetStream;
+pub use stream::{NetStream, Stream};

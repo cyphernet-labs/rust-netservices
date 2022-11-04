@@ -7,6 +7,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+amplify = "3.13.0"
 #noise_xk = { path = "../noise_xk" }
 
 [features]
