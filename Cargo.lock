@@ -142,9 +142,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.0.18"
+version = "4.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "335867764ed2de42325fafe6d18b8af74ba97ee0c590fa016f157535b42ab04b"
+checksum = "8e67816e006b17427c9b4386915109b494fec2d929c63e3bd3561234cbf1bf1e"
 dependencies = [
  "atty",
  "bitflags",
@@ -224,10 +224,9 @@ checksum = "f3b7eb4404b8195a9abb6356f4ac07d8ba267045c8d6d220ac4dc992e6cc75df"
 [[package]]
 name = "cyphernet"
 version = "0.1.0"
-source = "git+https://github.com/Internet2-WG/rust-cyphernet#707d39d897c2d81f6586accd2b5f3f41f5fcdf54"
+source = "git+https://github.com/Internet2-WG/rust-cyphernet#0456bc7e4aba399dcf133043ab02f40b9cc40123"
 dependencies = [
  "amplify_derive",
- "data-encoding",
  "ed25519-compact 2.0.2",
  "multibase",
  "socks",

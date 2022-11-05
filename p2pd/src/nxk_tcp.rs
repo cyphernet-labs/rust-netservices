@@ -6,36 +6,37 @@ use std::os::fd::{AsRawFd, RawFd};
 
 use cyphernet::addr::{LocalNode, PeerAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::Curve25519;
+use cyphernet::crypto::Ec;
 use ioreactor::{Controller, IoEv, ReactorApi, Resource};
 
 use crate::noise_xk;
 
-pub type NxkAddr = UniversalAddr<PeerAddr<Curve25519, net::SocketAddr>>;
+pub type NxkAddr<EC = Curve25519> = UniversalAddr<PeerAddr<EC, net::SocketAddr>>;
 
-pub enum NxkMethod {
+pub enum NxkMethod<EC: Ec> {
     Accept(net::TcpStream, net::SocketAddr),
-    Connect(NxkAddr),
+    Connect(NxkAddr<EC>),
 }
 
-pub struct NxkContext {
-    pub method: NxkMethod,
-    pub local_node: LocalNode<Curve25519>,
+pub struct NxkContext<EC: Ec> {
+    pub method: NxkMethod<EC>,
+    pub local_node: LocalNode<EC>,
 }
 
-pub type NxkStream = noise_xk::Stream<Curve25519, net::TcpStream>;
+pub type NxkStream<EC> = noise_xk::Stream<EC, net::TcpStream>;
 
-pub struct NxkSession {
-    stream: NxkStream,
+pub struct NxkSession<EC: Ec = Curve25519> {
+    stream: NxkStream<EC>,
     socket_addr: net::SocketAddr,
-    peer_addr: Option<NxkAddr>,
+    peer_addr: Option<NxkAddr<EC>>,
     inbound: bool,
 }
 
-impl NxkSession {
+impl<EC: Ec> NxkSession<EC> {
     pub fn accept(
         tcp_stream: net::TcpStream,
         remote_socket_addr: net::SocketAddr,
-        local_node: LocalNode<Curve25519>,
+        local_node: LocalNode<EC>,
     ) -> Self {
         Self {
             stream: NxkStream::upgrade(tcp_stream, local_node),
@@ -44,8 +45,13 @@ impl NxkSession {
             inbound: true,
         }
     }
+}
 
-    pub fn connect(nsh_addr: NxkAddr, local_node: LocalNode<Curve25519>) -> io::Result<Self> {
+impl<EC: Ec> NxkSession<EC>
+where
+    EC: Copy,
+{
+    pub fn connect(nsh_addr: NxkAddr<EC>, local_node: LocalNode<EC>) -> io::Result<Self> {
         // TODO: Use socks5
         let tcp_stream = net::TcpStream::connect(&nsh_addr)?;
         let remote_key = nsh_addr.as_remote_addr().to_pubkey();
@@ -58,19 +64,19 @@ impl NxkSession {
     }
 }
 
-impl AsRawFd for NxkSession {
+impl<EC: Ec> AsRawFd for NxkSession<EC> {
     fn as_raw_fd(&self) -> RawFd {
         self.stream.as_raw_fd()
     }
 }
 
-impl Read for NxkSession {
+impl<EC: Ec> Read for NxkSession<EC> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.stream.read(buf)
     }
 }
 
-impl Write for NxkSession {
+impl<EC: Ec> Write for NxkSession<EC> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.stream.write(buf)
     }
@@ -80,9 +86,14 @@ impl Write for NxkSession {
     }
 }
 
-impl Resource for NxkSession {
+impl<EC: Ec> Resource for NxkSession<EC>
+where
+    EC: Copy,
+    EC::PubKey: Send,
+    EC::PrivKey: Send,
+{
     type Id = RawFd;
-    type Context = NxkContext;
+    type Context = NxkContext<EC>;
     type Cmd = ();
     type Error = io::Error;
 
@@ -123,23 +134,26 @@ impl Resource for NxkSession {
     }
 }
 
-pub struct NxkListener<R>
+pub struct NxkListener<R, EC: Ec = Curve25519>
 where
     R: Resource,
-    R::Context: From<NxkContext>,
+    R::Context: From<NxkContext<EC>>,
 {
     socket: net::TcpListener,
-    local_node: LocalNode<Curve25519>,
+    local_node: LocalNode<EC>,
     controller: Controller<R>,
 }
 
-impl<R> Resource<R> for NxkListener<R>
+impl<R, EC> Resource<R> for NxkListener<R, EC>
 where
+    EC: Ec + Clone,
+    EC::PubKey: Send + Clone,
+    EC::PrivKey: Send + Clone,
     R: Resource,
-    R::Context: From<NxkContext>,
+    R::Context: From<NxkContext<EC>>,
 {
     type Id = RawFd;
-    type Context = (LocalNode<Curve25519>, net::SocketAddr);
+    type Context = (LocalNode<EC>, net::SocketAddr);
     type Cmd = ();
     type Error = io::Error;
 
