@@ -1,8 +1,7 @@
 use std::collections::VecDeque;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
-use std::{io, net};
 
 use crate::actors::IoEv;
 use crate::{Actor, Controller, Layout, ReactorApi};
@@ -134,7 +133,8 @@ impl<L: Layout, const SESSION_POOL_ID: u32> Actor for TcpSpawner<L, SESSION_POOL
     where
         Self: Sized,
     {
-        let socket = net::TcpListener::bind(context)?;
+        let socket = TcpListener::bind(context)?;
+        socket.set_nonblocking(true)?;
         Ok(Self { socket, controller })
     }
 
