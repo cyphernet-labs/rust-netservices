@@ -20,7 +20,7 @@ pub enum NxkAction<EC: Ec> {
 }
 
 pub struct NxkContext<EC: Ec> {
-    pub method: NxkAction<EC>,
+    pub action: NxkAction<EC>,
     pub local_node: LocalNode<EC>,
 }
 
@@ -102,11 +102,11 @@ where
     type Error = io::Error;
     type PoolSystem = P;
 
-    fn with(context: Self::Context, _controller: Controller<Self, P>) -> Result<Self, Self::Error>
+    fn with(context: Self::Context, _controller: Controller<P>) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
-        match context.method {
+        match context.action {
             NxkAction::Accept(tcp_stream, remote_socket_addr) => Ok(NxkSession::accept(
                 tcp_stream,
                 remote_socket_addr,
@@ -137,34 +137,23 @@ where
     }
 }
 
-pub struct NxkListener<R, P: Pool, const SESSION_POOL_ID: u32, EC: Ec = Curve25519>
-where
-    R: Actor,
-    R::Context: From<NxkContext<EC>>,
-{
+pub struct NxkListener<P: Pool, const SESSION_POOL_ID: u32, EC: Ec = Curve25519> {
     socket: net::TcpListener,
     local_node: LocalNode<EC>,
-    controller: Controller<R, P>,
+    controller: Controller<P>,
 }
 
-impl<R, P: Pool, const SESSION_POOL_ID: u32, EC: Ec> AsRawFd
-    for NxkListener<R, P, SESSION_POOL_ID, EC>
-where
-    R: Actor,
-    R::Context: From<NxkContext<EC>>,
-{
+impl<P: Pool, const SESSION_POOL_ID: u32, EC: Ec> AsRawFd for NxkListener<P, SESSION_POOL_ID, EC> {
     fn as_raw_fd(&self) -> RawFd {
         self.socket.as_raw_fd()
     }
 }
 
-impl<R, P: Pool, const SESSION_POOL_ID: u32, EC> Actor<R> for NxkListener<R, P, SESSION_POOL_ID, EC>
+impl<P: Pool, const SESSION_POOL_ID: u32, EC> Actor for NxkListener<P, SESSION_POOL_ID, EC>
 where
-    EC: Ec + Clone,
+    EC: Ec + Clone + 'static,
     EC::PubKey: Send + Clone,
     EC::PrivKey: Send + Clone,
-    R: Actor,
-    R::Context: From<NxkContext<EC>>,
 {
     type Id = RawFd;
     type Context = (LocalNode<EC>, net::SocketAddr);
@@ -172,7 +161,7 @@ where
     type Error = io::Error;
     type PoolSystem = P;
 
-    fn with(context: Self::Context, controller: Controller<R, P>) -> Result<Self, Self::Error>
+    fn with(context: Self::Context, controller: Controller<P>) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
@@ -191,11 +180,11 @@ where
     fn io_ready(&mut self, _: IoEv) -> Result<(), Self::Error> {
         let (stream, peer_socket_addr) = self.socket.accept()?;
         let nsh_info = NxkContext {
-            method: NxkAction::Accept(stream, peer_socket_addr),
+            action: NxkAction::Accept(stream, peer_socket_addr),
             local_node: self.local_node.clone(),
         };
         self.controller
-            .start_actor(SESSION_POOL_ID.into(), nsh_info.into())
+            .start_actor(SESSION_POOL_ID.into(), P::convert(Box::new(nsh_info)))
             .map_err(|_| io::ErrorKind::NotConnected)?;
         Ok(())
     }

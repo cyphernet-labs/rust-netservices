@@ -11,6 +11,7 @@ pub mod polling;
 pub mod popol;
 mod timeout;
 
+use std::any::Any;
 pub use timeout::TimeoutManager;
 
 use std::collections::HashMap;
@@ -55,7 +56,7 @@ pub struct IoEv {
 /// internally, if the worker thread pool is desired it can be talked to via
 /// set of channels specified as [`Resource::OutputChannels`] associated type
 /// and provided to the resource upon its construction.
-pub trait Actor<R: Actor = Self> {
+pub trait Actor {
     /// Actor's id types.
     ///
     /// Each actor must have a unique id without a reactor.
@@ -85,7 +86,7 @@ pub trait Actor<R: Actor = Self> {
     /// operating with other actors.
     fn with(
         context: Self::Context,
-        controller: Controller<R, Self::PoolSystem>,
+        controller: Controller<Self::PoolSystem>,
     ) -> Result<Self, Self::Error>
     where
         Self: Sized;
@@ -150,23 +151,23 @@ pub trait Scheduler<R: Actor>: Iterator<Item = IoSrc<R::Id>> + Send {
 }
 
 /// Callbacks called in a context of the reactor runtime threads.
-pub trait Handler<R: Actor, P: Pool>: Send {
+pub trait Handler<P: Pool>: Send {
     /// Called on non-actor-specific errors - or on errors which were not held by the resources
-    fn handle_err(&mut self, err: InternalError<R, P>);
+    fn handle_err(&mut self, err: InternalError<P>);
 }
 
 /// Information for constructing reactor thread pools
 pub struct PoolInfo<R: Actor, P: Pool> {
     id: P,
     scheduler: Box<dyn Scheduler<R>>,
-    handler: Box<dyn Handler<R, P>>,
+    handler: Box<dyn Handler<P>>,
 }
 
 impl<R: Actor, P: Pool> PoolInfo<R, P> {
     pub fn new(
         id: P,
         scheduler: impl Scheduler<R> + 'static,
-        handler: impl Handler<R, P> + 'static,
+        handler: impl Handler<P> + 'static,
     ) -> Self {
         PoolInfo {
             id,
@@ -178,8 +179,9 @@ impl<R: Actor, P: Pool> PoolInfo<R, P> {
 
 /// Trait for an enumeration of pools for a reactor
 pub trait Pool: Send + Copy + Eq + Hash + Debug + Display + From<u32> + Into<u32> {
-    type RootActor: Actor;
+    type RootActor: Actor<PoolSystem = Self>;
     fn default_pools() -> Vec<PoolInfo<Self::RootActor, Self>>;
+    fn convert(other_ctx: Box<dyn Any>) -> <Self::RootActor as Actor>::Context;
 }
 
 /// Implementation of reactor pattern.
@@ -194,21 +196,20 @@ pub trait Pool: Send + Copy + Eq + Hash + Debug + Display + From<u32> + Into<u32
 /// to connect or disconnect resources or send them data.
 ///
 /// Reactor manages internally a thread which runs the [`Runtime`] event loop.
-pub struct Reactor<R: Actor, P: Pool> {
+pub struct Reactor<P: Pool> {
     /// Threads running schedulers, one per pool.
     scheduler_threads: HashMap<P, JoinHandle<()>>,
     shutdown_send: chan::Sender<()>,
     shutdown_recv: chan::Receiver<()>,
-    controller: Controller<R, P>,
+    controller: Controller<P>,
     locked: bool,
 }
 
-impl<R: Actor<PoolSystem = P>, P: Pool<RootActor = R>> Reactor<R, P> {
+impl<P: Pool> Reactor<P> {
     /// Constructs reactor and runs it in a thread, returning [`Self`] as a
     /// controller exposing the API ([`ReactorApi`]).
-    pub fn new() -> Result<Self, InternalError<R, P>>
+    pub fn new() -> Result<Self, InternalError<P>>
     where
-        R: 'static,
         P: 'static,
     {
         let (shutdown_send, shutdown_recv) = chan::bounded(1);
@@ -224,13 +225,13 @@ impl<R: Actor<PoolSystem = P>, P: Pool<RootActor = R>> Reactor<R, P> {
         let mut pools = Vec::new();
 
         // Required to avoid Actor: Send constraint
-        struct Info<R: Actor, P: Pool> {
+        struct Info<P: Pool> {
             id: P,
-            scheduler: Box<dyn Scheduler<R>>,
-            control_recv: chan::Receiver<ControlEvent<R>>,
-            control_send: chan::Sender<ControlEvent<R>>,
+            scheduler: Box<dyn Scheduler<P::RootActor>>,
+            control_recv: chan::Receiver<ControlEvent<P::RootActor>>,
+            control_send: chan::Sender<ControlEvent<P::RootActor>>,
             shutdown: chan::Receiver<()>,
-            handler: Box<dyn Handler<R, P>>,
+            handler: Box<dyn Handler<P>>,
         }
 
         for info in P::default_pools() {
@@ -276,13 +277,13 @@ impl<R: Actor<PoolSystem = P>, P: Pool<RootActor = R>> Reactor<R, P> {
     ///
     /// Once this function is called it wouldn't be possible to add more
     /// pools or actors to the reactor (the reactor state gets locked).
-    pub fn controller(&mut self) -> Controller<R, P> {
+    pub fn controller(&mut self) -> Controller<P> {
         self.locked = true;
         self.controller.clone()
     }
 
     /// Joins all reactor threads.
-    pub fn join(self) -> Result<(), InternalError<R, P>> {
+    pub fn join(self) -> Result<(), InternalError<P>> {
         for (pool, scheduler_thread) in self.scheduler_threads {
             scheduler_thread
                 .join()
@@ -292,7 +293,7 @@ impl<R: Actor<PoolSystem = P>, P: Pool<RootActor = R>> Reactor<R, P> {
     }
 
     /// Shut downs the reactor.
-    pub fn shutdown(self) -> Result<(), InternalError<R, P>> {
+    pub fn shutdown(self) -> Result<(), InternalError<P>> {
         self.shutdown_send
             .send(())
             .map_err(|_| InternalError::ShutdownChanelBroken)?;
@@ -308,40 +309,39 @@ pub trait ReactorApi {
     type Actor: Actor;
 
     /// Enumerator for specific reactor runtimes
-    type Pool: Pool;
+    type Pool: Pool<RootActor = Self::Actor>;
 
     /// Connects new resource and adds it to the manager.
     fn start_actor(
         &mut self,
         pool: Self::Pool,
         ctx: <Self::Actor as Actor>::Context,
-    ) -> Result<(), InternalError<Self::Actor, Self::Pool>>;
+    ) -> Result<(), InternalError<Self::Pool>>;
 
     /// Disconnects from a resource, providing a reason.
     fn stop_actor(
         &mut self,
         id: <Self::Actor as Actor>::Id,
-    ) -> Result<(), InternalError<Self::Actor, Self::Pool>>;
+    ) -> Result<(), InternalError<Self::Pool>>;
 
     /// Set one-time timer which will call [`Handler::on_timer`] upon expiration.
-    fn set_timer(&mut self, pool: Self::Pool)
-        -> Result<(), InternalError<Self::Actor, Self::Pool>>;
+    fn set_timer(&mut self, pool: Self::Pool) -> Result<(), InternalError<Self::Pool>>;
 
     /// Send data to the resource.
     fn send(
         &mut self,
         id: <Self::Actor as Actor>::Id,
         cmd: <Self::Actor as Actor>::Cmd,
-    ) -> Result<(), InternalError<Self::Actor, Self::Pool>>;
+    ) -> Result<(), InternalError<Self::Pool>>;
 }
 
 /// Instance of reactor controller which may be transferred between threads
-pub struct Controller<R: Actor, P: Pool> {
-    actor_map: HashMap<R::Id, P>,
-    channels: HashMap<P, chan::Sender<ControlEvent<R>>>,
+pub struct Controller<P: Pool> {
+    actor_map: HashMap<<P::RootActor as Actor>::Id, P>,
+    channels: HashMap<P, chan::Sender<ControlEvent<P::RootActor>>>,
 }
 
-impl<R: Actor, P: Pool> Clone for Controller<R, P> {
+impl<P: Pool> Clone for Controller<P> {
     fn clone(&self) -> Self {
         Controller {
             actor_map: self.actor_map.clone(),
@@ -350,7 +350,7 @@ impl<R: Actor, P: Pool> Clone for Controller<R, P> {
     }
 }
 
-impl<R: Actor, P: Pool> Controller<R, P> {
+impl<P: Pool> Controller<P> {
     pub(self) fn new() -> Self {
         Controller {
             actor_map: empty!(),
@@ -361,21 +361,25 @@ impl<R: Actor, P: Pool> Controller<R, P> {
     pub(self) fn channel_for(
         &self,
         pool: P,
-    ) -> Result<&chan::Sender<ControlEvent<R>>, InternalError<R, P>> {
+    ) -> Result<&chan::Sender<ControlEvent<P::RootActor>>, InternalError<P>> {
         self.channels
             .get(&pool)
             .ok_or(InternalError::UnknownPool(pool))
     }
 
     /// Returns in which pool an actor is run in.
-    pub fn pool_for(&self, id: R::Id) -> Result<P, InternalError<R, P>> {
+    pub fn pool_for(&self, id: <P::RootActor as Actor>::Id) -> Result<P, InternalError<P>> {
         self.actor_map
             .get(&id)
             .ok_or(InternalError::UnknownActor(id))
             .copied()
     }
 
-    pub(self) fn register_actor(&mut self, id: R::Id, pool: P) -> Result<(), InternalError<R, P>> {
+    pub(self) fn register_actor(
+        &mut self,
+        id: <P::RootActor as Actor>::Id,
+        pool: P,
+    ) -> Result<(), InternalError<P>> {
         if !self.channels.contains_key(&pool) {
             return Err(InternalError::UnknownPool(pool));
         }
@@ -389,8 +393,8 @@ impl<R: Actor, P: Pool> Controller<R, P> {
     pub(self) fn register_pool(
         &mut self,
         pool: P,
-        channel: chan::Sender<ControlEvent<R>>,
-    ) -> Result<(), InternalError<R, P>> {
+        channel: chan::Sender<ControlEvent<P::RootActor>>,
+    ) -> Result<(), InternalError<P>> {
         if self.channels.contains_key(&pool) {
             return Err(InternalError::RepeatedPoll(pool));
         }
@@ -399,50 +403,66 @@ impl<R: Actor, P: Pool> Controller<R, P> {
     }
 }
 
-impl<R: Actor, P: Pool> ReactorApi for Controller<R, P> {
-    type Actor = R;
+impl<P: Pool> ReactorApi for Controller<P> {
+    type Actor = P::RootActor;
     type Pool = P;
 
-    fn start_actor(&mut self, pool: P, ctx: R::Context) -> Result<(), InternalError<R, P>> {
+    fn start_actor(
+        &mut self,
+        pool: P,
+        ctx: <Self::Actor as Actor>::Context,
+    ) -> Result<(), InternalError<P>> {
         self.channel_for(pool)?.send(ControlEvent::Connect(ctx))?;
         Ok(())
     }
 
-    fn stop_actor(&mut self, id: R::Id) -> Result<(), InternalError<R, P>> {
+    fn stop_actor(&mut self, id: <Self::Actor as Actor>::Id) -> Result<(), InternalError<P>> {
         let pool = self.pool_for(id.clone())?;
         self.channel_for(pool)?.send(ControlEvent::Disconnect(id))?;
         Ok(())
     }
 
-    fn set_timer(&mut self, pool: P) -> Result<(), InternalError<R, P>> {
+    fn set_timer(&mut self, pool: P) -> Result<(), InternalError<P>> {
         self.channel_for(pool)?.send(ControlEvent::SetTimer())?;
         Ok(())
     }
 
-    fn send(&mut self, id: R::Id, cmd: R::Cmd) -> Result<(), InternalError<R, P>> {
+    fn send(
+        &mut self,
+        id: <Self::Actor as Actor>::Id,
+        cmd: <Self::Actor as Actor>::Cmd,
+    ) -> Result<(), InternalError<P>> {
         let pool = self.pool_for(id.clone())?;
         self.channel_for(pool)?.send(ControlEvent::Send(id, cmd))?;
         Ok(())
     }
 }
 
-impl<R: Actor, P: Pool> ReactorApi for Reactor<R, P> {
-    type Actor = R;
+impl<P: Pool> ReactorApi for Reactor<P> {
+    type Actor = P::RootActor;
     type Pool = P;
 
-    fn start_actor(&mut self, pool: P, ctx: R::Context) -> Result<(), InternalError<R, P>> {
+    fn start_actor(
+        &mut self,
+        pool: P,
+        ctx: <Self::Actor as Actor>::Context,
+    ) -> Result<(), InternalError<P>> {
         self.controller.start_actor(pool, ctx)
     }
 
-    fn stop_actor(&mut self, id: R::Id) -> Result<(), InternalError<R, P>> {
+    fn stop_actor(&mut self, id: <Self::Actor as Actor>::Id) -> Result<(), InternalError<P>> {
         self.controller.stop_actor(id)
     }
 
-    fn set_timer(&mut self, pool: P) -> Result<(), InternalError<R, P>> {
+    fn set_timer(&mut self, pool: P) -> Result<(), InternalError<P>> {
         self.controller.set_timer(pool)
     }
 
-    fn send(&mut self, id: R::Id, cmd: R::Cmd) -> Result<(), InternalError<R, P>> {
+    fn send(
+        &mut self,
+        id: <Self::Actor as Actor>::Id,
+        cmd: <Self::Actor as Actor>::Cmd,
+    ) -> Result<(), InternalError<P>> {
         self.controller.send(id, cmd)
     }
 }
@@ -451,25 +471,25 @@ impl<R: Actor, P: Pool> ReactorApi for Reactor<R, P> {
 /// dedicated thread by the reactor. It is controlled by sending instructions
 /// through a set of crossbeam channels. [`Reactor`] abstracts that control via
 /// exposing high-level [`ReactorApi`] and [`Controller`] objects.
-struct PoolRuntime<R: Actor, P: Pool> {
+struct PoolRuntime<P: Pool> {
     id: P,
-    actors: HashMap<R::Id, R>,
-    scheduler: Box<dyn Scheduler<R>>,
-    handler: Box<dyn Handler<R, P>>,
-    control_recv: chan::Receiver<ControlEvent<R>>,
-    control_send: chan::Sender<ControlEvent<R>>,
+    actors: HashMap<<P::RootActor as Actor>::Id, P::RootActor>,
+    scheduler: Box<dyn Scheduler<P::RootActor>>,
+    handler: Box<dyn Handler<P>>,
+    control_recv: chan::Receiver<ControlEvent<P::RootActor>>,
+    control_send: chan::Sender<ControlEvent<P::RootActor>>,
     shutdown: chan::Receiver<()>,
     timeouts: TimeoutManager<()>,
 }
 
-impl<R: Actor<PoolSystem = P>, P: Pool> PoolRuntime<R, P> {
+impl<P: Pool> PoolRuntime<P> {
     fn new(
         id: P,
-        scheduler: Box<dyn Scheduler<R>>,
-        control_recv: chan::Receiver<ControlEvent<R>>,
-        control_send: chan::Sender<ControlEvent<R>>,
+        scheduler: Box<dyn Scheduler<P::RootActor>>,
+        control_recv: chan::Receiver<ControlEvent<P::RootActor>>,
+        control_send: chan::Sender<ControlEvent<P::RootActor>>,
         shutdown: chan::Receiver<()>,
-        handler: Box<dyn Handler<R, P>>,
+        handler: Box<dyn Handler<P>>,
     ) -> Self {
         PoolRuntime {
             id,
@@ -483,7 +503,7 @@ impl<R: Actor<PoolSystem = P>, P: Pool> PoolRuntime<R, P> {
         }
     }
 
-    fn run(mut self, controller: Controller<R, P>) -> ! {
+    fn run(mut self, controller: Controller<P>) -> ! {
         loop {
             let now = Instant::now();
             if let Err(err) = self.scheduler.wait_io(self.timeouts.next(now)) {
@@ -508,7 +528,7 @@ impl<R: Actor<PoolSystem = P>, P: Pool> PoolRuntime<R, P> {
         }
     }
 
-    fn process_control(&mut self, controller: &Controller<R, P>) {
+    fn process_control(&mut self, controller: &Controller<P>) {
         loop {
             match self.control_recv.try_recv() {
                 Err(chan::TryRecvError::Disconnected) => {
@@ -517,7 +537,7 @@ impl<R: Actor<PoolSystem = P>, P: Pool> PoolRuntime<R, P> {
                 Err(chan::TryRecvError::Empty) => break,
                 Ok(event) => match event {
                     ControlEvent::Connect(context) => {
-                        match R::with(context, controller.clone()) {
+                        match P::RootActor::with(context, controller.clone()) {
                             Err(err) => self
                                 .handler
                                 .handle_err(InternalError::ActorError(self.id, err)),
@@ -576,9 +596,9 @@ impl<R: Actor<PoolSystem = P>, P: Pool> PoolRuntime<R, P> {
     }
 }
 
-#[derive(Clone, Display)]
+#[derive(Display)]
 #[display(doc_comments)]
-pub enum InternalError<R: Actor, P: Pool> {
+pub enum InternalError<P: Pool> {
     /// shutdown channel in the reactor is broken
     ShutdownChanelBroken,
 
@@ -586,26 +606,26 @@ pub enum InternalError<R: Actor, P: Pool> {
     ControlChannelBroken,
 
     /// actor with id {0} is not known to the reactor
-    UnknownActor(R::Id),
+    UnknownActor(<P::RootActor as Actor>::Id),
 
     /// unknown pool {0}
     UnknownPool(P),
 
     /// actor with id {0} is already known
-    RepeatedActor(R::Id),
+    RepeatedActor(<P::RootActor as Actor>::Id),
 
     /// pool with id {0} is already present in the reactor
     RepeatedPoll(P),
 
     /// actor on pool {0} has not able to handle error. Details: {1}
-    ActorError(P, R::Error),
+    ActorError(P, <P::RootActor as Actor>::Error),
 
     /// error joining thread pool runtime {0}
     ThreadError(P),
 }
 
 // Required due to Derive macro adding R: Debug unnecessary constraint
-impl<R: Actor, P: Pool> Debug for InternalError<R, P> {
+impl<P: Pool> Debug for InternalError<P> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             InternalError::ShutdownChanelBroken => f
@@ -643,9 +663,9 @@ impl<R: Actor, P: Pool> Debug for InternalError<R, P> {
     }
 }
 
-impl<R: Actor, P: Pool> StdError for InternalError<R, P> {}
+impl<P: Pool> StdError for InternalError<P> {}
 
-impl<R: Actor, P: Pool> From<chan::SendError<ControlEvent<R>>> for InternalError<R, P> {
+impl<R: Actor, P: Pool> From<chan::SendError<ControlEvent<R>>> for InternalError<P> {
     fn from(_: chan::SendError<ControlEvent<R>>) -> Self {
         InternalError::ControlChannelBroken
     }

@@ -9,8 +9,8 @@ use clap::Parser;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::{Curve25519, PrivateKey};
 use ioreactor::popol::PopolScheduler;
-use ioreactor::{Handler, InternalError, Pool, PoolInfo, Reactor, ReactorApi};
-use p2pd::nxk_tcp::{NxkAddr, NxkListener};
+use ioreactor::{Actor, Handler, InternalError, Pool, PoolInfo, Reactor, ReactorApi};
+use p2pd::nxk_tcp::NxkAddr;
 use p2pd::peer::{Action, Context, PeerActor};
 
 pub const DEFAULT_PORT: u16 = 3232;
@@ -86,7 +86,7 @@ pub enum AppError {
     Curve25519(ed25519_compact::Error),
 
     #[from]
-    Reactor(InternalError<NshActor, NshPool>),
+    Reactor(InternalError<NshPool>),
 
     #[from]
     #[display("other error")]
@@ -132,7 +132,7 @@ fn main() -> Result<(), AppError> {
 
     let config = Config::try_from(args)?;
 
-    let mut reactor = Reactor::<NshActor, NshPool>::new()?;
+    let mut reactor = Reactor::<NshPool>::new()?;
 
     let nsh_socket = Context {
         method: Action::Connect("127.0.0.1".parse().unwrap()),
@@ -180,6 +180,14 @@ impl Pool for NshPool {
             Service,
         )]
     }
+
+    fn convert(other_ctx: Box<dyn Any>) -> <Self::RootActor as Actor>::Context {
+        let ctx = other_ctx
+            .downcast::<Context>()
+            .expect("wrong context object");
+        let ctx = *ctx;
+        ctx.into()
+    }
 }
 
 impl From<u32> for NshPool {
@@ -198,8 +206,8 @@ type NshActor = PeerActor<NshPool, PEER_POOL>;
 
 struct Service;
 
-impl Handler<NshActor, NshPool> for Service {
-    fn handle_err(&mut self, err: InternalError<NshActor, NshPool>) {
+impl Handler<NshPool> for Service {
+    fn handle_err(&mut self, err: InternalError<NshPool>) {
         panic!("{}", err);
     }
 }

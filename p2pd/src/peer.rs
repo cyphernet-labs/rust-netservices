@@ -12,11 +12,14 @@ pub enum Action {
     Connect(NxkAddr),
 }
 
-impl From<NxkAction<Curve25519>> for Action {
-    fn from(method: NxkAction<Curve25519>) -> Self {
+impl From<&NxkAction<Curve25519>> for Action {
+    fn from(method: &NxkAction<Curve25519>) -> Self {
         match method {
-            NxkAction::Accept(stream, addr) => Self::Accept(stream, addr),
-            NxkAction::Connect(addr) => Self::Connect(addr),
+            NxkAction::Accept(stream, addr) => Self::Accept(
+                stream.try_clone().expect("TCP stream cloning failure"),
+                *addr,
+            ),
+            NxkAction::Connect(addr) => Self::Connect(*addr),
         }
     }
 }
@@ -26,17 +29,17 @@ pub struct Context {
     pub local_node: LocalNode<Curve25519>,
 }
 
-impl From<NxkContext<Curve25519>> for Context {
-    fn from(ctx: NxkContext<Curve25519>) -> Self {
+impl From<&NxkContext<Curve25519>> for Context {
+    fn from(ctx: &NxkContext<Curve25519>) -> Self {
         Context {
-            method: ctx.method.into(),
-            local_node: ctx.local_node,
+            method: (&ctx.action).into(),
+            local_node: ctx.local_node.clone(),
         }
     }
 }
 
 pub enum PeerActor<P: Pool, const SESSION_POOL_ID: u32> {
-    Listener(NxkListener<Self, P, SESSION_POOL_ID>),
+    Listener(NxkListener<P, SESSION_POOL_ID>),
     Session(NxkSession<P>),
 }
 
@@ -49,7 +52,7 @@ impl<P: Pool, const SESSION_POOL_ID: u32> Actor for PeerActor<P, SESSION_POOL_ID
 
     fn with(
         context: Self::Context,
-        controller: Controller<Self, Self::PoolSystem>,
+        controller: Controller<Self::PoolSystem>,
     ) -> Result<Self, Self::Error>
     where
         Self: Sized,
