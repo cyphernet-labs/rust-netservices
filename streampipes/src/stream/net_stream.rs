@@ -3,12 +3,12 @@ use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
-use crate::ResourceAddr;
+use super::Stream;
 
 /// Network stream is an abstraction of TCP stream object which adds
 /// protocol composability.
-pub trait NetStream: io::Write + io::Read + AsRawFd {
-    type Addr: ResourceAddr + Into<SocketAddr>;
+pub trait NetStream: Stream + AsRawFd {
+    type Addr: Into<SocketAddr>;
     type AddrList: ToSocketAddrs;
     type Inner: NetStream;
 
