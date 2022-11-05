@@ -8,7 +8,7 @@ use std::{fs, io, net};
 use clap::Parser;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::{Curve25519, PrivateKey};
-use ioreactor::popol::PopolScheduler;
+use ioreactor::schedulers::PopolScheduler;
 use ioreactor::{Actor, Handler, InternalError, Pool, PoolInfo, Reactor, ReactorApi};
 use p2pd::nxk_tcp::NxkAddr;
 use p2pd::peer::{Action, Context, PeerActor};

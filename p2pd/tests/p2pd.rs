@@ -6,7 +6,7 @@ use std::error::Error as StdError;
 
 use cyphernet::addr::LocalNode;
 use cyphernet::crypto::ed25519::PrivateKey;
-use ioreactor::popol::PopolScheduler;
+use ioreactor::schedulers::PopolScheduler;
 use ioreactor::{Actor, Handler, InternalError, Pool, PoolInfo, Reactor, ReactorApi};
 
 use p2pd::peer::{Action, Context, PeerActor};

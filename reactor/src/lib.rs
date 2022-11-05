@@ -1,18 +1,12 @@
 #[macro_use]
 extern crate amplify;
 
-#[cfg(feature = "epoll")]
-pub mod epoll;
-#[cfg(feature = "mio")]
-pub mod mio;
-#[cfg(feature = "polling")]
-pub mod polling;
-#[cfg(feature = "popol")]
-pub mod popol;
-mod timeout;
+pub mod schedulers;
+
+mod util;
 
 use std::any::Any;
-pub use timeout::TimeoutManager;
+pub use util::timeout::TimeoutManager;
 
 use std::collections::HashMap;
 use std::error::Error as StdError;
