@@ -7,7 +7,7 @@ use std::os::fd::{AsRawFd, RawFd};
 use cyphernet::addr::{LocalNode, PeerAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::Curve25519;
 use cyphernet::crypto::Ec;
-use ioreactor::{Controller, IoEv, ReactorApi, Resource};
+use ioreactor::{Actor, Controller, IoEv, Pool, ReactorApi};
 
 use crate::noise_xk;
 
@@ -86,7 +86,7 @@ impl<EC: Ec> Write for NxkSession<EC> {
     }
 }
 
-impl<EC: Ec> Resource for NxkSession<EC>
+impl<EC: Ec> Actor for NxkSession<EC>
 where
     EC: Copy,
     EC::PubKey: Send,
@@ -97,7 +97,10 @@ where
     type Cmd = Vec<u8>;
     type Error = io::Error;
 
-    fn with(context: Self::Context, controller: Controller<Self>) -> Result<Self, Self::Error>
+    fn with<P: Pool>(
+        context: Self::Context,
+        controller: Controller<Self, P>,
+    ) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
@@ -132,19 +135,19 @@ where
     }
 }
 
-pub struct NxkListener<R, EC: Ec = Curve25519>
+pub struct NxkListener<R, P: Pool, EC: Ec = Curve25519>
 where
-    R: Resource,
+    R: Actor,
     R::Context: From<NxkContext<EC>>,
 {
     socket: net::TcpListener,
     local_node: LocalNode<EC>,
-    controller: Controller<R>,
+    controller: Controller<R, P>,
 }
 
-impl<R, EC: Ec> AsRawFd for NxkListener<R, EC>
+impl<R, P: Pool, EC: Ec> AsRawFd for NxkListener<R, P, EC>
 where
-    R: Resource,
+    R: Actor,
     R::Context: From<NxkContext<EC>>,
 {
     fn as_raw_fd(&self) -> RawFd {
@@ -152,12 +155,12 @@ where
     }
 }
 
-impl<R, EC> Resource<R> for NxkListener<R, EC>
+impl<R, P: Pool, EC> Actor<R> for NxkListener<R, P, EC>
 where
     EC: Ec + Clone,
     EC::PubKey: Send + Clone,
     EC::PrivKey: Send + Clone,
-    R: Resource,
+    R: Actor,
     R::Context: From<NxkContext<EC>>,
 {
     type Id = RawFd;
@@ -165,7 +168,7 @@ where
     type Cmd = ();
     type Error = io::Error;
 
-    fn with(context: Self::Context, controller: Controller<R>) -> Result<Self, Self::Error>
+    fn with<P>(context: Self::Context, controller: Controller<R, P>) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
@@ -188,7 +191,7 @@ where
             local_node: self.local_node.clone(),
         };
         self.controller
-            .connect(nsh_info.into())
+            .start_actor(nsh_info.into())
             .map_err(|_| io::ErrorKind::NotConnected)?;
         Ok(())
     }
