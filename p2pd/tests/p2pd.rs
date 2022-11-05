@@ -4,20 +4,20 @@ use std::{io, net};
 
 use cyphernet::addr::LocalNode;
 use cyphernet::crypto::ed25519::{Curve25519, PrivateKey};
-use ioreactor::popol::PollManager;
-use ioreactor::{Broker, Controller, IoEv, Reactor, ReactorApi, Resource};
+use ioreactor::popol::PopolScheduler;
+use ioreactor::{Actor, Controller, Handler, IoEv, Reactor, ReactorApi};
 use p2pd::nxk_tcp::{NxkAction, NxkAddr, NxkContext, NxkListener, NxkSession};
 
 fn main() -> Result<(), Box<dyn StdError>> {
-    let manager = PollManager::<Actor>::new();
+    let manager = PopolScheduler::<Actor>::new();
     let broker = Service {};
-    let mut reactor = Reactor::with(manager, broker)?;
+    let mut reactor = Reactor::new(manager, broker)?;
 
     let nsh_socket = Context {
         method: Action::Connect("127.0.0.1".parse().unwrap()),
         local_node: LocalNode::from(PrivateKey::test()),
     };
-    reactor.connect(nsh_socket)?;
+    reactor.start_actor(nsh_socket)?;
     reactor.join().unwrap();
     Ok(())
 }
@@ -56,7 +56,7 @@ pub enum Actor {
     Session(NxkSession),
 }
 
-impl Resource for Actor {
+impl Actor for Actor {
     type Id = RawFd;
     type Context = Context;
     type Cmd = Vec<u8>;
@@ -108,7 +108,7 @@ impl Resource for Actor {
 
 pub struct Service {}
 
-impl Broker<Actor> for Service {
+impl Handler<Actor> for Service {
     fn handle_err(&mut self, err: io::Error) {
         panic!("{}", err);
     }

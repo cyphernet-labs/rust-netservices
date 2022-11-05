@@ -3,22 +3,22 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
-use crate::{IoEv, IoManager, IoSrc, Resource};
+use crate::{Actor, IoEv, IoSrc, Scheduler};
 
 /// Manager for a set of resources which are polled for an event loop by the
 /// reactor by using [`popol`] library.
-pub struct PollManager<R>
+pub struct PopolScheduler<R>
 where
-    R: Resource,
+    R: Actor,
     R::Id: AsRawFd,
 {
     poll: popol::Poll<R::Id>,
     events: VecDeque<IoSrc<R::Id>>,
 }
 
-impl<R> PollManager<R>
+impl<R> PopolScheduler<R>
 where
-    R: Resource,
+    R: Actor,
     R::Id: AsRawFd,
 {
     pub fn new() -> Self {
@@ -29,28 +29,28 @@ where
     }
 }
 
-impl<R> IoManager<R> for PollManager<R>
+impl<R> Scheduler<R> for PopolScheduler<R>
 where
-    R: Resource,
+    R: Actor,
     R::Id: AsRawFd,
     R::Error: From<io::Error>,
 {
-    fn has_resource(&self, id: &R::Id) -> bool {
+    fn has_actor(&self, id: &R::Id) -> bool {
         self.poll.get(id).is_some()
     }
 
-    fn register_resource(&mut self, resource: &R) -> Result<(), R::Error> {
+    fn register_actor(&mut self, resource: &R) -> Result<(), R::Error> {
         let id = resource.id();
         self.poll.register(id.clone(), &id, popol::event::ALL);
         Ok(())
     }
 
-    fn unregister_resource(&mut self, id: &R::Id) -> Result<(), R::Error> {
+    fn unregister_actor(&mut self, id: &R::Id) -> Result<(), R::Error> {
         self.poll.unregister(id);
         Ok(())
     }
 
-    fn io_events(&mut self, timeout: Option<Duration>) -> Result<bool, R::Error> {
+    fn wait_io(&mut self, timeout: Option<Duration>) -> Result<bool, R::Error> {
         // Blocking call
         if self.poll.wait_timeout(timeout.into())? {
             return Ok(true);
@@ -70,9 +70,9 @@ where
     }
 }
 
-impl<R> Iterator for PollManager<R>
+impl<R> Iterator for PopolScheduler<R>
 where
-    R: Resource,
+    R: Actor,
     R::Id: AsRawFd,
 {
     type Item = IoSrc<R::Id>;

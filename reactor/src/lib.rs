@@ -13,26 +13,31 @@ mod timeout;
 
 pub use timeout::TimeoutManager;
 
-use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::error::Error as StdError;
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
+use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use std::{io, thread};
 
 use crossbeam_channel as chan;
 
 /// Information about generated I/O events from the event loop.
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub struct IoSrc<S> {
+    /// The source of the I/O event
     pub source: S,
+    /// Qualia of the generated event.
     pub io: IoEv,
 }
 
 /// Specific I/O events which were received.
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub struct IoEv {
+    /// Specifies whether I/O source has data to read.
     pub is_readable: bool,
+    /// Specifies whether I/O source is ready for write operations.
     pub is_writable: bool,
 }
 
@@ -50,16 +55,37 @@ pub struct IoEv {
 /// internally, if the worker thread pool is desired it can be talked to via
 /// set of channels specified as [`Resource::OutputChannels`] associated type
 /// and provided to the resource upon its construction.
-pub trait Resource<R: Resource = Self> {
-    type Id: Clone + Eq + Ord + Hash + Send;
-    type Context: Send;
-    type Cmd: Send;
-    type Error;
+pub trait Actor<R: Actor = Self> {
+    /// Actor's id types.
+    ///
+    /// Each actor must have a unique id without a reactor.
+    type Id: Clone + Eq + Ord + Hash + Send + Debug + Display;
 
-    fn with(context: Self::Context, controller: Controller<R>) -> Result<Self, Self::Error>
+    /// Extra data for actor construction
+    type Context: Send;
+
+    /// Set of commands supported by the actor's business logic.
+    ///
+    /// In case of a single command this can be just a data type providing
+    /// parameters to that command (for instance a byte string for an
+    /// actor operting as a writer).
+    type Cmd: Send;
+
+    /// Actor-specific error type, returned from I/O events handling or
+    /// command-processing business logic.
+    type Error: StdError;
+
+    /// Constructs actor giving some `context`. Each actor is provided with the
+    /// controller, which it should store internally in cases when it requires
+    /// operating with other actors.
+    fn with<P: Pool>(
+        context: Self::Context,
+        controller: Controller<R, P>,
+    ) -> Result<Self, Self::Error>
     where
         Self: Sized;
 
+    /// Returns actor's id.
     fn id(&self) -> Self::Id;
 
     /// Performs input and/or output operations basing on the flags provided.
@@ -83,9 +109,9 @@ pub trait Resource<R: Resource = Self> {
 
 /// Implements specific way of managing multiple resources for a reactor.
 /// Blocks on concurrent events from multiple resources.
-pub trait IoManager<R: Resource>: Iterator<Item = IoSrc<R::Id>> + Send {
+pub trait Scheduler<R: Actor>: Iterator<Item = IoSrc<R::Id>> + Send {
     /// Detects whether a resource under the given id is known to the manager.
-    fn has_resource(&self, id: &R::Id) -> bool;
+    fn has_actor(&self, id: &R::Id) -> bool;
 
     /// Adds already operating/connected resource to the manager.
     ///
@@ -93,7 +119,7 @@ pub trait IoManager<R: Resource>: Iterator<Item = IoSrc<R::Id>> + Send {
     ///
     /// Implementations must not block on the operation or generate any I/O
     /// events.
-    fn register_resource(&mut self, resource: &R) -> Result<(), R::Error>;
+    fn register_actor(&mut self, resource: &R) -> Result<(), R::Error>;
 
     /// Removes resource from the manager without disconnecting it or generating
     /// any events. Stops resource monitoring and returns the resource itself
@@ -104,7 +130,7 @@ pub trait IoManager<R: Resource>: Iterator<Item = IoSrc<R::Id>> + Send {
     ///
     /// Implementations must not block on the operation or generate any I/O
     /// events.
-    fn unregister_resource(&mut self, id: &R::Id) -> Result<(), R::Error>;
+    fn unregister_actor(&mut self, id: &R::Id) -> Result<(), R::Error>;
 
     /// Reads events from all resources under this manager.
     ///
@@ -115,11 +141,39 @@ pub trait IoManager<R: Resource>: Iterator<Item = IoSrc<R::Id>> + Send {
     /// # I/O
     ///
     /// Blocks on the read operation or until the timeout.
-    fn io_events(&mut self, timeout: Option<Duration>) -> Result<bool, R::Error>;
+    fn wait_io(&mut self, timeout: Option<Duration>) -> Result<bool, R::Error>;
 }
 
-pub trait Broker<R: Resource>: Send {
-    fn handle_err(&mut self, err: R::Error);
+/// Callbacks called in a context of the reactor runtime threads.
+pub trait Handler<R: Actor, P: Pool>: Send {
+    /// Called on non-actor-specific errors - or on errors which were not held by the resources
+    fn handle_err(&mut self, err: InternalError<R, P>);
+}
+
+/// Information for constructing reactor thread pools
+pub struct PoolInfo<R: Actor, P: Pool> {
+    id: P,
+    scheduler: Box<dyn Scheduler<R>>,
+    handler: Box<dyn Handler<R, P>>,
+}
+
+impl<R: Actor, P: Pool> PoolInfo<R, P> {
+    pub fn new(
+        id: P,
+        scheduler: impl Scheduler<R> + 'static,
+        handler: impl Handler<R, P> + 'static,
+    ) -> Self {
+        PoolInfo {
+            id,
+            scheduler: Box::new(scheduler),
+            handler: Box::new(handler),
+        }
+    }
+}
+
+/// Trait for an enumeration of pools for a reactor
+pub trait Pool: Send + Copy + Eq + Hash + Debug + Display {
+    fn default_pools<R: Actor>() -> BTreeSet<PoolInfo<R, Self>>;
 }
 
 /// Implementation of reactor pattern.
@@ -134,54 +188,106 @@ pub trait Broker<R: Resource>: Send {
 /// to connect or disconnect resources or send them data.
 ///
 /// Reactor manages internally a thread which runs the [`Runtime`] event loop.
-pub struct Reactor<R: Resource> {
-    #[allow(dead_code)]
-    thread: JoinHandle<()>,
-    control: chan::Sender<ControlEvent<R>>,
-    shutdown: chan::Sender<()>,
+pub struct Reactor<R: Actor, P: Pool> {
+    /// Threads running schedulers, one per pool.
+    scheduler_threads: HashMap<P, JoinHandle<()>>,
+    shutdown_send: chan::Sender<()>,
+    shutdown_recv: chan::Receiver<()>,
+    controller: Controller<R, P>,
+    locked: bool,
 }
 
-impl<R: Resource> Reactor<R> {
+impl<R: Actor, P: Pool> Reactor<R, P> {
     /// Constructs reactor and runs it in a thread, returning [`Self`] as a
     /// controller exposing the API ([`ReactorApi`]).
-    pub fn with(
-        io: impl IoManager<R> + 'static,
-        broker: impl Broker<R> + 'static,
-    ) -> io::Result<Self>
+    pub fn new() -> Result<Self, InternalError<R, P>>
     where
         R: 'static,
+        P: 'static,
     {
         let (shutdown_send, shutdown_recv) = chan::bounded(1);
-        let (control_send, control_recv) = chan::unbounded();
 
-        let control = control_send.clone();
-        let thread = thread::spawn(move || {
-            let runtime = Runtime::new(io, control_recv, control_send, shutdown_recv, broker);
-            runtime.run()
-        });
+        let mut reactor = Reactor {
+            scheduler_threads: empty!(),
+            shutdown_send,
+            shutdown_recv: shutdown_recv.clone(),
+            controller: Controller::new(),
+            locked: false,
+        };
 
-        Ok(Reactor {
-            thread,
-            control,
-            shutdown: shutdown_send,
-        })
+        let mut pools = Vec::new();
+
+        // Required to avoid Actor: Send constraint
+        struct Info<R: Actor, P: Pool> {
+            id: P,
+            scheduler: Box<dyn Scheduler<R>>,
+            control_recv: chan::Receiver<ControlEvent<R>>,
+            control_send: chan::Sender<ControlEvent<R>>,
+            shutdown: chan::Receiver<()>,
+            handler: Box<dyn Handler<R, P>>,
+        }
+
+        for info in P::default_pools() {
+            let (control_send, control_recv) = chan::unbounded();
+            let shutdown = shutdown_recv.clone();
+            let control = control_send.clone();
+
+            pools.push(Info {
+                id: info.id,
+                scheduler: info.scheduler,
+                control_recv,
+                control_send,
+                shutdown,
+                handler: info.handler,
+            });
+
+            reactor.controller.register_pool(info.id, control)?;
+        }
+
+        for info in pools {
+            let controller = reactor.controller();
+            let id = info.id;
+            let thread = thread::spawn(move || {
+                PoolRuntime::new(
+                    info.id,
+                    info.scheduler,
+                    info.control_recv,
+                    info.control_send,
+                    info.shutdown,
+                    info.handler,
+                )
+                .run(controller)
+            });
+            reactor.scheduler_threads.insert(id, thread)
+                .ok_or(())
+                .expect("controller logic for pool management doesn't account for errors with repeated pool creation");
+        }
+
+        Ok(reactor)
     }
 
     /// Returns controller implementing [`ReactorApi`] for this reactor.
-    pub fn controller(&self) -> Controller<R> {
-        Controller {
-            control: self.control.clone(),
+    ///
+    /// Once this function is called it wouldn't be possible to add more
+    /// pools or actors to the reactor (the reactor state gets locked).
+    pub fn controller(&mut self) -> Controller<R, P> {
+        self.locked = true;
+        self.controller.clone()
+    }
+
+    /// Joins all reactor threads.
+    pub fn join(self) -> Result<(), InternalError<R, P>> {
+        for (pool, scheduler_thread) in self.scheduler_threads {
+            scheduler_thread
+                .join()
+                .map_err(|_| InternalError::ThreadError(pool))?;
         }
+        Ok(())
     }
 
-    /// Joins reactor runtime thread
-    pub fn join(self) -> thread::Result<()> {
-        self.thread.join()
-    }
-
-    /// Shut downs the reactor
-    pub fn shutdown(self) -> Result<(), InternalError> {
-        self.shutdown
+    /// Shut downs the reactor.
+    pub fn shutdown(self) -> Result<(), InternalError<R, P>> {
+        self.shutdown_send
             .send(())
             .map_err(|_| InternalError::ShutdownChanelBroken)?;
         self.join()?;
@@ -193,93 +299,145 @@ impl<R: Resource> Reactor<R> {
 /// multiple [`Controller`]s constructed by [`Reactor::controller`].
 pub trait ReactorApi {
     /// Resource type managed by the reactor.
-    type Resource: Resource;
+    type Actor: Actor;
+
+    /// Enumerator for specific reactor runtimes
+    type Pool: Pool;
 
     /// Connects new resource and adds it to the manager.
-    fn connect(&mut self, addr: <Self::Resource as Resource>::Context)
-        -> Result<(), InternalError>;
+    fn start_actor(
+        &mut self,
+        pool: Self::Pool,
+        ctx: <Self::Actor as Actor>::Context,
+    ) -> Result<(), InternalError<Self::Actor, Self::Pool>>;
 
     /// Disconnects from a resource, providing a reason.
-    fn disconnect(&mut self, id: <Self::Resource as Resource>::Id) -> Result<(), InternalError>;
+    fn stop_actor(
+        &mut self,
+        id: <Self::Actor as Actor>::Id,
+    ) -> Result<(), InternalError<Self::Actor, Self::Pool>>;
 
     /// Set one-time timer which will call [`Handler::on_timer`] upon expiration.
-    fn set_timer(&mut self) -> Result<(), InternalError>;
+    fn set_timer(&mut self, pool: Self::Pool)
+        -> Result<(), InternalError<Self::Actor, Self::Pool>>;
 
     /// Send data to the resource.
     fn send(
         &mut self,
-        id: <Self::Resource as Resource>::Id,
-        data: <Self::Resource as Resource>::Cmd,
-    ) -> Result<(), InternalError>;
+        id: <Self::Actor as Actor>::Id,
+        cmd: <Self::Actor as Actor>::Cmd,
+    ) -> Result<(), InternalError<Self::Actor, Self::Pool>>;
 }
 
 /// Instance of reactor controller which may be transferred between threads
-#[derive(Clone)]
-pub struct Controller<R: Resource> {
-    control: chan::Sender<ControlEvent<R>>,
+pub struct Controller<R: Actor, P: Pool> {
+    actor_map: HashMap<R::Id, P>,
+    channels: HashMap<P, chan::Sender<ControlEvent<R>>>,
 }
 
-impl<R: Resource> ReactorApi for chan::Sender<ControlEvent<R>> {
-    type Resource = R;
-
-    fn connect(&mut self, addr: R::Context) -> Result<(), InternalError> {
-        chan::Sender::send(self, ControlEvent::Connect(addr))?;
-        Ok(())
-    }
-
-    fn disconnect(&mut self, id: R::Id) -> Result<(), InternalError> {
-        chan::Sender::send(self, ControlEvent::Disconnect(id))?;
-        Ok(())
-    }
-
-    fn set_timer(&mut self) -> Result<(), InternalError> {
-        chan::Sender::send(self, ControlEvent::SetTimer())?;
-        Ok(())
-    }
-
-    fn send(&mut self, id: R::Id, data: R::Cmd) -> Result<(), InternalError> {
-        chan::Sender::send(self, ControlEvent::Send(id, data))?;
-        Ok(())
+impl<R: Actor, P: Pool> Clone for Controller<R, P> {
+    fn clone(&self) -> Self {
+        Controller {
+            actor_map: self.actor_map.clone(),
+            channels: self.channels.clone(),
+        }
     }
 }
 
-impl<R: Resource> ReactorApi for Controller<R> {
-    type Resource = R;
-
-    fn connect(&mut self, addr: R::Context) -> Result<(), InternalError> {
-        self.control.connect(addr)
+impl<R: Actor, P: Pool> Controller<R, P> {
+    pub(self) fn new() -> Self {
+        Controller {
+            actor_map: empty!(),
+            channels: empty!(),
+        }
     }
 
-    fn disconnect(&mut self, id: R::Id) -> Result<(), InternalError> {
-        self.control.disconnect(id)
+    pub(self) fn channel_for(
+        &self,
+        pool: P,
+    ) -> Result<&chan::Sender<ControlEvent<R>>, InternalError<R, P>> {
+        self.channels
+            .get(&pool)
+            .ok_or(InternalError::UnknownPool(pool))
     }
 
-    fn set_timer(&mut self) -> Result<(), InternalError> {
-        self.control.set_timer()
+    /// Returns in which pool an actor is run in.
+    pub fn pool_for(&self, id: R::Id) -> Result<P, InternalError<R, P>> {
+        self.actor_map
+            .get(&id)
+            .ok_or(InternalError::UnknownActor(id))
+            .copied()
     }
 
-    fn send(&mut self, id: R::Id, data: R::Cmd) -> Result<(), InternalError> {
-        ReactorApi::send(&mut self.control, id, data)
+    pub(self) fn register_actor(&mut self, id: R::Id, pool: P) -> Result<(), InternalError<R, P>> {
+        if !self.channels.contains_key(&pool) {
+            return Err(InternalError::UnknownPool(pool));
+        }
+        if self.actor_map.contains_key(&id) {
+            return Err(InternalError::RepeatedActor(id));
+        }
+        self.actor_map.insert(id, pool);
+        Ok(())
+    }
+
+    pub(self) fn register_pool(
+        &mut self,
+        pool: P,
+        channel: chan::Sender<ControlEvent<R>>,
+    ) -> Result<(), InternalError<R, P>> {
+        if self.channels.contains_key(&pool) {
+            return Err(InternalError::RepeatedPoll(pool));
+        }
+        self.channels.insert(pool, channel);
+        Ok(())
     }
 }
 
-impl<R: Resource> ReactorApi for Reactor<R> {
-    type Resource = R;
+impl<R: Actor, P: Pool> ReactorApi for Controller<R, P> {
+    type Actor = R;
+    type Pool = P;
 
-    fn connect(&mut self, addr: R::Context) -> Result<(), InternalError> {
-        self.control.connect(addr)
+    fn start_actor(&mut self, pool: P, ctx: R::Context) -> Result<(), InternalError<R, P>> {
+        self.channel_for(pool)?.send(ControlEvent::Connect(ctx))?;
+        Ok(())
     }
 
-    fn disconnect(&mut self, id: R::Id) -> Result<(), InternalError> {
-        self.control.disconnect(id)
+    fn stop_actor(&mut self, id: R::Id) -> Result<(), InternalError<R, P>> {
+        let pool = self.pool_for(id.clone())?;
+        self.channel_for(pool)?.send(ControlEvent::Disconnect(id))?;
+        Ok(())
     }
 
-    fn set_timer(&mut self) -> Result<(), InternalError> {
-        self.control.set_timer()
+    fn set_timer(&mut self, pool: P) -> Result<(), InternalError<R, P>> {
+        self.channel_for(pool)?.send(ControlEvent::SetTimer())?;
+        Ok(())
     }
 
-    fn send(&mut self, id: R::Id, data: R::Cmd) -> Result<(), InternalError> {
-        ReactorApi::send(&mut self.control, id, data)
+    fn send(&mut self, id: R::Id, cmd: R::Cmd) -> Result<(), InternalError<R, P>> {
+        let pool = self.pool_for(id.clone())?;
+        self.channel_for(pool)?.send(ControlEvent::Send(id, cmd))?;
+        Ok(())
+    }
+}
+
+impl<R: Actor, P: Pool> ReactorApi for Reactor<R, P> {
+    type Actor = R;
+    type Pool = P;
+
+    fn start_actor(&mut self, pool: P, ctx: R::Context) -> Result<(), InternalError<R, P>> {
+        self.controller.start_actor(pool, ctx)
+    }
+
+    fn stop_actor(&mut self, id: R::Id) -> Result<(), InternalError<R, P>> {
+        self.controller.stop_actor(id)
+    }
+
+    fn set_timer(&mut self, pool: P) -> Result<(), InternalError<R, P>> {
+        self.controller.set_timer(pool)
+    }
+
+    fn send(&mut self, id: R::Id, cmd: R::Cmd) -> Result<(), InternalError<R, P>> {
+        self.controller.send(id, cmd)
     }
 }
 
@@ -287,57 +445,64 @@ impl<R: Resource> ReactorApi for Reactor<R> {
 /// dedicated thread by the reactor. It is controlled by sending instructions
 /// through a set of crossbeam channels. [`Reactor`] abstracts that control via
 /// exposing high-level [`ReactorApi`] and [`Controller`] objects.
-struct Runtime<R: Resource, IO: IoManager<R>, B: Broker<R>> {
-    resources: HashMap<R::Id, R>,
-    io: IO,
-    broker: B,
+struct PoolRuntime<R: Actor, P: Pool> {
+    id: P,
+    actors: HashMap<R::Id, R>,
+    scheduler: Box<dyn Scheduler<R>>,
+    handler: Box<dyn Handler<R, P>>,
     control_recv: chan::Receiver<ControlEvent<R>>,
     control_send: chan::Sender<ControlEvent<R>>,
     shutdown: chan::Receiver<()>,
     timeouts: TimeoutManager<()>,
 }
 
-impl<R: Resource, IO: IoManager<R>, B: Broker<R>> Runtime<R, IO, B> {
+impl<R: Actor, P: Pool> PoolRuntime<R, P> {
     fn new(
-        io: IO,
+        id: P,
+        scheduler: Box<dyn Scheduler<R>>,
         control_recv: chan::Receiver<ControlEvent<R>>,
         control_send: chan::Sender<ControlEvent<R>>,
         shutdown: chan::Receiver<()>,
-        broker: B,
+        handler: Box<dyn Handler<R, P>>,
     ) -> Self {
-        Runtime {
-            io,
-            resources: empty!(),
+        PoolRuntime {
+            id,
+            scheduler,
+            actors: empty!(),
             control_recv,
             control_send,
             shutdown,
-            broker,
+            handler,
             timeouts: TimeoutManager::new(Duration::from_secs(0)),
         }
     }
 
-    fn run(mut self) -> ! {
+    fn run(mut self, controller: Controller<R, P>) -> ! {
         loop {
             let now = Instant::now();
-            if let Err(err) = self.io.io_events(self.timeouts.next(now)) {
-                self.broker.handle_err(err);
+            if let Err(err) = self.scheduler.wait_io(self.timeouts.next(now)) {
+                self.handler
+                    .handle_err(InternalError::ActorError(self.id, err));
             }
-            for ev in &mut self.io {
+            for ev in &mut self.scheduler {
                 let res = self
-                    .resources
+                    .actors
                     .get_mut(&ev.source)
                     .expect("resource management inconsistency");
                 res.io_ready(ev.io)
                     .or_else(|err| res.handle_err(err))
-                    .unwrap_or_else(|err| self.broker.handle_err(err));
+                    .unwrap_or_else(|err| {
+                        self.handler
+                            .handle_err(InternalError::ActorError(self.id, err))
+                    });
             }
             // TODO: Should we process control events before dispatching input?
-            self.process_control();
+            self.process_control(&controller);
             self.process_shutdown();
         }
     }
 
-    fn process_control(&mut self) {
+    fn process_control(&mut self, controller: &Controller<R, P>) {
         loop {
             match self.control_recv.try_recv() {
                 Err(chan::TryRecvError::Disconnected) => {
@@ -346,37 +511,43 @@ impl<R: Resource, IO: IoManager<R>, B: Broker<R>> Runtime<R, IO, B> {
                 Err(chan::TryRecvError::Empty) => break,
                 Ok(event) => match event {
                     ControlEvent::Connect(context) => {
-                        let controller = Controller {
-                            control: self.control_send.clone(),
-                        };
-                        match R::with(context, controller) {
-                            Err(err) => self.broker.handle_err(err),
+                        match R::with(context, controller.clone()) {
+                            Err(err) => self
+                                .handler
+                                .handle_err(InternalError::ActorError(self.id, err)),
                             Ok(mut resource) => {
-                                self.io
-                                    .register_resource(&resource)
+                                self.scheduler
+                                    .register_actor(&resource)
                                     .or_else(|err| resource.handle_err(err))
-                                    .unwrap_or_else(|err| self.broker.handle_err(err));
-                                self.resources.insert(resource.id(), resource);
+                                    .unwrap_or_else(|err| {
+                                        self.handler
+                                            .handle_err(InternalError::ActorError(self.id, err))
+                                    });
+                                self.actors.insert(resource.id(), resource);
                             }
                         };
                         // TODO: Consider to error to the user if the resource was already present
                     }
                     ControlEvent::Disconnect(id) => {
-                        self.io
-                            .unregister_resource(&id)
-                            .unwrap_or_else(|err| self.broker.handle_err(err));
-                        self.resources.remove(&id);
+                        self.scheduler.unregister_actor(&id).unwrap_or_else(|err| {
+                            self.handler
+                                .handle_err(InternalError::ActorError(self.id, err))
+                        });
+                        self.actors.remove(&id);
                         // TODO: Don't we need to shutdown the resource?
                     }
                     ControlEvent::SetTimer() => {
                         // TODO: Add timeout manager
                     }
                     ControlEvent::Send(id, data) => {
-                        if let Some(resource) = self.resources.get_mut(&id) {
+                        if let Some(resource) = self.actors.get_mut(&id) {
                             resource
                                 .handle_cmd(data)
                                 .or_else(|err| resource.handle_err(err))
-                                .unwrap_or_else(|err| self.broker.handle_err(err));
+                                .unwrap_or_else(|err| {
+                                    self.handler
+                                        .handle_err(InternalError::ActorError(self.id, err))
+                                });
                         }
                     }
                 },
@@ -399,21 +570,77 @@ impl<R: Resource, IO: IoManager<R>, B: Broker<R>> Runtime<R, IO, B> {
     }
 }
 
-#[derive(Debug, Display, Error, From)]
+#[derive(Clone, Display, From)]
 #[display(doc_comments)]
-pub enum InternalError {
+pub enum InternalError<R: Actor, P: Pool> {
     /// shutdown channel in the reactor is broken
     ShutdownChanelBroken,
 
     /// control channel is broken; unable to send request
     ControlChannelBroken,
 
-    /// error joining runtime
+    /// actor with id {0} is not known to the reactor
+    UnknownActor(R::Id),
+
+    /// unknown pool {0}
+    UnknownPool(P),
+
+    /// actor with id {0} is already known
+    RepeatedActor(R::Id),
+
+    /// pool with id {0} is already present in the reactor
+    RepeatedPoll(P),
+
+    /// actor on pool {0} has not able to handle error. Details: {1}
+    ActorError(P, R::Error),
+
+    /// error joining thread pool runtime {0}
     #[from]
-    ThreadError(Box<dyn Any + Send + 'static>),
+    ThreadError(P),
 }
 
-impl<R: Resource> From<chan::SendError<ControlEvent<R>>> for InternalError {
+// Required due to Derive macro adding R: Debug unnecessary constraint
+impl<R: Actor, P: Pool> Debug for InternalError<R, P> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InternalError::ShutdownChanelBroken => f
+                .debug_tuple("InternalError::ShutdownChanelBroken")
+                .finish(),
+            InternalError::ControlChannelBroken => f
+                .debug_tuple("InternalError::ControlChannelBroken")
+                .finish(),
+            InternalError::UnknownActor(id) => f
+                .debug_tuple("InternalError::UnknownActor")
+                .field(id)
+                .finish(),
+            InternalError::UnknownPool(pool) => f
+                .debug_tuple("InternalError::UnknownPool")
+                .field(pool)
+                .finish(),
+            InternalError::RepeatedActor(id) => f
+                .debug_tuple("InternalError::RepeatedActor")
+                .field(id)
+                .finish(),
+            InternalError::RepeatedPoll(pool) => f
+                .debug_tuple("InternalError::RepeatedPoll")
+                .field(pool)
+                .finish(),
+            InternalError::ActorError(pool, err) => f
+                .debug_tuple("InternalError::ActorError")
+                .field(pool)
+                .field(err)
+                .finish(),
+            InternalError::ThreadError(pool) => f
+                .debug_tuple("InternalError::ThreadError")
+                .field(pool)
+                .finish(),
+        }
+    }
+}
+
+impl<R: Actor, P: Pool> StdError for InternalError<R, P> {}
+
+impl<R: Actor, P: Pool> From<chan::SendError<ControlEvent<R>>> for InternalError<R, P> {
     fn from(_: chan::SendError<ControlEvent<R>>) -> Self {
         InternalError::ControlChannelBroken
     }
@@ -421,7 +648,7 @@ impl<R: Resource> From<chan::SendError<ControlEvent<R>>> for InternalError {
 
 /// Events send by [`Controller`] and [`ReactorApi`] to the [`Runtime`].
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
-enum ControlEvent<R: Resource> {
+enum ControlEvent<R: Actor> {
     /// Request reactor to connect to the resource with some context
     Connect(R::Context),
 

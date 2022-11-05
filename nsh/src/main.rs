@@ -9,8 +9,8 @@ use std::{fs, io, net};
 use clap::Parser;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::Curve25519;
-use ioreactor::popol::PollManager;
-use ioreactor::{Broker, Controller, InternalError, IoEv, Reactor, ReactorApi, Resource};
+use ioreactor::popol::PopolScheduler;
+use ioreactor::{Actor, Controller, Handler, InternalError, IoEv, Reactor, ReactorApi};
 use p2pd::nxk_tcp::{NxkAction, NxkAddr, NxkContext, NxkListener, NxkSession};
 
 pub const DEFAULT_PORT: u16 = 3232;
@@ -132,9 +132,9 @@ fn main() -> Result<(), AppError> {
 
     let config = Config::try_from(args)?;
 
-    let manager = PollManager::<NshResource>::new();
+    let manager = PopolScheduler::<NshResource>::new();
     let broker = Service {};
-    let mut reactor = Reactor::with(manager, broker)?;
+    let mut reactor = Reactor::new(manager, broker)?;
 
     match config.command {
         Command::Listen(socket_addr) => {
@@ -150,7 +150,7 @@ fn main() -> Result<(), AppError> {
                 method: NshMethod::Connect(remote_host),
                 local_node: config.node_keys,
             };
-            reactor.connect(nsh_socket)?;
+            reactor.start_actor(nsh_socket)?;
         }
     }
     reactor.join()?;
@@ -192,7 +192,7 @@ pub enum NshResource {
     Session(NxkSession),
 }
 
-impl Resource for NshResource {
+impl Actor for NshResource {
     type Id = RawFd;
     type Context = NshContext;
     type Cmd = Vec<u8>;
@@ -244,7 +244,7 @@ impl Resource for NshResource {
 
 pub struct Service {}
 
-impl Broker<NshResource> for Service {
+impl Handler<NshResource> for Service {
     fn handle_err(&mut self, err: io::Error) {
         panic!("{}", err);
     }

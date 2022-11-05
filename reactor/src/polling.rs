@@ -4,13 +4,13 @@ use std::io;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::time::Duration;
 
-use crate::{IoEv, IoManager, IoSrc, Resource};
+use crate::{Actor, IoEv, IoSrc, Scheduler};
 
 /// Manager for a set of resources which are polled for an event loop by the
 /// reactor by using [`polling`] library.
-pub struct PollManager<R>
+pub struct PollingScheduler<R>
 where
-    R: Resource,
+    R: Actor,
     R::Id: Source,
 {
     poll: Poller,
@@ -19,9 +19,9 @@ where
     read_events: Vec<Event>,
 }
 
-impl<R> PollManager<R>
+impl<R> PollingScheduler<R>
 where
-    R: Resource,
+    R: Actor,
     R::Id: Source,
 {
     pub fn new() -> io::Result<Self> {
@@ -34,17 +34,17 @@ where
     }
 }
 
-impl<R> IoManager<R> for PollManager<R>
+impl<R> Scheduler<R> for PollingScheduler<R>
 where
-    R: Resource,
+    R: Actor,
     R::Id: Source + FromRawFd,
     R::Error: From<io::Error>,
 {
-    fn has_resource(&self, id: &R::Id) -> bool {
+    fn has_actor(&self, id: &R::Id) -> bool {
         self.resources.contains(id)
     }
 
-    fn register_resource(&mut self, resource: &R) -> Result<(), R::Error> {
+    fn register_actor(&mut self, resource: &R) -> Result<(), R::Error> {
         let id = resource.id();
         let raw = id.raw();
         self.poll.add(id, Event::all(raw as usize))?;
@@ -52,13 +52,13 @@ where
         Ok(())
     }
 
-    fn unregister_resource(&mut self, id: &R::Id) -> Result<(), R::Error> {
+    fn unregister_actor(&mut self, id: &R::Id) -> Result<(), R::Error> {
         self.resources.remove(id);
         self.poll.delete(id.raw())?;
         Ok(())
     }
 
-    fn io_events(&mut self, timeout: Option<Duration>) -> Result<bool, R::Error> {
+    fn wait_io(&mut self, timeout: Option<Duration>) -> Result<bool, R::Error> {
         // Blocking call
         self.poll.wait(&mut self.read_events, timeout)?;
 
@@ -81,9 +81,9 @@ where
     }
 }
 
-impl<R> Iterator for PollManager<R>
+impl<R> Iterator for PollingScheduler<R>
 where
-    R: Resource,
+    R: Actor,
     R::Id: Source,
 {
     type Item = IoSrc<R::Id>;
