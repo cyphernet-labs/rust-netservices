@@ -9,7 +9,7 @@ use clap::Parser;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::{Curve25519, PrivateKey};
 use ioreactor::schedulers::PopolScheduler;
-use ioreactor::{Actor, Handler, InternalError, Pool, PoolInfo, Reactor, ReactorApi};
+use ioreactor::{Actor, Handler, InternalError, Layout, Pool, Reactor, ReactorApi};
 use p2pd::nxk_tcp::NxkAddr;
 use p2pd::peer::{Action, Context, PeerActor};
 
@@ -170,11 +170,11 @@ pub enum NshPool {
 
 const PEER_POOL: u32 = NshPool::Peer as u32;
 
-impl Pool for NshPool {
+impl Layout for NshPool {
     type RootActor = NshActor;
 
-    fn default_pools() -> Vec<PoolInfo<NshActor, Self>> {
-        vec![PoolInfo::new(
+    fn default_pools() -> Vec<Pool<NshActor, Self>> {
+        vec![Pool::new(
             NshPool::Peer,
             PopolScheduler::<NshActor>::new(),
             Service,
