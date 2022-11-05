@@ -382,20 +382,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ioreactor"
-version = "0.1.0"
-dependencies = [
- "amplify",
- "crossbeam-channel",
- "epoll",
- "libc",
- "mio",
- "polling",
- "popol",
- "zmq",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.137"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -453,10 +439,10 @@ dependencies = [
  "crossbeam-channel",
  "cyphernet",
  "ed25519-compact 2.0.2",
- "ioreactor",
  "log",
  "ntls",
  "p2pd",
+ "re-actor",
  "shellexpand",
  "streampipes",
 ]
@@ -497,8 +483,8 @@ version = "0.1.0"
 dependencies = [
  "amplify",
  "cyphernet",
- "ioreactor",
  "log",
+ "re-actor",
  "streampipes",
 ]
 
@@ -617,6 +603,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
+]
+
+[[package]]
+name = "re-actor"
+version = "0.1.0"
+dependencies = [
+ "amplify",
+ "crossbeam-channel",
+ "epoll",
+ "libc",
+ "mio",
+ "polling",
+ "popol",
+ "zmq",
 ]
 
 [[package]]

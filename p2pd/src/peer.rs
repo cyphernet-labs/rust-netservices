@@ -1,7 +1,7 @@
 use cyphernet::addr::LocalNode;
 use cyphernet::crypto::ed25519::Curve25519;
-use ioreactor::actors::IoEv;
-use ioreactor::{Actor, Controller, Layout};
+use reactor::actors::IoEv;
+use reactor::{Actor, Controller, Layout};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::{io, net};
 
