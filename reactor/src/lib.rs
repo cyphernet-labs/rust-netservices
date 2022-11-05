@@ -13,7 +13,7 @@ mod timeout;
 
 pub use timeout::TimeoutManager;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
@@ -75,12 +75,17 @@ pub trait Actor<R: Actor = Self> {
     /// command-processing business logic.
     type Error: StdError;
 
+    /// Thread pool system this actor operates under. For actors which can
+    /// operate under multiple pools this associated type must be converted
+    /// into generic parameter.
+    type PoolSystem: Pool;
+
     /// Constructs actor giving some `context`. Each actor is provided with the
     /// controller, which it should store internally in cases when it requires
     /// operating with other actors.
-    fn with<P: Pool>(
+    fn with(
         context: Self::Context,
-        controller: Controller<R, P>,
+        controller: Controller<R, Self::PoolSystem>,
     ) -> Result<Self, Self::Error>
     where
         Self: Sized;
@@ -172,8 +177,9 @@ impl<R: Actor, P: Pool> PoolInfo<R, P> {
 }
 
 /// Trait for an enumeration of pools for a reactor
-pub trait Pool: Send + Copy + Eq + Hash + Debug + Display {
-    fn default_pools<R: Actor>() -> BTreeSet<PoolInfo<R, Self>>;
+pub trait Pool: Send + Copy + Eq + Hash + Debug + Display + From<u32> + Into<u32> {
+    type RootActor: Actor;
+    fn default_pools() -> Vec<PoolInfo<Self::RootActor, Self>>;
 }
 
 /// Implementation of reactor pattern.
@@ -197,7 +203,7 @@ pub struct Reactor<R: Actor, P: Pool> {
     locked: bool,
 }
 
-impl<R: Actor, P: Pool> Reactor<R, P> {
+impl<R: Actor<PoolSystem = P>, P: Pool<RootActor = R>> Reactor<R, P> {
     /// Constructs reactor and runs it in a thread, returning [`Self`] as a
     /// controller exposing the API ([`ReactorApi`]).
     pub fn new() -> Result<Self, InternalError<R, P>>
@@ -456,7 +462,7 @@ struct PoolRuntime<R: Actor, P: Pool> {
     timeouts: TimeoutManager<()>,
 }
 
-impl<R: Actor, P: Pool> PoolRuntime<R, P> {
+impl<R: Actor<PoolSystem = P>, P: Pool> PoolRuntime<R, P> {
     fn new(
         id: P,
         scheduler: Box<dyn Scheduler<R>>,
@@ -570,7 +576,7 @@ impl<R: Actor, P: Pool> PoolRuntime<R, P> {
     }
 }
 
-#[derive(Clone, Display, From)]
+#[derive(Clone, Display)]
 #[display(doc_comments)]
 pub enum InternalError<R: Actor, P: Pool> {
     /// shutdown channel in the reactor is broken
@@ -595,7 +601,6 @@ pub enum InternalError<R: Actor, P: Pool> {
     ActorError(P, R::Error),
 
     /// error joining thread pool runtime {0}
-    #[from]
     ThreadError(P),
 }
 
