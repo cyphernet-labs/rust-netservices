@@ -1,7 +1,7 @@
 use cyphernet::addr::LocalNode;
 use cyphernet::crypto::ed25519::Curve25519;
 use ioreactor::{Actor, Controller, IoEv, Pool};
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::{io, net};
 
 use crate::nxk_tcp::{NxkAction, NxkAddr, NxkContext, NxkListener, NxkSession};
