@@ -144,6 +144,16 @@ where
     controller: Controller<R>,
 }
 
+impl<R, EC: Ec> AsRawFd for NxkListener<R, EC>
+where
+    R: Resource,
+    R::Context: From<NxkContext<EC>>,
+{
+    fn as_raw_fd(&self) -> RawFd {
+        self.socket.as_raw_fd()
+    }
+}
+
 impl<R, EC> Resource<R> for NxkListener<R, EC>
 where
     EC: Ec + Clone,
