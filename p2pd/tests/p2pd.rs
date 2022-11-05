@@ -1,17 +1,18 @@
 #[macro_use]
 extern crate amplify;
 
+use std::any::Any;
 use std::error::Error as StdError;
 
 use cyphernet::addr::LocalNode;
 use cyphernet::crypto::ed25519::PrivateKey;
 use ioreactor::popol::PopolScheduler;
-use ioreactor::{Handler, InternalError, Pool, PoolInfo, Reactor, ReactorApi};
+use ioreactor::{Actor, Handler, InternalError, Pool, PoolInfo, Reactor, ReactorApi};
 
 use p2pd::peer::{Action, Context, PeerActor};
 
 fn main() -> Result<(), Box<dyn StdError>> {
-    let mut reactor = Reactor::<DaemonActor, DaemonPool>::new()?;
+    let mut reactor = Reactor::<DaemonPool>::new()?;
 
     let nsh_socket = Context {
         method: Action::Connect("127.0.0.1".parse().unwrap()),
@@ -40,6 +41,14 @@ impl Pool for DaemonPool {
             Service,
         )]
     }
+
+    fn convert(other_ctx: Box<dyn Any>) -> <Self::RootActor as Actor>::Context {
+        let ctx = other_ctx
+            .downcast::<Context>()
+            .expect("wrong context object");
+        let ctx = *ctx;
+        ctx.into()
+    }
 }
 
 impl From<u32> for DaemonPool {
@@ -58,8 +67,8 @@ type DaemonActor = PeerActor<DaemonPool, PEER_POOL>;
 
 struct Service;
 
-impl Handler<DaemonActor, DaemonPool> for Service {
-    fn handle_err(&mut self, err: InternalError<DaemonActor, DaemonPool>) {
+impl Handler<DaemonPool> for Service {
+    fn handle_err(&mut self, err: InternalError<DaemonPool>) {
         panic!("{}", err);
     }
 }
