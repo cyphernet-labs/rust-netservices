@@ -14,6 +14,15 @@
 //! composed into an actor which performs encoding on that stream - and then
 //! into actor providing some framing protocol etc.
 
+#[cfg(feature = "mio")]
+pub mod mio;
+#[cfg(feature = "socket2")]
+pub mod socket2;
+pub mod stdfd;
+pub mod stdtcp;
+#[cfg(feature = "zmq")]
+pub mod zeromq;
+
 use std::error::Error as StdError;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
