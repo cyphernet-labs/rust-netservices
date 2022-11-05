@@ -1,6 +1,7 @@
 //! Noise_XK streams, connections and sessions based on TCP stream
 
 use std::io::{self, Read, Write};
+use std::marker::PhantomData;
 use std::net;
 use std::os::fd::{AsRawFd, RawFd};
 
@@ -25,14 +26,15 @@ pub struct NxkContext<EC: Ec> {
 
 pub type NxkStream<EC> = noise_xk::Stream<EC, net::TcpStream>;
 
-pub struct NxkSession<EC: Ec = Curve25519> {
+pub struct NxkSession<P: Pool, EC: Ec = Curve25519> {
     stream: NxkStream<EC>,
     socket_addr: net::SocketAddr,
     peer_addr: Option<NxkAddr<EC>>,
     inbound: bool,
+    _phantom: PhantomData<P>,
 }
 
-impl<EC: Ec> NxkSession<EC> {
+impl<P: Pool, EC: Ec> NxkSession<P, EC> {
     pub fn accept(
         tcp_stream: net::TcpStream,
         remote_socket_addr: net::SocketAddr,
@@ -43,11 +45,12 @@ impl<EC: Ec> NxkSession<EC> {
             socket_addr: remote_socket_addr,
             peer_addr: None,
             inbound: true,
+            _phantom: Default::default(),
         }
     }
 }
 
-impl<EC: Ec> NxkSession<EC>
+impl<P: Pool, EC: Ec> NxkSession<P, EC>
 where
     EC: Copy,
 {
@@ -60,23 +63,24 @@ where
             socket_addr: nsh_addr.to_socket_addr(),
             peer_addr: Some(nsh_addr),
             inbound: false,
+            _phantom: Default::default(),
         })
     }
 }
 
-impl<EC: Ec> AsRawFd for NxkSession<EC> {
+impl<P: Pool, EC: Ec> AsRawFd for NxkSession<P, EC> {
     fn as_raw_fd(&self) -> RawFd {
         self.stream.as_raw_fd()
     }
 }
 
-impl<EC: Ec> Read for NxkSession<EC> {
+impl<P: Pool, EC: Ec> Read for NxkSession<P, EC> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.stream.read(buf)
     }
 }
 
-impl<EC: Ec> Write for NxkSession<EC> {
+impl<P: Pool, EC: Ec> Write for NxkSession<P, EC> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.stream.write(buf)
     }
@@ -86,7 +90,7 @@ impl<EC: Ec> Write for NxkSession<EC> {
     }
 }
 
-impl<EC: Ec> Actor for NxkSession<EC>
+impl<P: Pool, EC: Ec> Actor for NxkSession<P, EC>
 where
     EC: Copy,
     EC::PubKey: Send,
@@ -96,11 +100,9 @@ where
     type Context = NxkContext<EC>;
     type Cmd = Vec<u8>;
     type Error = io::Error;
+    type PoolSystem = P;
 
-    fn with<P: Pool>(
-        context: Self::Context,
-        controller: Controller<Self, P>,
-    ) -> Result<Self, Self::Error>
+    fn with(context: Self::Context, _controller: Controller<Self, P>) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
@@ -135,7 +137,7 @@ where
     }
 }
 
-pub struct NxkListener<R, P: Pool, EC: Ec = Curve25519>
+pub struct NxkListener<R, P: Pool, const SESSION_POOL_ID: u32, EC: Ec = Curve25519>
 where
     R: Actor,
     R::Context: From<NxkContext<EC>>,
@@ -145,7 +147,8 @@ where
     controller: Controller<R, P>,
 }
 
-impl<R, P: Pool, EC: Ec> AsRawFd for NxkListener<R, P, EC>
+impl<R, P: Pool, const SESSION_POOL_ID: u32, EC: Ec> AsRawFd
+    for NxkListener<R, P, SESSION_POOL_ID, EC>
 where
     R: Actor,
     R::Context: From<NxkContext<EC>>,
@@ -155,7 +158,7 @@ where
     }
 }
 
-impl<R, P: Pool, EC> Actor<R> for NxkListener<R, P, EC>
+impl<R, P: Pool, const SESSION_POOL_ID: u32, EC> Actor<R> for NxkListener<R, P, SESSION_POOL_ID, EC>
 where
     EC: Ec + Clone,
     EC::PubKey: Send + Clone,
@@ -167,8 +170,9 @@ where
     type Context = (LocalNode<EC>, net::SocketAddr);
     type Cmd = ();
     type Error = io::Error;
+    type PoolSystem = P;
 
-    fn with<P>(context: Self::Context, controller: Controller<R, P>) -> Result<Self, Self::Error>
+    fn with(context: Self::Context, controller: Controller<R, P>) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
@@ -191,7 +195,7 @@ where
             local_node: self.local_node.clone(),
         };
         self.controller
-            .start_actor(nsh_info.into())
+            .start_actor(SESSION_POOL_ID.into(), nsh_info.into())
             .map_err(|_| io::ErrorKind::NotConnected)?;
         Ok(())
     }
