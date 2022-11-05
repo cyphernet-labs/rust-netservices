@@ -62,7 +62,7 @@ impl<P: Layout, const SESSION_POOL_ID: u32> Actor for PeerActor<P, SESSION_POOL_
             Action::Listen(socket_addr) => {
                 NxkSpawner::with((context.local_node, socket_addr), controller).map(Self::Listener)
             }
-            Action::Accept(tcp_stream, remote_socket_addr) => {
+            Action::Accept(tcp_stream, _) => {
                 NxkSession::accept(tcp_stream, context.local_node, controller).map(Self::Session)
             }
             Action::Connect(nsh_addr) => {
