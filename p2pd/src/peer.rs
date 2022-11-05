@@ -5,7 +5,7 @@ use reactor::{Actor, Controller, Layout};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::{io, net};
 
-use crate::nxk_tcp::{NxkAction, NxkAddr, NxkContext, NxkListener, NxkSession};
+use crate::nxk_tcp::{NxkAction, NxkAddr, NxkContext, NxkSession, NxkSpawner};
 
 pub enum Action {
     Listen(net::SocketAddr),
@@ -40,16 +40,16 @@ impl From<&NxkContext<Curve25519>> for Context {
 }
 
 pub enum PeerActor<P: Layout, const SESSION_POOL_ID: u32> {
-    Listener(NxkListener<P, SESSION_POOL_ID>),
+    Listener(NxkSpawner<P, SESSION_POOL_ID>),
     Session(NxkSession<P>),
 }
 
 impl<P: Layout, const SESSION_POOL_ID: u32> Actor for PeerActor<P, SESSION_POOL_ID> {
+    type Layout = P;
     type Id = RawFd;
     type Context = Context;
     type Cmd = Vec<u8>;
     type Error = io::Error;
-    type Layout = P;
 
     fn with(
         context: Self::Context,
@@ -60,13 +60,13 @@ impl<P: Layout, const SESSION_POOL_ID: u32> Actor for PeerActor<P, SESSION_POOL_
     {
         match context.method {
             Action::Listen(socket_addr) => {
-                NxkListener::with((context.local_node, socket_addr), controller).map(Self::Listener)
+                NxkSpawner::with((context.local_node, socket_addr), controller).map(Self::Listener)
             }
-            Action::Accept(tcp_stream, remote_socket_addr) => Ok(Self::Session(
-                NxkSession::accept(tcp_stream, remote_socket_addr, context.local_node),
-            )),
+            Action::Accept(tcp_stream, remote_socket_addr) => {
+                NxkSession::accept(tcp_stream, context.local_node, controller).map(Self::Session)
+            }
             Action::Connect(nsh_addr) => {
-                NxkSession::connect(nsh_addr, context.local_node).map(Self::Session)
+                NxkSession::connect(nsh_addr, context.local_node, controller).map(Self::Session)
             }
         }
     }
