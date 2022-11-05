@@ -1,3 +1,3 @@
 [workspace]
-members = ["reactor", "streampipes", "nsh"]
-default-members = ["reactor", "streampipes"]
+members = ["reactor", "streampipes", "nsh", "p2pd"]
+default-members = ["reactor", "streampipes", "p2pd"]

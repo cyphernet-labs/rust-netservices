@@ -1,7 +1,7 @@
+use std::convert::Infallible;
+
 use super::FramedStream;
 use crate::frame::Frame;
-use crate::transcode::dumb::{DumbDecoder, DumbEncoder};
-use std::convert::Infallible;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DumbFrame64Kb {
@@ -24,21 +24,18 @@ impl Frame for DumbFrame64Kb {
     }
 }
 
-pub type DumbFramed64KbStream<R, W> =
-    FramedStream<R, W, DumbDecoder, DumbEncoder, DumbFrame64Kb, 2u8>;
+pub type DumbFramed64KbStream<S> = FramedStream<S, DumbFrame64Kb, 2u8>;
 
 #[cfg(test)]
 mod test {
-    use crate::frame::dumb::DumbFramed64KbStream;
-    use crate::transcode::dumb::{DumbDecoder, DumbEncoder};
-    use std::io;
+    use std::collections::VecDeque;
     use std::io::Write;
+
+    use crate::frame::dumb::DumbFramed64KbStream;
 
     #[test]
     fn test() {
-        let reader = io::Cursor::new(Vec::<u8>::new());
-        let writer = Vec::<u8>::new();
-        let mut stream = DumbFramed64KbStream::with(reader, writer, DumbDecoder, DumbEncoder);
+        let mut stream = DumbFramed64KbStream::with(VecDeque::new());
 
         let data = [
             0x02, 0x00, b'a', b'b', 0x05, 0x00, b'M', b'a', b'x', b'i', b'm',

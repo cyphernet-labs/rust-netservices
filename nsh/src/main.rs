@@ -1,21 +1,17 @@
 #[macro_use]
 extern crate amplify;
-#[macro_use]
-extern crate log;
 
-use std::collections::{HashMap, VecDeque};
-use std::io::Read;
-use std::net::TcpStream;
+use std::any::Any;
 use std::path::PathBuf;
 use std::{fs, io, net};
 
 use clap::Parser;
-use crossbeam_channel as chan;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
-use cyphernet::crypto::ed25519::Curve25519;
-use nakamoto_net::{Io, Link, LocalTime, Reactor as _};
-use streampipes::frame::dumb::DumbFramed64KbStream;
-use streampipes::transcode::dumb::{DumbDecoder, DumbEncoder, DumbTranscodedStream};
+use cyphernet::crypto::ed25519::{Curve25519, PrivateKey};
+use ioreactor::popol::PopolScheduler;
+use ioreactor::{Actor, Handler, InternalError, Pool, PoolInfo, Reactor, ReactorApi};
+use p2pd::nxk_tcp::NxkAddr;
+use p2pd::peer::{Action, Context, PeerActor};
 
 pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
@@ -67,7 +63,7 @@ struct Args {
 enum Command {
     Listen(net::SocketAddr),
     Connect {
-        remote_host: UniversalAddr<PeerAddr<Curve25519, net::SocketAddr>>,
+        remote_host: NxkAddr,
         remote_command: String,
     },
 }
@@ -90,7 +86,11 @@ pub enum AppError {
     Curve25519(ed25519_compact::Error),
 
     #[from]
-    Nakamoto(nakamoto_net::error::Error),
+    Reactor(InternalError<NshPool>),
+
+    #[from]
+    #[display("other error")]
+    Other(Box<dyn Any + Send>),
 }
 
 impl TryFrom<Args> for Config {
@@ -127,140 +127,87 @@ impl TryFrom<Args> for Config {
     }
 }
 
-type Reactor = nakamoto_net_poll::Reactor<TcpStream>;
-type Stream = DumbTranscodedStream<io::Cursor<Vec<u8>>, Vec<u8>>;
-
 fn main() -> Result<(), AppError> {
     let args = Args::parse();
 
     let config = Config::try_from(args)?;
 
-    let (handle, commands) = chan::unbounded::<ProtocolCmd>();
-    let (shutdown, shutdown_recv) = chan::bounded(1);
-    let (listening_send, listening) = chan::bounded(1);
-    let mut reactor = Reactor::new(shutdown_recv, listening_send)?;
-    let mut protocol = Protocol::default();
-    let events = Events {};
+    let mut reactor = Reactor::<NshPool>::new()?;
 
-    let listen_sockets = match config.command {
+    let nsh_socket = Context {
+        method: Action::Connect("127.0.0.1".parse().unwrap()),
+        local_node: LocalNode::from(PrivateKey::test()),
+    };
+    reactor.start_actor(NshPool::Peer, nsh_socket)?;
+
+    match config.command {
         Command::Listen(socket_addr) => {
             println!("Listening on {} ...", socket_addr);
-            vec![socket_addr]
+            // TODO: Listen on an address
         }
         Command::Connect {
             remote_host,
             remote_command: _,
         } => {
             println!("Connecting to {} ...", remote_host);
-            protocol.connect(remote_host.into());
-            vec![]
+            let nsh_socket = Context {
+                method: Action::Connect(remote_host),
+                local_node: config.node_keys,
+            };
+            reactor.start_actor(NshPool::Peer, nsh_socket)?;
         }
-    };
-    reactor.run(&listen_sockets, protocol, events, commands)?;
+    }
+    reactor.join()?;
 
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-pub enum ProtocolEvent {}
-#[derive(Debug, Clone)]
-pub enum ProtocolCmd {}
-#[derive(Debug, Display)]
-#[display(doc_comments)]
-pub enum DisconnectReason {}
-impl From<DisconnectReason> for nakamoto_net::DisconnectReason<DisconnectReason> {
-    fn from(reason: DisconnectReason) -> Self {
-        nakamoto_net::DisconnectReason::Protocol(reason)
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Display, Debug)]
+#[display(lowercase)]
+pub enum NshPool {
+    Peer = 0,
+}
+
+const PEER_POOL: u32 = NshPool::Peer as u32;
+
+impl Pool for NshPool {
+    type RootActor = NshActor;
+
+    fn default_pools() -> Vec<PoolInfo<NshActor, Self>> {
+        vec![PoolInfo::new(
+            NshPool::Peer,
+            PopolScheduler::<NshActor>::new(),
+            Service,
+        )]
+    }
+
+    fn convert(other_ctx: Box<dyn Any>) -> <Self::RootActor as Actor>::Context {
+        let ctx = other_ctx
+            .downcast::<Context>()
+            .expect("wrong context object");
+        let ctx = *ctx;
+        ctx.into()
     }
 }
 
-#[derive(Default)]
-pub struct Protocol {
-    connect_queue: VecDeque<net::SocketAddr>,
-    streams: HashMap<net::SocketAddr, Stream>,
-}
-
-impl Protocol {
-    pub fn connect(&mut self, socket_addr: net::SocketAddr) {
-        self.connect_queue.push_back(socket_addr);
+impl From<u32> for NshPool {
+    fn from(value: u32) -> Self {
+        NshPool::Peer
     }
 }
 
-impl nakamoto_net::Protocol for Protocol {
-    type Event = ProtocolEvent;
-    type Command = ProtocolCmd;
-    type DisconnectReason = DisconnectReason;
-
-    fn received_bytes(&mut self, addr: &net::SocketAddr, bytes: &[u8]) {
-        let stream = self.streams.get_mut(addr).expect("unknown remote peer");
-        stream.push_bytes(bytes).expect("buffer overflow");
-
-        // Printout the received data
-        let mut buf = vec![0u8; bytes.len()];
-        loop {
-            let len = stream.read(&mut buf).expect("in-memory reading");
-            if len == 0 {
-                break;
-            }
-            let data = String::from_utf8_lossy(&buf[..len]);
-            println!("{}", data);
-        }
-    }
-
-    fn attempted(&mut self, addr: &net::SocketAddr) {}
-
-    fn connected(&mut self, addr: net::SocketAddr, _local_addr: &net::SocketAddr, link: Link) {
-        debug_assert_eq!(
-            link,
-            Link::Inbound,
-            "Reactor implementation can only accept incoming connections"
-        );
-
-        let reader = io::Cursor::new(Vec::<u8>::new());
-        let writer = Vec::<u8>::new();
-        let stream = Stream::with(reader, writer, DumbDecoder, DumbEncoder);
-        if self.streams.insert(addr, stream).is_some() {
-            warn!(
-                "Repeated incoming connection from peer {}, resetting tunnel",
-                addr
-            );
-        }
-
-        // TODO: Perform handshake
-    }
-
-    fn disconnected(
-        &mut self,
-        addr: &net::SocketAddr,
-        _reason: nakamoto_net::DisconnectReason<Self::DisconnectReason>,
-    ) {
-        self.streams.remove(addr).expect("unknown remote peer");
-    }
-
-    fn command(&mut self, cmd: Self::Command) {
-        panic!("Commands are not supported")
-    }
-
-    fn tick(&mut self, local_time: LocalTime) {}
-
-    fn wake(&mut self) {}
-}
-
-impl Iterator for Protocol {
-    type Item = Io<ProtocolEvent, DisconnectReason>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(socket_addr) = self.connect_queue.pop_front() {
-            return Some(Io::Connect(socket_addr));
-        }
-        None
+impl From<NshPool> for u32 {
+    fn from(value: NshPool) -> Self {
+        value as u32
     }
 }
 
-pub struct Events {}
+type NshActor = PeerActor<NshPool, PEER_POOL>;
 
-impl nakamoto_net::Publisher<ProtocolEvent> for Events {
-    fn publish(&mut self, e: ProtocolEvent) {
-        info!("Received event {:?}", e);
+struct Service;
+
+impl Handler<NshPool> for Service {
+    fn handle_err(&mut self, err: InternalError<NshPool>) {
+        panic!("{}", err);
     }
 }
