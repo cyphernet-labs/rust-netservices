@@ -107,24 +107,22 @@ pub trait Actor {
     fn handle_err(&mut self, err: Self::Error) -> Result<(), Self::Error>;
 }
 
-/// Implements specific way of managing multiple resources for a reactor.
-/// Blocks on concurrent events from multiple resources.
+/// Implements specific way of scheduling how multiple actors under a
+/// [`Reactor`] run in a concurrent way.
 pub trait Scheduler<R: Actor>: Iterator<Item = IoSrc<R::Id>> + Send {
     /// Detects whether a resource under the given id is known to the manager.
     fn has_actor(&self, id: &R::Id) -> bool;
 
-    /// Adds already operating/connected resource to the manager.
+    /// Adds already operating/connected actor to the scheduler.
     ///
     /// # I/O
     ///
     /// Implementations must not block on the operation or generate any I/O
     /// events.
-    fn register_actor(&mut self, resource: &R) -> Result<(), R::Error>;
+    fn register_actor(&mut self, actor: &R) -> Result<(), R::Error>;
 
-    /// Removes resource from the manager without disconnecting it or generating
-    /// any events. Stops resource monitoring and returns the resource itself
-    /// (like connection or a TCP stream). May be used later to insert resource
-    /// back to the manager with [`Self::register_resource`].
+    /// Removes previously added actor from the scheduler without generating
+    /// any events. Stops actor run scheduling.
     ///
     /// # I/O
     ///
@@ -132,7 +130,7 @@ pub trait Scheduler<R: Actor>: Iterator<Item = IoSrc<R::Id>> + Send {
     /// events.
     fn unregister_actor(&mut self, id: &R::Id) -> Result<(), R::Error>;
 
-    /// Reads events from all resources under this manager.
+    /// Waits for I/O events from all actors under this scheduler.
     ///
     /// # Returns
     ///
@@ -140,7 +138,7 @@ pub trait Scheduler<R: Actor>: Iterator<Item = IoSrc<R::Id>> + Send {
     ///
     /// # I/O
     ///
-    /// Blocks on the read operation or until the timeout.
+    /// Blocks until the timeout.
     fn wait_io(&mut self, timeout: Option<Duration>) -> Result<bool, R::Error>;
 }
 
@@ -152,6 +150,7 @@ pub struct Pool<R: Actor, L: Layout> {
 }
 
 impl<R: Actor, L: Layout> Pool<R, L> {
+    /// Constructs pool information from the source data
     pub fn new(
         id: L,
         scheduler: impl Scheduler<R> + 'static,
@@ -181,22 +180,37 @@ pub trait Layout: Send + Copy + Eq + Hash + Debug + Display + From<u32> + Into<u
 
 /// Callbacks called in a context of the reactor runtime threads.
 pub trait Handler<L: Layout>: Send {
-    /// Called on non-actor-specific errors - or on errors which were not held by the resources
+    /// Called on non-actor-specific errors - or on errors which were not held
+    /// by the actors
     fn handle_err(&mut self, err: InternalError<L>);
 }
 
 /// Implementation of reactor pattern.
 ///
-/// Reactor manages multiple resources of homogenous type `R` (resource can be a
-/// TCP connections, file descriptors or any other blocking resource). It does
-/// concurrent read of the I/O events from the resources using
-/// [`ResourceMgr::read_events`] method, and dispatches events to a
-/// [`Handler`] in synchronous demultiplexed way. Finally, it can be controlled
-/// from any outside thread - or from the handler - by using [`ReactorApi`] and
-/// [`Controllers`] constructed by [`Reactor::controller`]. This includes ability
-/// to connect or disconnect resources or send them data.
+/// Reactor manages multiple actors of homogenous type `L::RootActor`. Actors
+/// can be a TCP connections, file descriptors, GPU kernels or any other
+/// process which may be blocked by waiting on I/O events.
 ///
-/// Reactor manages internally a thread which runs the [`Runtime`] event loop.
+/// Reactor uses specific [`Scheduler`] implementations (see [`schedulers`]
+/// module) which organize operations with multiple actors in a concurrent way.
+///
+/// Reactor may run multiple independend schedulers of different type.
+/// Each scheduler runs in a separate thread. Each actor is allocated to a
+/// single scheduler.
+///
+/// Using multiple schedulers allows to organize different thread pools, like
+/// actors operating as workers, network connections etc.
+///
+/// Reactor waits of the I/O events from any of the actors using
+/// [`Scheduler::wait_io`] method and asks corresponding actors to process the
+/// events. Timeouts and notifications are also dispatched to a [`Handler`]
+/// instance, one per scheduler.
+///
+/// Reactor, schedulers and actors can be controlled from any actor or any
+/// outside thread - or from the handler - by using [`ReactorApi`] and
+/// [`Controller`]s constructed by [`Reactor::controller`]. Actors are
+/// controlled by sending them commands of [`Actor::Cmd`] type via
+/// [`Controller::send`].
 pub struct Reactor<L: Layout> {
     /// Threads running schedulers, one per pool.
     scheduler_threads: HashMap<L, JoinHandle<()>>,
@@ -597,6 +611,7 @@ impl<L: Layout> PoolRuntime<L> {
     }
 }
 
+/// Errors generated by the reactor
 #[derive(Display)]
 #[display(doc_comments)]
 pub enum InternalError<L: Layout> {

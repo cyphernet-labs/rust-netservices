@@ -14,7 +14,7 @@ where
     R::Id: Source,
 {
     poll: Poller,
-    resources: HashSet<R::Id>,
+    actors: HashSet<R::Id>,
     events: VecDeque<IoSrc<R::Id>>,
     read_events: Vec<Event>,
 }
@@ -27,7 +27,7 @@ where
     pub fn new() -> io::Result<Self> {
         Ok(Self {
             poll: Poller::new()?,
-            resources: empty!(),
+            actors: empty!(),
             events: empty!(),
             read_events: empty!(),
         })
@@ -41,19 +41,19 @@ where
     R::Error: From<io::Error>,
 {
     fn has_actor(&self, id: &R::Id) -> bool {
-        self.resources.contains(id)
+        self.actors.contains(id)
     }
 
     fn register_actor(&mut self, resource: &R) -> Result<(), R::Error> {
         let id = resource.id();
         let raw = id.raw();
         self.poll.add(id, Event::all(raw as usize))?;
-        self.resources.insert(resource.id());
+        self.actors.insert(resource.id());
         Ok(())
     }
 
     fn unregister_actor(&mut self, id: &R::Id) -> Result<(), R::Error> {
-        self.resources.remove(id);
+        self.actors.remove(id);
         self.poll.delete(id.raw())?;
         Ok(())
     }
