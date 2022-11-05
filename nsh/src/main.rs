@@ -2,8 +2,6 @@
 extern crate amplify;
 
 use std::any::Any;
-use std::io::Write;
-use std::marker::PhantomData;
 use std::os::fd::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::{fs, io, net};
@@ -13,7 +11,7 @@ use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr
 use cyphernet::crypto::ed25519::Curve25519;
 use ioreactor::popol::PollManager;
 use ioreactor::{Broker, Controller, InternalError, IoEv, Reactor, ReactorApi, Resource};
-use p2pd::nxk_tcp::{NxkAddr, NxkContext, NxkListener, NxkMethod, NxkSession, NxkStream};
+use p2pd::nxk_tcp::{NxkAddr, NxkContext, NxkListener, NxkMethod, NxkSession};
 
 pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
@@ -134,7 +132,7 @@ fn main() -> Result<(), AppError> {
 
     let config = Config::try_from(args)?;
 
-    let manager = PollManager::<NshResource<()>>::new();
+    let manager = PollManager::<NshResource>::new();
     let broker = Service {};
     let mut reactor = Reactor::with(manager, broker)?;
 
@@ -166,90 +164,79 @@ pub enum NshMethod {
     Connect(NxkAddr),
 }
 
+impl From<NxkMethod<Curve25519>> for NshMethod {
+    fn from(method: NxkMethod<Curve25519>) -> Self {
+        match method {
+            NxkMethod::Accept(stream, addr) => Self::Accept(stream, addr),
+            NxkMethod::Connect(addr) => Self::Connect(addr),
+        }
+    }
+}
+
 pub struct NshContext {
     pub method: NshMethod,
     pub local_node: LocalNode<Curve25519>,
 }
 
-pub enum NxkInner {
-    Listener(net::TcpListener),
+impl From<NxkContext<Curve25519>> for NshContext {
+    fn from(ctx: NxkContext<Curve25519>) -> Self {
+        NshContext {
+            method: ctx.method.into(),
+            local_node: ctx.local_node,
+        }
+    }
+}
+
+pub enum NshResource {
+    Listener(NxkListener<Self>),
     Session(NxkSession),
 }
 
-pub struct NshResource<C: Send> {
-    inner: NxkInner,
-    local_node: LocalNode<Curve25519>,
-    controller: Controller<Self>,
-    _phantom: PhantomData<C>,
-}
-
-impl<C: Send> Resource for NshResource<C> {
+impl Resource for NshResource {
     type Id = RawFd;
     type Context = NshContext;
-    type Cmd = C;
+    type Cmd = ();
     type Error = io::Error;
 
     fn with(context: Self::Context, controller: Controller<Self>) -> Result<Self, Self::Error>
     where
         Self: Sized,
     {
-        let inner = match context.method {
+        match context.method {
             NshMethod::Listen(socket_addr) => {
-                NxkInner::Listener(net::TcpListener::bind(socket_addr)?)
+                NxkListener::with((context.local_node, socket_addr), controller).map(Self::Listener)
             }
-            NshMethod::Accept(tcp_stream, remote_socket_addr) => NxkInner::Session(
-                NxkSession::accept(tcp_stream, remote_socket_addr, context.local_node.clone()),
-            ),
+            NshMethod::Accept(tcp_stream, remote_socket_addr) => Ok(Self::Session(
+                NxkSession::accept(tcp_stream, remote_socket_addr, context.local_node),
+            )),
             NshMethod::Connect(nsh_addr) => {
-                NxkInner::Session(NxkSession::connect(nsh_addr, context.local_node.clone())?)
+                NxkSession::connect(nsh_addr, context.local_node).map(Self::Session)
             }
-        };
-        Ok(Self {
-            inner,
-            controller,
-            local_node: context.local_node,
-            _phantom: none!(),
-        })
+        }
     }
 
     fn id(&self) -> Self::Id {
-        match &self.inner {
-            NxkInner::Listener(listener) => listener.as_raw_fd(),
-            NxkInner::Session(session) => session.as_raw_fd(),
+        match self {
+            Self::Listener(listener) => listener.as_raw_fd(),
+            Self::Session(session) => session.as_raw_fd(),
         }
     }
 
     fn io_ready(&mut self, io: IoEv) -> Result<(), Self::Error> {
-        match self.inner {
-            NxkInner::Listener(ref listener) => {
-                let (stream, peer_socket_addr) = listener.accept()?;
-                let nsh_info = NshContext {
-                    method: NshMethod::Accept(stream, peer_socket_addr),
-                    local_node: self.local_node.clone(),
-                };
-                self.controller
-                    .connect(nsh_info)
-                    .map_err(|_| io::ErrorKind::NotConnected)?;
-            }
-            NxkInner::Session(ref mut session) => {
-                if io.is_readable { /* TODO: Do read */ }
-                if io.is_writable {
-                    session.flush()?;
-                }
-            }
+        match self {
+            Self::Listener(listener) => listener.io_ready(io),
+            Self::Session(session) => session.io_ready(io),
         }
-        Ok(())
     }
 
     fn handle_cmd(&mut self, cmd: Self::Cmd) -> Result<(), Self::Error> {
-        match self.inner {
-            NxkInner::Listener(_) => panic!("data sent to TCP listener"),
-            NxkInner::Session(ref mut stream) => {
-                // TODO: Do writes, like
-                // stream.write_all(&data)?
+        match self {
+            Self::Listener(_) => panic!("data sent to TCP listener"),
+            Self::Session(stream) => {
+                stream.handle_cmd(())?;
+                todo!();
             }
-        };
-        Ok(())
+        }
     }
 
     fn handle_err(&mut self, err: Self::Error) -> Result<(), Self::Error> {
@@ -259,7 +246,7 @@ impl<C: Send> Resource for NshResource<C> {
 
 pub struct Service {}
 
-impl Broker<NshResource<()>> for Service {
+impl Broker<NshResource> for Service {
     fn handle_err(&mut self, err: io::Error) {
         panic!("{}", err);
     }
