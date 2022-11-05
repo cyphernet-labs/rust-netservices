@@ -32,7 +32,7 @@ impl<K> TimeoutManager<K> {
     ///
     /// ```
     /// use std::time::{Duration, Instant};
-    /// use ioreactor::TimeoutManager;
+    /// use re_actor::TimeoutManager;
     ///
     /// let mut tm = TimeoutManager::new(Duration::from_secs(1));
     /// let now = Instant::now();
@@ -75,7 +75,7 @@ impl<K> TimeoutManager<K> {
     ///
     /// ```
     /// # use std::time::{Duration, Instant};
-    /// use ioreactor::TimeoutManager;
+    /// use re_actor::TimeoutManager;
     ///
     /// let mut tm = TimeoutManager::new(Duration::from_secs(0));
     /// let mut now = Instant::now();
@@ -126,7 +126,7 @@ impl<K> TimeoutManager<K> {
     ///
     /// ```
     /// use std::time::{Duration, Instant};
-    /// use ioreactor::TimeoutManager;
+    /// use re_actor::TimeoutManager;
     ///
     /// let mut tm = TimeoutManager::new(Duration::from_secs(0));
     /// let now = Instant::now();

@@ -3,9 +3,9 @@
 //!
 //! Actors handle such things as handshake, encryption, data encoding,
 //! etc and may execute their business logic by calling to other actors or the
-//! reactor itself via [`Controller`] handler provided during the actor
+//! re-actor itself via [`Controller`] handler provided during the actor
 //! construction. In such a way they may create new actors and register them
-//! with the reactor or send a data to them in a non-blocking way.
+//! with the re-actor or send a data to them in a non-blocking way.
 //! If an actor needs to perform extensive or blocking operation it is advised
 //! to use dedicated worker threads in a separate pools under [`Reactor`].
 //!
@@ -26,13 +26,13 @@ use crate::{Controller, Layout};
 /// Concrete implementations of the trait should encompass application-specific
 /// business logic for working with data. It is advised that they operate as a
 /// state machine, advancing on I/O events via calls to [`Actor::io_ready`],
-/// dispatched by the reactor runtime.
+/// dispatched by the re-actor runtime.
 ///
 /// Actors should handle such things as handshake, encryption, data encoding,
 /// etc and may execute their business logic by calling to other actors or the
-/// reactor itself via [`Controller`] handler provided during the actor
+/// re-actor itself via [`Controller`] handler provided during the actor
 /// construction. In such a way they may create new actors and register them
-/// with the reactor or send a data to them in a non-blocking way.
+/// with the re-actor or send a data to them in a non-blocking way.
 /// If an actor needs to perform extensive or blocking operation it is advised
 /// to use dedicated worker threads in a separate pools under [`Reactor`].
 ///
@@ -48,10 +48,10 @@ pub trait Actor {
 
     /// Actor's id types.
     ///
-    /// Each actor must have a unique id within the reactor.
+    /// Each actor must have a unique id within the re-actor.
     type Id: Clone + Eq + Hash + Send + Debug + Display;
 
-    /// Extra data provided for constructing the actor from within reactor
+    /// Extra data provided for constructing the actor from within re-actor
     /// runtime (see [`Controller::start_actor`].
     type Context: Send;
 
@@ -88,7 +88,7 @@ pub trait Actor {
     /// The errors returned by this method are forwarded to [`Self::handle_err`].
     fn io_ready(&mut self, io: IoEv) -> Result<(), Self::Error>;
 
-    /// Called by the reactor [`Runtime`] whenever it receives a command for this
+    /// Called by the re-actor [`Runtime`] whenever it receives a command for this
     /// resource through the [`Controller`] [`ReactorApi`].
     ///
     /// The errors returned by this method are forwarded to [`Self::handle_err`].

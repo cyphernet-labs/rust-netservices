@@ -7,21 +7,21 @@ use crate::{Actor, Controller, Handler, InternalError, Layout, Scheduler, Timeou
 /// Events send by [`Controller`] and [`ReactorApi`] to the [`Runtime`].
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub enum ControlEvent<A: Actor> {
-    /// Request reactor to connect to the resource with some context
+    /// Request re-actor to connect to the resource with some context
     Connect(A::Context),
 
-    /// Request reactor to disconnect from a resource
+    /// Request re-actor to disconnect from a resource
     Disconnect(A::Id),
 
-    /// Ask reactor to wake up after certain interval
+    /// Ask re-actor to wake up after certain interval
     SetTimer(),
 
-    /// Request reactor to send the data to the resource
+    /// Request re-actor to send the data to the resource
     Send(A::Id, A::Cmd),
 }
 
-/// Runtime represents the reactor event loop with its state handled in a
-/// dedicated thread by the reactor. It is controlled by sending instructions
+/// Runtime represents the re-actor event loop with its state handled in a
+/// dedicated thread by the re-actor. It is controlled by sending instructions
 /// through a set of crossbeam channels. [`Reactor`] abstracts that control via
 /// exposing high-level [`ReactorApi`] and [`Controller`] objects.
 pub struct PoolRuntime<L: Layout> {
@@ -85,7 +85,7 @@ impl<L: Layout> PoolRuntime<L> {
         loop {
             match self.control_recv.try_recv() {
                 Err(chan::TryRecvError::Disconnected) => {
-                    panic!("reactor shutdown channel was dropper")
+                    panic!("re-actor shutdown channel was dropper")
                 }
                 Err(chan::TryRecvError::Empty) => break,
                 Ok(event) => match event {
@@ -143,7 +143,7 @@ impl<L: Layout> PoolRuntime<L> {
                 // TODO: Disconnect all resources
             }
             Err(chan::TryRecvError::Disconnected) => {
-                panic!("reactor shutdown channel was dropper")
+                panic!("re-actor shutdown channel was dropper")
             }
         }
     }

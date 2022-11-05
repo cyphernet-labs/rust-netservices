@@ -13,7 +13,7 @@ rust-version = "1.59.0"
 [dependencies]
 amplify = "3.12.1"
 streampipes = { path = "../streampipes" }
-ioreactor = { path = "../reactor", features = ["popol"] }
+reactor = { package = "re-actor", path = "../re-actor", features = ["popol"] }
 p2pd = { path = "../p2pd" }
 cyphernet = { git = "https://github.com/Internet2-WG/rust-cyphernet", features = ["ed25519"] }
 ntls = { git = "https://github.com/Internet2-WG/ntls" }

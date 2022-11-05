@@ -8,10 +8,10 @@ use std::{fs, io, net};
 use clap::Parser;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::{Curve25519, PrivateKey};
-use ioreactor::schedulers::PopolScheduler;
-use ioreactor::{Actor, Handler, InternalError, Layout, Pool, Reactor, ReactorApi};
 use p2pd::nxk_tcp::NxkAddr;
 use p2pd::peer::{Action, Context, PeerActor};
+use reactor::schedulers::PopolScheduler;
+use reactor::{Actor, Handler, InternalError, Layout, Pool, Reactor, ReactorApi};
 
 pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy

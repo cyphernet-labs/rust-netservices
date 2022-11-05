@@ -1,4 +1,4 @@
-//! Implementation of the reactor pattern.
+//! Implementation of the re-actor pattern.
 //!
 //! Reactor manages multiple [`Actor`]s, which represent a modules of application
 //! business logic which depend on I/O events. Actors

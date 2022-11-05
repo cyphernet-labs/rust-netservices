@@ -5,7 +5,7 @@ use std::hash::Hash;
 use super::Handler;
 use crate::{Actor, Scheduler};
 
-/// Information for constructing reactor thread pools
+/// Information for constructing re-actor thread pools
 pub struct Pool<R: Actor, L: Layout> {
     pub(super) id: L,
     pub(super) scheduler: Box<dyn Scheduler<R>>,
@@ -27,13 +27,13 @@ impl<R: Actor, L: Layout> Pool<R, L> {
     }
 }
 
-/// Trait layout out the structure for the reactor runtime.
+/// Trait layout out the structure for the re-actor runtime.
 /// It is should be implemented by enumerators listing existing thread pools.
 pub trait Layout: Send + Copy + Eq + Hash + Debug + Display + From<u32> + Into<u32> {
-    /// The root actor type which will be operated by the reactor
+    /// The root actor type which will be operated by the re-actor
     type RootActor: Actor<Layout = Self>;
 
-    /// Provides reactor with information on constructing thread pools.
+    /// Provides re-actor with information on constructing thread pools.
     fn default_pools() -> Vec<Pool<Self::RootActor, Self>>;
 
     /// Convertor transforming any context from the actor hierarchy into the

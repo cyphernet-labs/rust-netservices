@@ -16,7 +16,7 @@ pub use layout::{Layout, Pool};
 use self::runtime::{ControlEvent, PoolRuntime};
 use crate::Scheduler;
 
-/// Callbacks called in a context of the reactor runtime threads.
+/// Callbacks called in a context of the re-actor runtime threads.
 pub trait Handler<L: Layout>: Send {
     /// Called on non-actor-specific errors - or on errors which were not held
     /// by the actors
@@ -24,7 +24,7 @@ pub trait Handler<L: Layout>: Send {
 }
 
 /// Reactor, which provisioned with information about schedulers thread
-/// [`Layout`] can run the reactor runtime with [`Reactor::run`].
+/// [`Layout`] can run the re-actor runtime with [`Reactor::run`].
 pub struct Reactor<L: Layout> {
     /// Threads running schedulers, one per pool.
     scheduler_threads: HashMap<L, JoinHandle<()>>,
@@ -35,7 +35,7 @@ pub struct Reactor<L: Layout> {
 }
 
 impl<L: Layout> Reactor<L> {
-    /// Constructs reactor and runs it in a thread, returning [`Self`] as a
+    /// Constructs re-actor and runs it in a thread, returning [`Self`] as a
     /// controller exposing the API ([`ReactorApi`]).
     pub fn new() -> Result<Self, InternalError<L>>
     where
@@ -102,16 +102,16 @@ impl<L: Layout> Reactor<L> {
         Ok(reactor)
     }
 
-    /// Returns controller implementing [`ReactorApi`] for this reactor.
+    /// Returns controller implementing [`ReactorApi`] for this re-actor.
     ///
     /// Once this function is called it wouldn't be possible to add more
-    /// pools or actors to the reactor (the reactor state gets locked).
+    /// pools or actors to the re-actor (the re-actor state gets locked).
     pub fn controller(&mut self) -> Controller<L> {
         self.locked = true;
         self.controller.clone()
     }
 
-    /// Joins all reactor threads.
+    /// Joins all re-actor threads.
     pub fn join(self) -> Result<(), InternalError<L>> {
         for (pool, scheduler_thread) in self.scheduler_threads {
             scheduler_thread
@@ -121,7 +121,7 @@ impl<L: Layout> Reactor<L> {
         Ok(())
     }
 
-    /// Shut downs the reactor.
+    /// Shut downs the re-actor.
     pub fn shutdown(self) -> Result<(), InternalError<L>> {
         self.shutdown_send
             .send(())

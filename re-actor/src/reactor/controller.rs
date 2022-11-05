@@ -5,13 +5,13 @@ use crossbeam_channel as chan;
 use super::runtime::ControlEvent;
 use crate::{Actor, InternalError, Layout, Reactor};
 
-/// API for controlling the [`Reactor`] by the reactor instance or through
+/// API for controlling the [`Reactor`] by the re-actor instance or through
 /// multiple [`Controller`]s constructed by [`Reactor::controller`].
 pub trait ReactorApi {
-    /// Resource type managed by the reactor.
+    /// Resource type managed by the re-actor.
     type Actor: Actor;
 
-    /// Enumerator for specific reactor runtimes
+    /// Enumerator for specific re-actor runtimes
     type Pool: Layout<RootActor = Self::Actor>;
 
     /// Connects new resource and adds it to the manager.
@@ -38,7 +38,7 @@ pub trait ReactorApi {
     ) -> Result<(), InternalError<Self::Pool>>;
 }
 
-/// Instance of reactor controller which may be transferred between threads
+/// Instance of re-actor controller which may be transferred between threads
 pub struct Controller<L: Layout> {
     actor_map: HashMap<<L::RootActor as Actor>::Id, L>,
     channels: HashMap<L, chan::Sender<ControlEvent<L::RootActor>>>,

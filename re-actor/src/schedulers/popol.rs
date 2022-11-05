@@ -7,7 +7,7 @@ use crate::actors::{IoEv, IoSrc};
 use crate::{Actor, Scheduler};
 
 /// Manager for a set of resources which are polled for an event loop by the
-/// reactor by using [`popol`] library.
+/// re-actor by using [`popol`] library.
 pub struct PopolScheduler<R>
 where
     R: Actor,

@@ -8,7 +8,7 @@ use crate::actors::{IoEv, IoSrc};
 use crate::{Actor, Scheduler};
 
 /// Manager for a set of resources which are polled for an event loop by the
-/// reactor by using [`polling`] library.
+/// re-actor by using [`polling`] library.
 pub struct PollingScheduler<R>
 where
     R: Actor,
