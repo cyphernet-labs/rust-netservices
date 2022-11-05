@@ -8,7 +8,8 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use cyphernet::addr::{LocalNode, PeerAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::Curve25519;
 use cyphernet::crypto::Ec;
-use ioreactor::{Actor, Controller, IoEv, Layout, ReactorApi};
+use ioreactor::actors::IoEv;
+use ioreactor::{Actor, Controller, Layout, ReactorApi};
 
 use crate::noise_xk;
 

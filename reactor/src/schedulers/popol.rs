@@ -3,7 +3,8 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
-use crate::{Actor, IoEv, IoSrc, Scheduler};
+use crate::actors::{IoEv, IoSrc};
+use crate::{Actor, Scheduler};
 
 /// Manager for a set of resources which are polled for an event loop by the
 /// reactor by using [`popol`] library.
