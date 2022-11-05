@@ -457,6 +457,7 @@ dependencies = [
  "ioreactor",
  "log",
  "ntls",
+ "p2pd",
  "shellexpand",
  "streampipes",
 ]
@@ -490,6 +491,15 @@ name = "os_str_bytes"
 version = "6.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3baf96e39c5359d2eb0dd6ccb42c62b91d9678aa68160d261b9e0ccbf9e9dea9"
+
+[[package]]
+name = "p2pd"
+version = "0.1.0"
+dependencies = [
+ "cyphernet",
+ "ioreactor",
+ "streampipes",
+]
 
 [[package]]
 name = "pkg-config"

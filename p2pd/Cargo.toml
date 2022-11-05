@@ -1,0 +1,15 @@
+[package]
+name = "p2pd"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ioreactor = { path = "../reactor" }
+streampipes = { path = "../streampipes" }
+cyphernet = { git = "https://github.com/Internet2-WG/rust-cyphernet", features = ["ed25519"] }
+
+
+[[test]]
+name = "p2pd"

@@ -50,13 +50,13 @@ pub struct IoEv {
 /// internally, if the worker thread pool is desired it can be talked to via
 /// set of channels specified as [`Resource::OutputChannels`] associated type
 /// and provided to the resource upon its construction.
-pub trait Resource {
+pub trait Resource<R: Resource = Self> {
     type Id: Clone + Eq + Ord + Hash + Send;
     type Context: Send;
     type Cmd: Send;
     type Error;
 
-    fn with(context: Self::Context, controller: Controller<Self>) -> Result<Self, Self::Error>
+    fn with(context: Self::Context, controller: Controller<R>) -> Result<Self, Self::Error>
     where
         Self: Sized;
 
