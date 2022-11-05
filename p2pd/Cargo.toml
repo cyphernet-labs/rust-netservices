@@ -13,6 +13,7 @@ log = "0.4.17"
 
 [dev-dependencies]
 amplify = "3.13.0"
+cyphernet = { git = "https://github.com/Internet2-WG/rust-cyphernet", features = ["ed25519", "rand"] }
 
 [[test]]
 name = "p2pd"

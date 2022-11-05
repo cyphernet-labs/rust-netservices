@@ -3,7 +3,7 @@
 use std::io::{self, Read, Write};
 use std::marker::PhantomData;
 use std::net;
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, RawFd};
 
 use cyphernet::addr::{LocalNode, PeerAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::Curve25519;
