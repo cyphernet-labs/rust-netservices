@@ -36,44 +36,51 @@ pub struct IoEv {
     pub is_writable: bool,
 }
 
-/// Resource is an I/O item operated by the [`crate::Reactor`]. It should
-/// encompass all application-specific business logic for working with I/O
-/// data and can operate as a state machine, advancing on I/O events via
-/// calls to [`Resource::update_from_io`], dispatched by the reactor runtime.
-/// Resources should handle such things as handshake, encryption, data encoding,
-/// etc. and may execute their business logic by calling the reactor via
-/// [`Controller`] handler provided during the resource construction. In such a
-/// way they may create new resources and register them with the reactor,
-/// disconnect other resources or send a data to them in a non-blocking way.
-/// If a resource needs to perform extensive or blocking operation it is advised
-/// to use dedicated worker threads. While this can be handled by the resource
-/// internally, if the worker thread pool is desired it can be talked to via
-/// set of channels specified as [`Resource::OutputChannels`] associated type
-/// and provided to the resource upon its construction.
+/// Actor is an piece of business logic which depends on I/O and managed in
+/// concurrent way by a [`Reactor`] runtime.
+///
+/// Concrete implementations of the trait should encompass application-specific
+/// business logic for working with data. It is advised that they operate as a
+/// state machine, advancing on I/O events via calls to [`Actor::io_ready`],
+/// dispatched by the reactor runtime.
+///
+/// Actors should handle such things as handshake, encryption, data encoding,
+/// etc and may execute their business logic by calling to other actors or the
+/// reactor itself via [`Controller`] handler provided during the actor
+/// construction. In such a way they may create new actors and register them
+/// with the reactor or send a data to them in a non-blocking way.
+/// If an actor needs to perform extensive or blocking operation it is advised
+/// to use dedicated worker threads in a separate pools under [`Reactor`].
+///
+/// Actors can be composed from other actors, which helps with abstraction and
+/// concern separation. For instance, an actor providing TCP connection may be
+/// composed into an actor which performs encoding on that stream - and then
+/// into actor providing some framing protocol etc.
 pub trait Actor {
+    /// Thread pools layout this actor operates under. For actors which can
+    /// operate under multiple pools this associated type must be converted
+    /// into generic parameter.
+    type Layout: Layout;
+
     /// Actor's id types.
     ///
-    /// Each actor must have a unique id without a reactor.
-    type Id: Clone + Eq + Ord + Hash + Send + Debug + Display;
+    /// Each actor must have a unique id within the reactor.
+    type Id: Clone + Eq + Hash + Send + Debug + Display;
 
-    /// Extra data for actor construction
+    /// Extra data provided for constructing the actor from within reactor
+    /// runtime (see [`Controller::start_actor`].
     type Context: Send;
 
     /// Set of commands supported by the actor's business logic.
     ///
     /// In case of a single command this can be just a data type providing
     /// parameters to that command (for instance a byte string for an
-    /// actor operting as a writer).
+    /// actor operating as a writer).
     type Cmd: Send;
 
     /// Actor-specific error type, returned from I/O events handling or
     /// command-processing business logic.
     type Error: StdError;
-
-    /// Thread pools layout this actor operates under. For actors which can
-    /// operate under multiple pools this associated type must be converted
-    /// into generic parameter.
-    type Layout: Layout;
 
     /// Constructs actor giving some `context`. Each actor is provided with the
     /// controller, which it should store internally in cases when it requires
