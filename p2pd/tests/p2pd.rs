@@ -7,36 +7,37 @@ use std::error::Error as StdError;
 use cyphernet::addr::LocalNode;
 use cyphernet::crypto::ed25519::PrivateKey;
 use ioreactor::schedulers::PopolScheduler;
-use ioreactor::{Actor, Handler, InternalError, Pool, PoolInfo, Reactor, ReactorApi};
+use ioreactor::{Actor, Handler, InternalError, Layout, Pool, Reactor, ReactorApi};
 
 use p2pd::peer::{Action, Context, PeerActor};
 
 fn main() -> Result<(), Box<dyn StdError>> {
-    let mut reactor = Reactor::<DaemonPool>::new()?;
+    let mut reactor = Reactor::<Microservices>::new()?;
 
     let nsh_socket = Context {
         method: Action::Connect("127.0.0.1".parse().unwrap()),
         local_node: LocalNode::from(PrivateKey::test()),
     };
-    reactor.start_actor(DaemonPool::Peer, nsh_socket)?;
+    reactor.start_actor(Microservices::Peer, nsh_socket)?;
     reactor.join().unwrap();
     Ok(())
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Display, Debug)]
 #[display(lowercase)]
-enum DaemonPool {
+enum Microservices {
     Peer = 0,
+    Worker = 1,
 }
 
-const PEER_POOL: u32 = DaemonPool::Peer as u32;
+const PEER_POOL: u32 = Microservices::Peer as u32;
 
-impl Pool for DaemonPool {
+impl Layout for Microservices {
     type RootActor = DaemonActor;
 
-    fn default_pools() -> Vec<PoolInfo<DaemonActor, Self>> {
-        vec![PoolInfo::new(
-            DaemonPool::Peer,
+    fn default_pools() -> Vec<Pool<DaemonActor, Self>> {
+        vec![Pool::new(
+            Microservices::Peer,
             PopolScheduler::<DaemonActor>::new(),
             Service,
         )]
@@ -51,24 +52,28 @@ impl Pool for DaemonPool {
     }
 }
 
-impl From<u32> for DaemonPool {
+impl From<u32> for Microservices {
     fn from(value: u32) -> Self {
-        DaemonPool::Peer
+        match value {
+            x if x == Microservices::Peer as u32 => Microservices::Peer,
+            x if x == Microservices::Worker as u32 => Microservices::Worker,
+            _ => panic!("invalid daemon pool id {}", value),
+        }
     }
 }
 
-impl From<DaemonPool> for u32 {
-    fn from(value: DaemonPool) -> Self {
+impl From<Microservices> for u32 {
+    fn from(value: Microservices) -> Self {
         value as u32
     }
 }
 
-type DaemonActor = PeerActor<DaemonPool, PEER_POOL>;
+type DaemonActor = PeerActor<Microservices, PEER_POOL>;
 
 struct Service;
 
-impl Handler<DaemonPool> for Service {
-    fn handle_err(&mut self, err: InternalError<DaemonPool>) {
+impl Handler<Microservices> for Service {
+    fn handle_err(&mut self, err: InternalError<Microservices>) {
         panic!("{}", err);
     }
 }

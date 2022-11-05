@@ -8,7 +8,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use cyphernet::addr::{LocalNode, PeerAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::Curve25519;
 use cyphernet::crypto::Ec;
-use ioreactor::{Actor, Controller, IoEv, Pool, ReactorApi};
+use ioreactor::{Actor, Controller, IoEv, Layout, ReactorApi};
 
 use crate::noise_xk;
 
@@ -26,7 +26,7 @@ pub struct NxkContext<EC: Ec> {
 
 pub type NxkStream<EC> = noise_xk::Stream<EC, net::TcpStream>;
 
-pub struct NxkSession<P: Pool, EC: Ec = Curve25519> {
+pub struct NxkSession<P: Layout, EC: Ec = Curve25519> {
     stream: NxkStream<EC>,
     socket_addr: net::SocketAddr,
     peer_addr: Option<NxkAddr<EC>>,
@@ -34,7 +34,7 @@ pub struct NxkSession<P: Pool, EC: Ec = Curve25519> {
     _phantom: PhantomData<P>,
 }
 
-impl<P: Pool, EC: Ec> NxkSession<P, EC> {
+impl<P: Layout, EC: Ec> NxkSession<P, EC> {
     pub fn accept(
         tcp_stream: net::TcpStream,
         remote_socket_addr: net::SocketAddr,
@@ -50,7 +50,7 @@ impl<P: Pool, EC: Ec> NxkSession<P, EC> {
     }
 }
 
-impl<P: Pool, EC: Ec> NxkSession<P, EC>
+impl<P: Layout, EC: Ec> NxkSession<P, EC>
 where
     EC: Copy,
 {
@@ -68,19 +68,19 @@ where
     }
 }
 
-impl<P: Pool, EC: Ec> AsRawFd for NxkSession<P, EC> {
+impl<P: Layout, EC: Ec> AsRawFd for NxkSession<P, EC> {
     fn as_raw_fd(&self) -> RawFd {
         self.stream.as_raw_fd()
     }
 }
 
-impl<P: Pool, EC: Ec> Read for NxkSession<P, EC> {
+impl<P: Layout, EC: Ec> Read for NxkSession<P, EC> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.stream.read(buf)
     }
 }
 
-impl<P: Pool, EC: Ec> Write for NxkSession<P, EC> {
+impl<P: Layout, EC: Ec> Write for NxkSession<P, EC> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.stream.write(buf)
     }
@@ -90,7 +90,7 @@ impl<P: Pool, EC: Ec> Write for NxkSession<P, EC> {
     }
 }
 
-impl<P: Pool, EC: Ec> Actor for NxkSession<P, EC>
+impl<P: Layout, EC: Ec> Actor for NxkSession<P, EC>
 where
     EC: Copy,
     EC::PubKey: Send,
@@ -100,7 +100,7 @@ where
     type Context = NxkContext<EC>;
     type Cmd = Vec<u8>;
     type Error = io::Error;
-    type PoolSystem = P;
+    type Layout = P;
 
     fn with(context: Self::Context, _controller: Controller<P>) -> Result<Self, Self::Error>
     where
@@ -137,19 +137,21 @@ where
     }
 }
 
-pub struct NxkListener<P: Pool, const SESSION_POOL_ID: u32, EC: Ec = Curve25519> {
+pub struct NxkListener<P: Layout, const SESSION_POOL_ID: u32, EC: Ec = Curve25519> {
     socket: net::TcpListener,
     local_node: LocalNode<EC>,
     controller: Controller<P>,
 }
 
-impl<P: Pool, const SESSION_POOL_ID: u32, EC: Ec> AsRawFd for NxkListener<P, SESSION_POOL_ID, EC> {
+impl<P: Layout, const SESSION_POOL_ID: u32, EC: Ec> AsRawFd
+    for NxkListener<P, SESSION_POOL_ID, EC>
+{
     fn as_raw_fd(&self) -> RawFd {
         self.socket.as_raw_fd()
     }
 }
 
-impl<P: Pool, const SESSION_POOL_ID: u32, EC> Actor for NxkListener<P, SESSION_POOL_ID, EC>
+impl<P: Layout, const SESSION_POOL_ID: u32, EC> Actor for NxkListener<P, SESSION_POOL_ID, EC>
 where
     EC: Ec + Clone + 'static,
     EC::PubKey: Send + Clone,
@@ -159,7 +161,7 @@ where
     type Context = (LocalNode<EC>, net::SocketAddr);
     type Cmd = ();
     type Error = io::Error;
-    type PoolSystem = P;
+    type Layout = P;
 
     fn with(context: Self::Context, controller: Controller<P>) -> Result<Self, Self::Error>
     where

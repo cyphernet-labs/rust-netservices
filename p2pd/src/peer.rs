@@ -1,6 +1,6 @@
 use cyphernet::addr::LocalNode;
 use cyphernet::crypto::ed25519::Curve25519;
-use ioreactor::{Actor, Controller, IoEv, Pool};
+use ioreactor::{Actor, Controller, IoEv, Layout};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::{io, net};
 
@@ -38,21 +38,21 @@ impl From<&NxkContext<Curve25519>> for Context {
     }
 }
 
-pub enum PeerActor<P: Pool, const SESSION_POOL_ID: u32> {
+pub enum PeerActor<P: Layout, const SESSION_POOL_ID: u32> {
     Listener(NxkListener<P, SESSION_POOL_ID>),
     Session(NxkSession<P>),
 }
 
-impl<P: Pool, const SESSION_POOL_ID: u32> Actor for PeerActor<P, SESSION_POOL_ID> {
+impl<P: Layout, const SESSION_POOL_ID: u32> Actor for PeerActor<P, SESSION_POOL_ID> {
     type Id = RawFd;
     type Context = Context;
     type Cmd = Vec<u8>;
     type Error = io::Error;
-    type PoolSystem = P;
+    type Layout = P;
 
     fn with(
         context: Self::Context,
-        controller: Controller<Self::PoolSystem>,
+        controller: Controller<Self::Layout>,
     ) -> Result<Self, Self::Error>
     where
         Self: Sized,
