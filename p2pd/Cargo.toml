@@ -9,7 +9,7 @@ edition = "2021"
 ioreactor = { path = "../reactor" }
 streampipes = { path = "../streampipes" }
 cyphernet = { git = "https://github.com/Internet2-WG/rust-cyphernet", features = ["ed25519"] }
-
+log = "0.4.17"
 
 [[test]]
 name = "p2pd"

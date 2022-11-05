@@ -13,13 +13,13 @@ use crate::noise_xk;
 
 pub type NxkAddr<EC = Curve25519> = UniversalAddr<PeerAddr<EC, net::SocketAddr>>;
 
-pub enum NxkMethod<EC: Ec> {
+pub enum NxkAction<EC: Ec> {
     Accept(net::TcpStream, net::SocketAddr),
     Connect(NxkAddr<EC>),
 }
 
 pub struct NxkContext<EC: Ec> {
-    pub method: NxkMethod<EC>,
+    pub method: NxkAction<EC>,
     pub local_node: LocalNode<EC>,
 }
 
@@ -94,7 +94,7 @@ where
 {
     type Id = RawFd;
     type Context = NxkContext<EC>;
-    type Cmd = ();
+    type Cmd = Vec<u8>;
     type Error = io::Error;
 
     fn with(context: Self::Context, controller: Controller<Self>) -> Result<Self, Self::Error>
@@ -102,12 +102,12 @@ where
         Self: Sized,
     {
         match context.method {
-            NxkMethod::Accept(tcp_stream, remote_socket_addr) => Ok(NxkSession::accept(
+            NxkAction::Accept(tcp_stream, remote_socket_addr) => Ok(NxkSession::accept(
                 tcp_stream,
                 remote_socket_addr,
                 context.local_node,
             )),
-            NxkMethod::Connect(nsh_addr) => NxkSession::connect(nsh_addr, context.local_node),
+            NxkAction::Connect(nsh_addr) => NxkSession::connect(nsh_addr, context.local_node),
         }
     }
 
@@ -123,10 +123,8 @@ where
         Ok(())
     }
 
-    fn handle_cmd(&mut self, cmd: Self::Cmd) -> Result<(), Self::Error> {
-        // TODO: Do writes, like
-        // self.stream.write_all(&data)?
-        todo!()
+    fn handle_cmd(&mut self, data: Vec<u8>) -> Result<(), Self::Error> {
+        self.stream.write_all(&data)
     }
 
     fn handle_err(&mut self, err: Self::Error) -> Result<(), Self::Error> {
@@ -186,7 +184,7 @@ where
     fn io_ready(&mut self, _: IoEv) -> Result<(), Self::Error> {
         let (stream, peer_socket_addr) = self.socket.accept()?;
         let nsh_info = NxkContext {
-            method: NxkMethod::Accept(stream, peer_socket_addr),
+            method: NxkAction::Accept(stream, peer_socket_addr),
             local_node: self.local_node.clone(),
         };
         self.controller

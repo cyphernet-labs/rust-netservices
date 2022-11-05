@@ -11,7 +11,7 @@ use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr
 use cyphernet::crypto::ed25519::Curve25519;
 use ioreactor::popol::PollManager;
 use ioreactor::{Broker, Controller, InternalError, IoEv, Reactor, ReactorApi, Resource};
-use p2pd::nxk_tcp::{NxkAddr, NxkContext, NxkListener, NxkMethod, NxkSession};
+use p2pd::nxk_tcp::{NxkAction, NxkAddr, NxkContext, NxkListener, NxkSession};
 
 pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
@@ -164,11 +164,11 @@ pub enum NshMethod {
     Connect(NxkAddr),
 }
 
-impl From<NxkMethod<Curve25519>> for NshMethod {
-    fn from(method: NxkMethod<Curve25519>) -> Self {
+impl From<NxkAction<Curve25519>> for NshMethod {
+    fn from(method: NxkAction<Curve25519>) -> Self {
         match method {
-            NxkMethod::Accept(stream, addr) => Self::Accept(stream, addr),
-            NxkMethod::Connect(addr) => Self::Connect(addr),
+            NxkAction::Accept(stream, addr) => Self::Accept(stream, addr),
+            NxkAction::Connect(addr) => Self::Connect(addr),
         }
     }
 }
@@ -195,7 +195,7 @@ pub enum NshResource {
 impl Resource for NshResource {
     type Id = RawFd;
     type Context = NshContext;
-    type Cmd = ();
+    type Cmd = Vec<u8>;
     type Error = io::Error;
 
     fn with(context: Self::Context, controller: Controller<Self>) -> Result<Self, Self::Error>
@@ -232,15 +232,13 @@ impl Resource for NshResource {
     fn handle_cmd(&mut self, cmd: Self::Cmd) -> Result<(), Self::Error> {
         match self {
             Self::Listener(_) => panic!("data sent to TCP listener"),
-            Self::Session(stream) => {
-                stream.handle_cmd(())?;
-                todo!();
-            }
+            Self::Session(stream) => stream.handle_cmd(cmd),
         }
     }
 
     fn handle_err(&mut self, err: Self::Error) -> Result<(), Self::Error> {
-        todo!()
+        log::error!("resource failure. Details: {}", err);
+        Ok(())
     }
 }
 
