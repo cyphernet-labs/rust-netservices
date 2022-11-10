@@ -7,7 +7,7 @@ use reactor::actors::IoEv;
 use reactor::{Actor, Controller, InternalError, ReactorApi};
 use streampipes::Stream;
 
-use crate::daemon::{ActorId, Message, Microservices};
+use crate::daemon::{ActorId, Message, Threads};
 use crate::persistence::PersistenceCmd;
 use crate::router::RouterCmd;
 use crate::ResourceId;
@@ -39,11 +39,11 @@ pub enum Response {
 pub struct RpcActor {
     id: ClientId,
     stream: Box<dyn Stream>,
-    controller: Controller<Microservices>,
+    controller: Controller<Threads>,
 }
 
 impl Actor for RpcActor {
-    type Layout = Microservices;
+    type Layout = Threads;
     type Id = ClientId;
     type Context = (ClientId, Box<dyn Stream + Send>);
     type Cmd = Response;
@@ -91,7 +91,7 @@ impl Actor for RpcActor {
 }
 
 impl RpcActor {
-    fn handle_request(&mut self, request: Request) -> Result<(), InternalError<Microservices>> {
+    fn handle_request(&mut self, request: Request) -> Result<(), InternalError<Threads>> {
         let id = ActorId::Rpc(self.id);
         match request {
             Request::ListPeers => self
@@ -103,7 +103,7 @@ impl RpcActor {
                     method: peer::Action::Connect(addr),
                     local_node: self.local_node,
                 });
-                self.controller.start_actor(Microservices::P2p, ctx)
+                self.controller.start_actor(Threads::P2p, ctx)
             }
 
             Request::DisconnectPeer(id) => self.controller.stop_actor(ActorId::P2p(id)),

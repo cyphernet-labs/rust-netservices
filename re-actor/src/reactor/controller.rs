@@ -115,13 +115,13 @@ impl<L: Layout> ReactorApi for Controller<L> {
         pool: L,
         ctx: <Self::Actor as Actor>::Context,
     ) -> Result<(), InternalError<L>> {
-        self.channel_for(pool)?.send(ControlEvent::RunActor(ctx))?;
+        self.channel_for(pool)?.send(ControlEvent::Connect(ctx))?;
         Ok(())
     }
 
     fn stop_actor(&mut self, id: <Self::Actor as Actor>::Id) -> Result<(), InternalError<L>> {
         let pool = self.pool_for(id.clone())?;
-        self.channel_for(pool)?.send(ControlEvent::StopActor(id))?;
+        self.channel_for(pool)?.send(ControlEvent::Disconnect(id))?;
         Ok(())
     }
 

@@ -14,7 +14,6 @@
 //! composed into an actor which performs encoding on that stream - and then
 //! into actor providing some framing protocol etc.
 
-pub mod crossbeam;
 #[cfg(feature = "mio")]
 pub mod mio;
 #[cfg(feature = "socket2")]

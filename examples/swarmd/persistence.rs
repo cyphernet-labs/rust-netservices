@@ -3,7 +3,7 @@ use std::os::fd::RawFd;
 use reactor::actors::IoEv;
 use reactor::{Actor, Controller};
 
-use crate::daemon::Microservices;
+use crate::daemon::Threads;
 use crate::{daemon, ResourceId};
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Getters, Debug, Display)]
@@ -15,7 +15,7 @@ pub struct PersistenceId {
 
 pub struct Persistence {
     id: PersistenceId,
-    controller: Controller<Microservices>,
+    controller: Controller<Threads>,
 }
 
 #[derive(Debug)]
@@ -26,7 +26,7 @@ pub enum PersistenceCmd {
 }
 
 impl Actor for Persistence {
-    type Layout = Microservices;
+    type Layout = Threads;
     type Id = PersistenceId;
     type Context = u64;
     type Cmd = PersistenceCmd;

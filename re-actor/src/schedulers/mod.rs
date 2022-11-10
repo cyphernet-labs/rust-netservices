@@ -1,4 +1,3 @@
-mod crossbeam;
 #[cfg(feature = "epoll")]
 mod epoll;
 #[cfg(feature = "mio")]
@@ -11,7 +10,6 @@ mod threaded;
 #[cfg(feature = "zmq")]
 mod zeromq;
 
-pub use self::crossbeam::CrossbeamScheduler;
 #[cfg(feature = "polling")]
 pub use self::polling::PollingScheduler;
 #[cfg(feature = "popol")]

@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use reactor::actors::IoEv;
-use reactor::schedulers::{CrossbeamScheduler, PopolScheduler};
+use reactor::schedulers::PopolScheduler;
 use reactor::{Actor, Controller, InternalError, Layout, Pool};
 
 use crate::p2p::{P2pActor, P2pMsg};
@@ -12,48 +12,30 @@ use crate::PeerId;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Display, Debug)]
 #[display(lowercase)]
-pub enum Microservices {
+pub enum Threads {
     P2p = 0,
     Rpc = 1,
     Router = 10,
     Persistence = 11,
 }
 
-pub const P2P_THREAD: u32 = Microservices::P2p as u32;
-pub const RPC_THREAD: u32 = Microservices::Rpc as u32;
-pub const ROUTER_THREAD: u32 = Microservices::Router as u32;
-pub const PERSISTENCE_THREAD: u32 = Microservices::Persistence as u32;
+pub const P2P_THREAD: u32 = Threads::P2p as u32;
+pub const RPC_THREAD: u32 = Threads::Rpc as u32;
+pub const ROUTER_THREAD: u32 = Threads::Router as u32;
+pub const PERSISTENCE_THREAD: u32 = Threads::Persistence as u32;
 
-impl Layout for Microservices {
+impl Layout for Threads {
     type RootActor = DaemonActor;
 
     fn default_pools() -> Vec<Pool<DaemonActor, Self>> {
-        vec![
-            Pool::new(
-                Microservices::P2p,
-                PopolScheduler::<DaemonActor>::new(),
-                Handler,
-            ),
-            Pool::new(
-                Microservices::Rpc,
-                PopolScheduler::<DaemonActor>::new(),
-                Handler,
-            ),
-            Pool::new(
-                Microservices::Router,
-                CrossbeamScheduler::<DaemonActor>::new(),
-                Handler,
-            ),
-            Pool::new(
-                Microservices::Persistence,
-                PopolScheduler::<DaemonActor>::new(),
-                Handler,
-            ),
-        ]
+        vec![Pool::new(
+            Threads::P2p,
+            PopolScheduler::<DaemonActor>::new(),
+            Router::default(),
+        )]
     }
 
     fn convert(other_ctx: Box<dyn Any>) -> <Self::RootActor as Actor>::Context {
-        // TODO: Support context deduction for all sub-actors
         let ctx = other_ctx
             .downcast::<Context>()
             .expect("wrong context object");
@@ -62,20 +44,20 @@ impl Layout for Microservices {
     }
 }
 
-impl From<u32> for Microservices {
+impl From<u32> for Threads {
     fn from(value: u32) -> Self {
         match value {
-            x if x == Microservices::P2p as u32 => Microservices::P2p,
-            x if x == Microservices::Rpc as u32 => Microservices::Rpc,
-            x if x == Microservices::Router as u32 => Microservices::Router,
-            x if x == Microservices::Persistence as u32 => Microservices::Persistence,
+            x if x == Threads::P2p as u32 => Threads::P2p,
+            x if x == Threads::Rpc as u32 => Threads::Rpc,
+            x if x == Threads::Router as u32 => Threads::Router,
+            x if x == Threads::Persistence as u32 => Threads::Persistence,
             _ => panic!("invalid daemon pool id {}", value),
         }
     }
 }
 
-impl From<Microservices> for u32 {
-    fn from(value: Microservices) -> Self {
+impl From<Threads> for u32 {
+    fn from(value: Threads) -> Self {
         value as u32
     }
 }
@@ -118,7 +100,7 @@ pub enum DaemonActor {
 }
 
 impl Actor for DaemonActor {
-    type Layout = Microservices;
+    type Layout = Threads;
     type Id = ActorId;
     type Context = Context;
     type Cmd = Message;
@@ -151,7 +133,7 @@ impl Actor for DaemonActor {
 
     fn io_ready(&mut self, io: IoEv) -> Result<(), Self::Error> {
         match self {
-            DaemonActor::P2p(actor) => actor.io_ready(io).map_err(Error::from),
+            DaemonActor::P2p(actor) => actor.io_ready(io),
             DaemonActor::Rpc(actor) => actor.io_ready(io),
             DaemonActor::Router(actor) => actor.io_ready(io),
             DaemonActor::Persistence(actor) => actor.io_ready(io),
@@ -160,7 +142,7 @@ impl Actor for DaemonActor {
 
     fn handle_cmd(&mut self, cmd: Self::Cmd) -> Result<(), Self::Error> {
         match (self, cmd) {
-            (Self::P2p(actor), Message::R2p(msg)) => actor.handle_cmd(msg).map_err(Error::from),
+            (Self::P2p(actor), Message::R2p(msg)) => actor.handle_cmd(msg),
             (Self::Rpc(actor), Message::Rpc(msg)) => actor.handle_cmd(msg),
             (Self::Router(actor), Message::Router(msg)) => actor.handle_cmd(msg),
             (Self::Persistence(actor), Message::Persistence(msg)) => actor.handle_cmd(msg),
@@ -180,8 +162,8 @@ impl Actor for DaemonActor {
 
 pub struct Handler;
 
-impl reactor::Handler<Microservices> for Handler {
-    fn handle_err(&mut self, err: InternalError<Microservices>) {
+impl reactor::Handler<Threads> for Handler {
+    fn handle_err(&mut self, err: InternalError<Threads>) {
         panic!("{}", err);
     }
 }
@@ -190,5 +172,5 @@ impl reactor::Handler<Microservices> for Handler {
 #[display(inner)]
 pub enum Error {
     #[from(InternalError<Threads>)]
-    Internal(Box<InternalError<Microservices>>),
+    Internal(Box<InternalError<Threads>>),
 }

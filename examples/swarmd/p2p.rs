@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::io;
 
 use netservices::peer;
 use netservices::peer::PeerActor;
@@ -7,7 +6,7 @@ use reactor::actors::IoEv;
 use reactor::{Actor, Controller};
 
 use crate::daemon::P2P_THREAD;
-use crate::{daemon, Microservices, PeerId, ResourceId, RouteMap};
+use crate::{daemon, PeerId, ResourceId, RouteMap, Threads};
 
 #[derive(Debug)]
 pub enum P2pMsg {
@@ -25,15 +24,15 @@ pub enum P2pMsg {
 }
 
 pub struct P2pActor {
-    peer: PeerActor<Microservices, P2P_THREAD>,
+    peer: PeerActor<Threads, P2P_THREAD>,
 }
 
 impl Actor for P2pActor {
-    type Layout = Microservices;
+    type Layout = Threads;
     type Id = PeerId;
     type Context = peer::Context;
     type Cmd = P2pMsg;
-    type Error = io::Error;
+    type Error = daemon::Error;
 
     fn with(
         context: Self::Context,
@@ -42,22 +41,22 @@ impl Actor for P2pActor {
     where
         Self: Sized,
     {
-        PeerActor::with(context, controller).map(Self)
+        todo!()
     }
 
     fn id(&self) -> Self::Id {
-        self.0.id()
+        todo!()
     }
 
     fn io_ready(&mut self, io: IoEv) -> Result<(), Self::Error> {
-        self.0.io_ready(io)
+        todo!()
     }
 
     fn handle_cmd(&mut self, cmd: Self::Cmd) -> Result<(), Self::Error> {
-        match cmd {}
+        todo!()
     }
 
     fn handle_err(&mut self, err: Self::Error) -> Result<(), Self::Error> {
-        self.0.handle_err(err)
+        todo!()
     }
 }
