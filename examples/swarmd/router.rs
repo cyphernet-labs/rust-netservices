@@ -9,7 +9,7 @@ use crate::daemon::{ActorId, Message};
 use crate::p2p::P2pMsg;
 use crate::persistence::{PersistenceCmd, PersistenceId};
 use crate::rpc::Response;
-use crate::{daemon, PeerId, ResourceId, RouteMap, Threads};
+use crate::{daemon, Microservices, PeerId, ResourceId, RouteMap};
 
 #[derive(Debug)]
 pub enum RouterCmd {
@@ -38,14 +38,14 @@ pub struct Router {
     routes: RouteMap,
     known_resources: BTreeSet<PeerId>,
     local_resources: BTreeSet<ResourceId>,
-    controller: Controller<Threads>,
+    controller: Controller<Microservices>,
     free_workers: VecDeque<PersistenceId>,
     busy_workers: HashMap<PersistenceId, Option<ActorId>>,
     peers: BTreeSet<PeerId>,
 }
 
 impl Actor for Router {
-    type Layout = Threads;
+    type Layout = Microservices;
     type Id = RouterId;
     type Context = RouterConfig;
     type Cmd = RouterCmd;
@@ -60,7 +60,10 @@ impl Actor for Router {
     {
         let mut worker_ids = VecDeque::with_capacity(context.persistence_pool_size.into());
         for index in 0..context.persistence_pool_size.into() {
-            controller.start_actor(Threads::Persistence, daemon::Context::Persistence(index))?;
+            controller.start_actor(
+                Microservices::Persistence,
+                daemon::Context::Persistence(index),
+            )?;
             worker_ids.push_back(index);
         }
 
@@ -155,7 +158,7 @@ impl Router {
         &mut self,
         task: PersistenceCmd,
         source: Option<ActorId>,
-    ) -> Result<(), InternalError<Threads>> {
+    ) -> Result<(), InternalError<Microservices>> {
         loop {
             if let Some(worker_id) = self.free_workers.pop_front() {
                 self.busy_workers.insert(worker_id, source);
@@ -173,7 +176,7 @@ impl Router {
         &mut self,
         worker_id: PersistenceId,
         report: Option<Message>,
-    ) -> Result<(), InternalError<Threads>> {
+    ) -> Result<(), InternalError<Microservices>> {
         if let Some(source) = self.busy_workers.remove(&worker_id) {
             if let Some(actor_id) = source {
                 self.controller.send(

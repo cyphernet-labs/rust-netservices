@@ -8,10 +8,10 @@ use crate::{Actor, Controller, Handler, InternalError, Layout, Scheduler, Timeou
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub enum ControlEvent<A: Actor> {
     /// Request re-actor to connect to the resource with some context
-    Connect(A::Context),
+    RunActor(A::Context),
 
     /// Request re-actor to disconnect from a resource
-    Disconnect(A::Id),
+    StopActor(A::Id),
 
     /// Ask re-actor to wake up after certain interval
     SetTimer(),
@@ -89,7 +89,7 @@ impl<L: Layout> PoolRuntime<L> {
                 }
                 Err(chan::TryRecvError::Empty) => break,
                 Ok(event) => match event {
-                    ControlEvent::Connect(context) => {
+                    ControlEvent::RunActor(context) => {
                         match L::RootActor::with(context, controller.clone()) {
                             Err(err) => self
                                 .handler
@@ -107,7 +107,7 @@ impl<L: Layout> PoolRuntime<L> {
                         };
                         // TODO: Consider to error to the user if the resource was already present
                     }
-                    ControlEvent::Disconnect(id) => {
+                    ControlEvent::StopActor(id) => {
                         self.scheduler.unregister_actor(&id).unwrap_or_else(|err| {
                             self.handler
                                 .handle_err(InternalError::ActorError(self.id, err))
