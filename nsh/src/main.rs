@@ -8,8 +8,8 @@ use std::{fs, io, net};
 use clap::Parser;
 use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::{Curve25519, PrivateKey};
-use p2pd::nxk_tcp::NxkAddr;
-use p2pd::peer::{Action, Context, PeerActor};
+use netservices::nxk_tcp::NxkAddr;
+use netservices::peer::{Action, Context, PeerActor};
 use reactor::schedulers::PopolScheduler;
 use reactor::{Actor, Handler, InternalError, Layout, Pool, Reactor, ReactorApi};
 

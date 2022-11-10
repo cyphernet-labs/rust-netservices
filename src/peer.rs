@@ -1,9 +1,10 @@
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::{io, net};
+
 use cyphernet::addr::LocalNode;
 use cyphernet::crypto::ed25519::Curve25519;
 use reactor::actors::IoEv;
 use reactor::{Actor, Controller, Layout};
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::{io, net};
 
 use crate::nxk_tcp::{NxkAction, NxkAddr, NxkContext, NxkSession, NxkSpawner};
 
@@ -93,7 +94,6 @@ impl<P: Layout, const SESSION_POOL_ID: u32> Actor for PeerActor<P, SESSION_POOL_
     }
 
     fn handle_err(&mut self, err: Self::Error) -> Result<(), Self::Error> {
-        log::error!("resource failure. Details: {}", err);
-        Ok(())
+        Err(err)
     }
 }

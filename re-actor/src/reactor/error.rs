@@ -35,7 +35,7 @@ pub enum InternalError<L: Layout> {
     ThreadError(L),
 }
 
-// Required due to Derive macro adding R: Debug unnecessary constraint
+// Required due to Derive macro adding L::RootActor: Debug unnecessary constraint
 impl<L: Layout> Debug for InternalError<L> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
