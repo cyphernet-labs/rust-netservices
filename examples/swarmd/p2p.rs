@@ -4,10 +4,9 @@ use std::io;
 use netservices::peer;
 use netservices::peer::PeerActor;
 use reactor::actors::IoEv;
-use reactor::{Actor, Controller, ReactorApi};
+use reactor::{Actor, Controller};
 
-use crate::daemon::{ActorId, Message, P2P_THREAD};
-use crate::router::RouterCmd;
+use crate::daemon::P2P_THREAD;
 use crate::{daemon, Microservices, PeerId, ResourceId, RouteMap};
 
 #[derive(Debug)]
@@ -27,7 +26,6 @@ pub enum P2pMsg {
 
 pub struct P2pActor {
     peer: PeerActor<Microservices, P2P_THREAD>,
-    controller: Controller<Microservices>,
 }
 
 impl Actor for P2pActor {
@@ -52,23 +50,14 @@ impl Actor for P2pActor {
     }
 
     fn io_ready(&mut self, io: IoEv) -> Result<(), Self::Error> {
-        if io.is_readable {
-            self.handle_read()
-        }
+        self.0.io_ready(io)
     }
 
-    fn handle_cmd(&mut self, cmd: Self::Cmd) -> Result<(), Self::Error> {}
+    fn handle_cmd(&mut self, cmd: Self::Cmd) -> Result<(), Self::Error> {
+        match cmd {}
+    }
 
     fn handle_err(&mut self, err: Self::Error) -> Result<(), Self::Error> {
         self.0.handle_err(err)
-    }
-}
-
-impl P2pActor {
-    fn handle_read(&self) {
-        self.controller.send(
-            ActorId::Router,
-            Message::Router(RouterCmd::ForwardToWorker {}),
-        )
     }
 }

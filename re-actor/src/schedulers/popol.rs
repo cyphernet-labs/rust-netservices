@@ -11,7 +11,7 @@ use crate::{Actor, Scheduler};
 pub struct PopolScheduler<R>
 where
     R: Actor,
-    R::IoResource: AsRawFd,
+    R::Id: AsRawFd,
 {
     poll: popol::Poll<R::Id>,
     events: VecDeque<IoSrc<R::Id>>,
@@ -20,7 +20,7 @@ where
 impl<R> PopolScheduler<R>
 where
     R: Actor,
-    R::IoResource: AsRawFd,
+    R::Id: AsRawFd,
 {
     pub fn new() -> Self {
         Self {
@@ -33,16 +33,16 @@ where
 impl<R> Scheduler<R> for PopolScheduler<R>
 where
     R: Actor,
-    R::IoResource: AsRawFd,
+    R::Id: AsRawFd,
     R::Error: From<io::Error>,
 {
     fn has_actor(&self, id: &R::Id) -> bool {
         self.poll.get(id).is_some()
     }
 
-    fn register_actor(&mut self, actor: &R) -> Result<(), R::Error> {
-        let rsc = actor.io_resource();
-        self.poll.register(rsc.clone(), &rsc, popol::event::ALL);
+    fn register_actor(&mut self, resource: &R) -> Result<(), R::Error> {
+        let id = resource.id();
+        self.poll.register(id.clone(), &id, popol::event::ALL);
         Ok(())
     }
 
@@ -74,9 +74,9 @@ where
 impl<R> Iterator for PopolScheduler<R>
 where
     R: Actor,
-    R::IoResource: AsRawFd,
+    R::Id: AsRawFd,
 {
-    type Item = IoSrc<R::IoResource>;
+    type Item = IoSrc<R::Id>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.events.pop_front()

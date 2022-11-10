@@ -23,7 +23,7 @@ use crate::actors::{Actor, IoSrc};
 
 /// Implements specific way of scheduling how multiple actors under a
 /// [`Reactor`] run in a concurrent way.
-pub trait Scheduler<R: Actor>: Iterator<Item = IoSrc<R::IoResource>> + Send {
+pub trait Scheduler<R: Actor>: Iterator<Item = IoSrc<R::Id>> + Send {
     /// Detects whether a resource under the given id is known to the manager.
     fn has_actor(&self, id: &R::Id) -> bool;
 
