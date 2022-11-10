@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::marker::PhantomData;
 use std::time::Duration;
 
 use crossbeam_channel as chan;
@@ -10,23 +9,30 @@ use crate::Scheduler;
 
 /// Scheduler which is able to run actor not depending on the I/O events
 /// other than in-memory channels;
-pub struct CrossbeamScheduler<R: CrossbeamActor<T>, T: Send> {
+pub struct CrossbeamScheduler<R: CrossbeamActor<T>, T: Send>
+where
+    R::Cmd: From<T>,
+{
     events: VecDeque<IoSrc<R::Id>>,
-    channels: Vec<chan::Receiver<R::Cmd>>,
-    _phantom: PhantomData<T>,
+    channels: Vec<chan::Receiver<T>>,
 }
 
-impl<R: CrossbeamActor<T>, T: Send> CrossbeamScheduler<R, T> {
+impl<R: CrossbeamActor<T>, T: Send> CrossbeamScheduler<R, T>
+where
+    R::Cmd: From<T>,
+{
     pub fn new() -> Self {
         Self {
             events: empty!(),
             channels: none!(),
-            _phantom: default!(),
         }
     }
 }
 
-impl<R: CrossbeamActor<T>, T: Send> Scheduler<R> for CrossbeamScheduler<R, T> {
+impl<R: CrossbeamActor<T>, T: Send> Scheduler<R> for CrossbeamScheduler<R, T>
+where
+    R::Cmd: From<T>,
+{
     fn has_actor(&self, id: &R::Id) -> bool {
         self.channels.contains(id)
     }
@@ -70,8 +76,11 @@ impl<R: CrossbeamActor<T>, T: Send> Scheduler<R> for CrossbeamScheduler<R, T> {
     }
 }
 
-impl<R: CrossbeamActor<T>, T: Send> Iterator for CrossbeamScheduler<R, T> {
-    type Item = IoSrc<R::Id>;
+impl<R: CrossbeamActor<T>, T: Send> Iterator for CrossbeamScheduler<R, T>
+where
+    R::Cmd: From<T>,
+{
+    type Item = IoSrc<R::IoResource>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.events.pop_front()

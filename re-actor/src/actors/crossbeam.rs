@@ -7,6 +7,7 @@ use crate::Actor;
 
 pub trait CrossbeamActor<T>
 where
-    Self: Actor<Id = chan::Receiver<T>>,
+    Self: Actor<IoResource = chan::Receiver<T>>,
+    Self::Cmd: From<T>,
 {
 }

@@ -61,6 +61,9 @@ pub trait Actor {
     /// Each actor must have a unique id within the re-actor.
     type Id: Clone + Eq + Hash + Send + Debug + Display;
 
+    /// I/O resource operated by the actor.
+    type IoResource;
+
     /// Extra data provided for constructing the actor from within re-actor
     /// runtime (see [`Controller::start_actor`].
     type Context: Send;
@@ -88,6 +91,10 @@ pub trait Actor {
 
     /// Returns actor's id.
     fn id(&self) -> Self::Id;
+
+    /// Returns reference to the I/O resource operated by the actor. Used by
+    /// a scheduler to poll/select on a set of resources inside the event loop.
+    fn io_resource(&self) -> &Self::IoResource;
 
     /// Performs input and/or output operations basing on the flags provided.
     /// For instance, flushes write queue or reads the data and executes

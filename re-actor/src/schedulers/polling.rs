@@ -1,29 +1,30 @@
-use polling::{Event, Poller, Source};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::time::Duration;
+
+use polling::{Event, Poller, Source};
 
 use crate::actors::{IoEv, IoSrc};
 use crate::{Actor, Scheduler};
 
 /// Manager for a set of resources which are polled for an event loop by the
 /// re-actor by using [`polling`] library.
-pub struct PollingScheduler<R>
+pub struct PollingScheduler<'r, R>
 where
     R: Actor,
-    R::Id: Source,
+    R::IoResource: Source,
 {
     poll: Poller,
-    actors: HashSet<R::Id>,
+    actors: HashMap<R::Id, &'r R::IoResource>,
     events: VecDeque<IoSrc<R::Id>>,
     read_events: Vec<Event>,
 }
 
-impl<R> PollingScheduler<R>
+impl<'r, R> PollingScheduler<'r, R>
 where
     R: Actor,
-    R::Id: Source,
+    R::IoResource: Source,
 {
     pub fn new() -> io::Result<Self> {
         Ok(Self {
@@ -35,27 +36,28 @@ where
     }
 }
 
-impl<R> Scheduler<R> for PollingScheduler<R>
+impl<'r, R> Scheduler<R> for PollingScheduler<'r, R>
 where
     R: Actor,
-    R::Id: Source + FromRawFd,
+    R::IoResource: Source + FromRawFd + Sync,
     R::Error: From<io::Error>,
 {
     fn has_actor(&self, id: &R::Id) -> bool {
         self.actors.contains(id)
     }
 
-    fn register_actor(&mut self, resource: &R) -> Result<(), R::Error> {
-        let id = resource.id();
-        let raw = id.raw();
-        self.poll.add(id, Event::all(raw as usize))?;
-        self.actors.insert(resource.id());
+    fn register_actor(&mut self, actor: &R) -> Result<(), R::Error> {
+        let rsc = actor.io_resource();
+        let raw = rsc.raw();
+        self.poll.add(raw, Event::all(raw as usize))?;
+        self.actors.insert(actor.id(), rsc);
         Ok(())
     }
 
     fn unregister_actor(&mut self, id: &R::Id) -> Result<(), R::Error> {
-        self.actors.remove(id);
-        self.poll.delete(id.raw())?;
+        if let Some(rsc) = self.actors.remove(id) {
+            self.poll.delete(rsc)?;
+        }
         Ok(())
     }
 
@@ -82,12 +84,12 @@ where
     }
 }
 
-impl<R> Iterator for PollingScheduler<R>
+impl<'r, R> Iterator for PollingScheduler<'r, R>
 where
     R: Actor,
-    R::Id: Source,
+    R::IoResource: Source,
 {
-    type Item = IoSrc<R::Id>;
+    type Item = IoSrc<R::IoResource>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.events.pop_front()
