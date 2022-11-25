@@ -1,9 +1,11 @@
 use std::collections::{hash_map, HashMap};
+use std::os::unix::io::RawFd;
 use std::thread::JoinHandle;
 
 use crossbeam_channel as chan;
 
-use crate::resource::{Event, Resource};
+use crate::poller::Poll;
+use crate::resource::Resource;
 use crate::Error;
 
 pub trait Service {
@@ -11,17 +13,15 @@ pub trait Service {
     type Session: Resource;
     type Command;
 
-    fn handle_listener_event(
+    fn handle_listener_events(
         &mut self,
         id: <Self::Listener as Resource>::Id,
-        event: Event<Self::Listener>,
         resources: &mut Resources<Self>,
     ) -> Result<(), Error>;
 
-    fn handle_session_event(
+    fn handle_session_events(
         &mut self,
         id: <Self::Session as Resource>::Id,
-        event: Event<Self::Session>,
         resources: &mut Resources<Self>,
     ) -> Result<(), Error>;
 
@@ -36,14 +36,36 @@ pub struct Reactor<S: Service> {
     shutdown_recv: chan::Receiver<()>,
 }
 
-pub struct Runtime<S: Service> {
+pub struct Runtime<S: Service, P: Poll> {
     service: S,
+    poller: P,
     resources: Resources<S>,
+    listener_map: HashMap<RawFd, <S::Listener as Resource>::Id>,
+    session_map: HashMap<RawFd, <S::Session as Resource>::Id>,
 }
 
-impl<S: Service> Runtime<S> {
+impl<S: Service, P: Poll> Runtime<S, P> {
     pub fn run_loop(&mut self) -> Result<(), Error> {
-        todo!()
+        loop {
+            self.poller.poll()?;
+            for (fd, io) in &mut self.poller {
+                if let Some(id) = self.listener_map.get(&fd) {
+                    let count = {
+                        let res = self
+                            .resources
+                            .listeners
+                            .get_mut(id)
+                            .expect("resource disappeared");
+                        res.handle_io(io)
+                            .map_err(|err| Error::Resource(Box::new(err)))?
+                    };
+                    if count > 0 {
+                        self.service
+                            .handle_listener_events(*id, &mut self.resources)?;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -67,14 +89,6 @@ impl<S: Service> Resources<S> {
         todo!()
     }
 
-    pub fn send(
-        &mut self,
-        session_id: <S::Session as Resource>::Id,
-        message: <S::Session as Resource>::Message,
-    ) -> Result<(), Error> {
-        todo!()
-    }
-
     pub fn listeners(&self) -> hash_map::Iter<<S::Listener as Resource>::Id, S::Listener> {
         self.listeners.iter()
     }
@@ -89,13 +103,5 @@ impl<S: Service> Resources<S> {
 
     pub fn session(&self, id: <S::Session as Resource>::Id) -> Option<&S::Session> {
         self.sessions.get(&id)
-    }
-}
-
-impl<S: Service> Iterator for Resources<S> {
-    type Item = (<S::Session as Resource>::Id, Event<S::Session>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        todo!()
     }
 }
