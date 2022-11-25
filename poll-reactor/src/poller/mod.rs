@@ -10,7 +10,11 @@ pub struct IoEv {
     pub is_writable: bool,
 }
 
-pub trait Poll: Iterator<Item = (RawFd, IoEv)> {
+pub trait Poll
+where
+    Self: Iterator<Item = (RawFd, IoEv)>,
+    for<'a> &'a mut Self: Iterator<Item = (RawFd, IoEv)>,
+{
     fn register(&mut self, fd: impl AsRawFd) -> Result<bool, io::Error>;
     fn unregister(&mut self, fd: impl AsRawFd) -> Result<bool, io::Error>;
 
