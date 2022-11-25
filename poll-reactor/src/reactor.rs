@@ -55,6 +55,26 @@ pub struct Resources<S: Service + ?Sized> {
 }
 
 impl<S: Service> Resources<S> {
+    pub fn listen(&mut self, listener: S::Listener) -> Result<bool, Error> {
+        todo!()
+    }
+
+    pub fn connect(&mut self, connection: S::Session) -> Result<bool, Error> {
+        todo!()
+    }
+
+    pub fn disconnect(&mut self, session_id: <S::Session as Resource>::Id) -> Result<bool, Error> {
+        todo!()
+    }
+
+    pub fn send(
+        &mut self,
+        session_id: <S::Session as Resource>::Id,
+        message: <S::Session as Resource>::Message,
+    ) -> Result<(), Error> {
+        todo!()
+    }
+
     pub fn listeners(&self) -> hash_map::Iter<<S::Listener as Resource>::Id, S::Listener> {
         self.listeners.iter()
     }
@@ -70,12 +90,12 @@ impl<S: Service> Resources<S> {
     pub fn session(&self, id: <S::Session as Resource>::Id) -> Option<&S::Session> {
         self.sessions.get(&id)
     }
+}
 
-    pub fn listener_mut(&mut self, id: <S::Listener as Resource>::Id) -> Option<&mut S::Listener> {
-        self.listeners.get_mut(&id)
-    }
+impl<S: Service> Iterator for Resources<S> {
+    type Item = (<S::Session as Resource>::Id, Event<S::Session>);
 
-    pub fn session_mut(&mut self, id: <S::Session as Resource>::Id) -> Option<&mut S::Session> {
-        self.sessions.get_mut(&id)
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!()
     }
 }

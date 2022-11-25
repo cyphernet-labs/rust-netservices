@@ -3,7 +3,7 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 
 pub enum Event<R: Resource> {
-    Connected,
+    Connected(),
     SessionEstablished,
     Received(R::Message),
     Disconnected(R::DisconnectReason),
