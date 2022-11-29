@@ -1,4 +1,5 @@
-use std::collections::{hash_map, HashMap};
+use amplify::confinement::Confined;
+use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::thread::JoinHandle;
 
@@ -7,21 +8,31 @@ use crossbeam_channel as chan;
 use crate::poller::Poll;
 use crate::resource::{Resource, ResourceId};
 
-pub trait Service: Send {
+pub enum ServiceEvent<L: Resource, C: Resource, const MAX_SIZE: usize> {
+    RegisterListener(L),
+    RegisterService(C),
+    UnregisterListener(L),
+    UnregisterService(C),
+    Send(C::Id, Confined<Vec<u8>, 1, MAX_SIZE>),
+}
+
+pub trait Service<const MAX_DATA_SIZE: usize = { usize::MAX }>:
+    Send + Iterator<Item = ServiceEvent<Self::Listener, Self::Session, MAX_DATA_SIZE>>
+{
     type Listener: Resource;
     type Session: Resource;
     type Command: Send;
 
-    fn handle_listener_events(
+    fn handle_listener_event(
         &mut self,
         id: <Self::Listener as Resource>::Id,
-        resources: &mut Resources<Self>,
+        event: <Self::Listener as Resource>::Event,
     );
 
-    fn handle_session_events(
+    fn handle_session_event(
         &mut self,
         id: <Self::Session as Resource>::Id,
-        resources: &mut Resources<Self>,
+        event: <Self::Session as Resource>::Event,
     );
 
     fn handle_command(&mut self, cmd: Self::Command);
@@ -48,7 +59,8 @@ impl<S: Service> Reactor<S> {
                 poller,
                 control_recv,
                 shutdown_recv,
-                resources: Resources::new(),
+                listeners: empty!(),
+                sessions: empty!(),
                 listener_map: empty!(),
                 session_map: empty!(),
             };
@@ -69,9 +81,12 @@ pub struct Runtime<S: Service, P: Poll> {
     poller: P,
     control_recv: chan::Receiver<S::Command>,
     shutdown_recv: chan::Receiver<()>,
-    resources: Resources<S>,
     listener_map: HashMap<RawFd, <S::Listener as Resource>::Id>,
     session_map: HashMap<RawFd, <S::Session as Resource>::Id>,
+    listeners: HashMap<<S::Listener as Resource>::Id, S::Listener>,
+    sessions: HashMap<<S::Session as Resource>::Id, S::Session>,
+    // waker
+    // timeouts
 }
 
 impl<S: Service, P: Poll> Runtime<S, P> {
@@ -86,18 +101,27 @@ impl<S: Service, P: Poll> Runtime<S, P> {
     fn handle_events(&mut self) {
         for (fd, io) in &mut self.poller {
             if let Some(id) = self.listener_map.get(&fd) {
-                let count = {
-                    let res = self
-                        .resources
-                        .listeners
-                        .get_mut(id)
-                        .expect("resource disappeared");
-                    res.handle_io(io)
-                };
-                if count > 0 {
-                    self.service
-                        .handle_listener_events(*id, &mut self.resources);
+                let res = self.listeners.get_mut(id).expect("resource disappeared");
+                res.handle_io(io);
+                for event in res {
+                    self.service.handle_listener_event(*id, event);
                 }
+            } else if let Some(id) = self.session_map.get(&fd) {
+                let res = self.sessions.get_mut(id).expect("resource disappeared");
+                res.handle_io(io);
+                for event in res {
+                    self.service.handle_session_event(*id, event);
+                }
+            }
+        }
+
+        while let Some(event) = self.service.next() {
+            match event {
+                ServiceEvent::RegisterListener(_) => {}
+                ServiceEvent::RegisterService(_) => {}
+                ServiceEvent::UnregisterListener(_) => {}
+                ServiceEvent::UnregisterService(_) => {}
+                ServiceEvent::Send(id, _) => {}
             }
         }
     }
@@ -106,61 +130,3 @@ impl<S: Service, P: Poll> Runtime<S, P> {
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display, Error)]
 #[display("the resource with the same ID {0} is already registered")]
 pub struct AlreadyRegistered<Id: ResourceId>(Id);
-
-#[derive(Debug)]
-pub struct Resources<S: Service + ?Sized> {
-    listeners: HashMap<<S::Listener as Resource>::Id, S::Listener>,
-    sessions: HashMap<<S::Session as Resource>::Id, S::Session>,
-    // waker
-    // timeouts
-}
-
-impl<S: Service> Resources<S> {
-    fn new() -> Self {
-        Self {
-            listeners: empty!(),
-            sessions: empty!(),
-        }
-    }
-
-    pub fn listeners(&self) -> hash_map::Iter<<S::Listener as Resource>::Id, S::Listener> {
-        self.listeners.iter()
-    }
-
-    pub fn sessions(&self) -> hash_map::Iter<<S::Session as Resource>::Id, S::Session> {
-        self.sessions.iter()
-    }
-
-    pub fn listener(&self, id: <S::Listener as Resource>::Id) -> Option<&S::Listener> {
-        self.listeners.get(&id)
-    }
-
-    pub fn session(&self, id: <S::Session as Resource>::Id) -> Option<&S::Session> {
-        self.sessions.get(&id)
-    }
-
-    pub fn register_listener(
-        &mut self,
-        listener: S::Listener,
-    ) -> Result<(), AlreadyRegistered<<S::Listener as Resource>::Id>> {
-        todo!()
-    }
-
-    pub fn unregister_listener(
-        &mut self,
-        id: <S::Listener as Resource>::Id,
-    ) -> Option<S::Listener> {
-        todo!()
-    }
-
-    pub fn register_session(
-        &mut self,
-        session: S::Session,
-    ) -> Result<(), AlreadyRegistered<<S::Session as Resource>::Id>> {
-        todo!()
-    }
-
-    pub fn unregister_session(&mut self, id: <S::Session as Resource>::Id) -> Option<S::Session> {
-        todo!()
-    }
-}
