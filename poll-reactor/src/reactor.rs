@@ -8,19 +8,19 @@ use crossbeam_channel as chan;
 use crate::poller::Poll;
 use crate::resource::{Resource, ResourceId};
 
-pub enum ServiceEvent<L: Resource, C: Resource, const MAX_SIZE: usize> {
+pub enum Action<L: Resource, C: Resource, const MAX_SIZE: usize> {
     RegisterListener(L),
-    RegisterService(C),
+    RegisterConnection(C),
     UnregisterListener(L),
-    UnregisterService(C),
+    UnregisterConnection(C),
     Send(C::Id, Confined<Vec<u8>, 1, MAX_SIZE>),
 }
 
-pub trait Service<const MAX_DATA_SIZE: usize = { usize::MAX }>:
-    Send + Iterator<Item = ServiceEvent<Self::Listener, Self::Session, MAX_DATA_SIZE>>
+pub trait Handler<const MAX_DATA_SIZE: usize = { usize::MAX }>:
+    Send + Iterator<Item = Action<Self::Listener, Self::Connection, MAX_DATA_SIZE>>
 {
     type Listener: Resource;
-    type Session: Resource;
+    type Connection: Resource;
     type Command: Send;
 
     fn handle_listener_event(
@@ -29,22 +29,22 @@ pub trait Service<const MAX_DATA_SIZE: usize = { usize::MAX }>:
         event: <Self::Listener as Resource>::Event,
     );
 
-    fn handle_session_event(
+    fn handle_connection_event(
         &mut self,
-        id: <Self::Session as Resource>::Id,
-        event: <Self::Session as Resource>::Event,
+        id: <Self::Connection as Resource>::Id,
+        event: <Self::Connection as Resource>::Event,
     );
 
     fn handle_command(&mut self, cmd: Self::Command);
 }
 
-pub struct Reactor<S: Service> {
+pub struct Reactor<S: Handler> {
     thread: JoinHandle<()>,
     control_send: chan::Sender<S::Command>,
     shutdown_send: chan::Sender<()>,
 }
 
-impl<S: Service> Reactor<S> {
+impl<S: Handler> Reactor<S> {
     pub fn new<P: Poll>(service: S, poller: P) -> Self
     where
         S: 'static,
@@ -60,9 +60,9 @@ impl<S: Service> Reactor<S> {
                 control_recv,
                 shutdown_recv,
                 listeners: empty!(),
-                sessions: empty!(),
+                connections: empty!(),
                 listener_map: empty!(),
-                session_map: empty!(),
+                connection_map: empty!(),
             };
 
             runtime.run();
@@ -76,20 +76,20 @@ impl<S: Service> Reactor<S> {
     }
 }
 
-pub struct Runtime<S: Service, P: Poll> {
+pub struct Runtime<S: Handler, P: Poll> {
     service: S,
     poller: P,
     control_recv: chan::Receiver<S::Command>,
     shutdown_recv: chan::Receiver<()>,
     listener_map: HashMap<RawFd, <S::Listener as Resource>::Id>,
-    session_map: HashMap<RawFd, <S::Session as Resource>::Id>,
+    connection_map: HashMap<RawFd, <S::Connection as Resource>::Id>,
     listeners: HashMap<<S::Listener as Resource>::Id, S::Listener>,
-    sessions: HashMap<<S::Session as Resource>::Id, S::Session>,
+    connections: HashMap<<S::Connection as Resource>::Id, S::Connection>,
     // waker
     // timeouts
 }
 
-impl<S: Service, P: Poll> Runtime<S, P> {
+impl<S: Handler, P: Poll> Runtime<S, P> {
     fn run(mut self) {
         loop {
             if self.poller.poll() > 0 {
@@ -106,22 +106,22 @@ impl<S: Service, P: Poll> Runtime<S, P> {
                 for event in res {
                     self.service.handle_listener_event(*id, event);
                 }
-            } else if let Some(id) = self.session_map.get(&fd) {
-                let res = self.sessions.get_mut(id).expect("resource disappeared");
+            } else if let Some(id) = self.connection_map.get(&fd) {
+                let res = self.connections.get_mut(id).expect("resource disappeared");
                 res.handle_io(io);
                 for event in res {
-                    self.service.handle_session_event(*id, event);
+                    self.service.handle_connection_event(*id, event);
                 }
             }
         }
 
-        while let Some(event) = self.service.next() {
-            match event {
-                ServiceEvent::RegisterListener(_) => {}
-                ServiceEvent::RegisterService(_) => {}
-                ServiceEvent::UnregisterListener(_) => {}
-                ServiceEvent::UnregisterService(_) => {}
-                ServiceEvent::Send(id, _) => {}
+        while let Some(action) = self.service.next() {
+            match action {
+                Action::RegisterListener(_) => {}
+                Action::RegisterConnection(_) => {}
+                Action::UnregisterListener(_) => {}
+                Action::UnregisterConnection(_) => {}
+                Action::Send(id, _) => {}
             }
         }
     }
