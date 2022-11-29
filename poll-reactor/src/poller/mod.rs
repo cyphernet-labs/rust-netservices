@@ -12,11 +12,11 @@ pub struct IoEv {
 
 pub trait Poll
 where
-    Self: Iterator<Item = (RawFd, IoEv)>,
+    Self: Send + Iterator<Item = (RawFd, IoEv)>,
     for<'a> &'a mut Self: Iterator<Item = (RawFd, IoEv)>,
 {
     fn register(&mut self, fd: impl AsRawFd) -> Result<bool, io::Error>;
     fn unregister(&mut self, fd: impl AsRawFd) -> Result<bool, io::Error>;
 
-    fn poll(&mut self) -> Result<usize, io::Error>;
+    fn poll(&mut self) -> usize;
 }
