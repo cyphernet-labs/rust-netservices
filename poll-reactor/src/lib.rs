@@ -18,4 +18,4 @@ pub mod poller;
 mod reactor;
 pub mod resource;
 
-pub use reactor::Reactor;
+pub use reactor::{Handler, Reactor};

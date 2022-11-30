@@ -2,6 +2,7 @@ use amplify::confinement::Confined;
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::thread::JoinHandle;
+use std::time::Instant;
 
 use crossbeam_channel as chan;
 
@@ -27,12 +28,14 @@ pub trait Handler<const MAX_DATA_SIZE: usize = { usize::MAX }>:
         &mut self,
         id: <Self::Listener as Resource>::Id,
         event: <Self::Listener as Resource>::Event,
+        instant: Instant,
     );
 
     fn handle_connection_event(
         &mut self,
         id: <Self::Connection as Resource>::Id,
         event: <Self::Connection as Resource>::Event,
+        instant: Instant,
     );
 
     fn handle_command(&mut self, cmd: Self::Command);
@@ -92,25 +95,27 @@ pub struct Runtime<H: Handler, P: Poll> {
 impl<H: Handler, P: Poll> Runtime<H, P> {
     fn run(mut self) {
         loop {
-            if self.poller.poll() > 0 {
-                self.handle_events();
+            let (instant, count) = self.poller.poll();
+            if count > 0 {
+                self.handle_events(instant);
             }
+            // TODO process commands
         }
     }
 
-    fn handle_events(&mut self) {
+    fn handle_events(&mut self, instant: Instant) {
         for (fd, io) in &mut self.poller {
             if let Some(id) = self.listener_map.get(&fd) {
                 let res = self.listeners.get_mut(id).expect("resource disappeared");
                 res.handle_io(io);
                 for event in res {
-                    self.service.handle_listener_event(*id, event);
+                    self.service.handle_listener_event(*id, event, instant);
                 }
             } else if let Some(id) = self.connection_map.get(&fd) {
                 let res = self.connections.get_mut(id).expect("resource disappeared");
                 res.handle_io(io);
                 for event in res {
-                    self.service.handle_connection_event(*id, event);
+                    self.service.handle_connection_event(*id, event, instant);
                 }
             }
         }
@@ -126,7 +131,3 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
         }
     }
 }
-
-#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display, Error)]
-#[display("the resource with the same ID {0} is already registered")]
-pub struct AlreadyRegistered<Id: ResourceId>(Id);
