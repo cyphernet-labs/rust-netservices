@@ -15,5 +15,5 @@ bitcoin_hashes = "0.11.0"
 log = "0.4.17"
 
 [workspace]
-members = ["re-actor", "poll-reactor", "streampipes", "nsh"]
-default-members = ["re-actor", "poll-reactor", "streampipes"]
+members = ["poll-reactor", "streampipes", "nsh", "node"]
+default-members = ["re-actor", "poll-reactor", "streampipes", "node"]
