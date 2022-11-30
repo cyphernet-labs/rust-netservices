@@ -76,20 +76,20 @@ impl<S: Handler> Reactor<S> {
     }
 }
 
-pub struct Runtime<S: Handler, P: Poll> {
-    service: S,
+pub struct Runtime<H: Handler, P: Poll> {
+    service: H,
     poller: P,
-    control_recv: chan::Receiver<S::Command>,
+    control_recv: chan::Receiver<H::Command>,
     shutdown_recv: chan::Receiver<()>,
-    listener_map: HashMap<RawFd, <S::Listener as Resource>::Id>,
-    connection_map: HashMap<RawFd, <S::Connection as Resource>::Id>,
-    listeners: HashMap<<S::Listener as Resource>::Id, S::Listener>,
-    connections: HashMap<<S::Connection as Resource>::Id, S::Connection>,
+    listener_map: HashMap<RawFd, <H::Listener as Resource>::Id>,
+    connection_map: HashMap<RawFd, <H::Connection as Resource>::Id>,
+    listeners: HashMap<<H::Listener as Resource>::Id, H::Listener>,
+    connections: HashMap<<H::Connection as Resource>::Id, H::Connection>,
     // waker
     // timeouts
 }
 
-impl<S: Handler, P: Poll> Runtime<S, P> {
+impl<H: Handler, P: Poll> Runtime<H, P> {
     fn run(mut self) {
         loop {
             if self.poller.poll() > 0 {
