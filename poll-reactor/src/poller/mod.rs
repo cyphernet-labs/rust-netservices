@@ -1,5 +1,6 @@
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::time::Instant;
 
 /// Information about I/O events which has happened for an actor
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
@@ -18,5 +19,5 @@ where
     fn register(&mut self, fd: impl AsRawFd) -> Result<bool, io::Error>;
     fn unregister(&mut self, fd: impl AsRawFd) -> Result<bool, io::Error>;
 
-    fn poll(&mut self) -> usize;
+    fn poll(&mut self) -> (Instant, usize);
 }
