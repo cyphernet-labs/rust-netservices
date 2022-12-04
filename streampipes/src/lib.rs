@@ -4,6 +4,3 @@
 //! into packets.
 
 pub mod frame;
-mod stream;
-
-pub use stream::{NetStream, Stream};

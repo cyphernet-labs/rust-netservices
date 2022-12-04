@@ -7,7 +7,7 @@ use std::time::Instant;
 use crossbeam_channel as chan;
 
 use crate::poller::Poll;
-use crate::resource::{Resource, ResourceId};
+use crate::resource::Resource;
 
 pub enum Action<L: Resource, C: Resource, const MAX_SIZE: usize> {
     RegisterListener(L),
@@ -23,6 +23,8 @@ pub trait Handler<const MAX_DATA_SIZE: usize = { usize::MAX }>:
     type Listener: Resource;
     type Connection: Resource;
     type Command: Send;
+
+    fn handle_wakeup(&mut self);
 
     fn handle_listener_event(
         &mut self,
