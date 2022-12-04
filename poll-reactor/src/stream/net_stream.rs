@@ -5,8 +5,7 @@ use std::time::Duration;
 
 use super::Stream;
 
-/// Network stream is an abstraction of TCP stream object which adds
-/// protocol composability.
+/// Network stream is an abstraction of TCP stream object.
 pub trait NetStream: Stream + AsRawFd {
     type Addr: Into<SocketAddr>;
     type AddrList: ToSocketAddrs;
@@ -129,11 +128,11 @@ impl NetStream for TcpStream {
         TcpStream::peek(self, buf)
     }
 
-    #[allow(unstable_features, unstable_name_collisions, unconditional_recursion)]
+    #[allow(unstable_features, unstable_name_collisions)]
     fn set_linger(&mut self, linger: Option<Duration>) -> io::Result<()> {
         TcpStream::set_linger(self, linger)
     }
-    #[allow(unstable_features, unstable_name_collisions, unconditional_recursion)]
+    #[allow(unstable_features, unstable_name_collisions)]
     fn linger(&self) -> io::Result<Option<Duration>> {
         TcpStream::linger(self)
     }
