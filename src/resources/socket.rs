@@ -1,38 +1,38 @@
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::io::Error;
-use std::marker::PhantomData;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::{io, net};
 
-use super::Resource;
-use crate::poller::IoEv;
-use crate::resource::{READ_TIMEOUT, WRITE_TIMEOUT};
-use crate::stream::{Frame, NetListener, NetStream};
+use reactor::poller::IoEv;
+use reactor::resource::{Resource, ResourceId};
 
-pub trait NetSession<S: NetStream>: NetStream {
+use crate::stream::{Frame, NetListener, NetStream, READ_TIMEOUT, WRITE_TIMEOUT};
+
+pub trait NetSession: NetStream {
     type Context;
+    type Inner: NetStream;
 
-    fn with(stream: S, context: &Self::Context) -> Self;
+    fn with(stream: Self::Inner, context: &Self::Context) -> Self;
 
-    fn remote_addr(&self) -> S::Addr;
+    fn remote_addr(&self) -> Self::Addr;
 }
 
 #[derive(Debug)]
-pub struct NetAccept<L: NetListener<Stream = N>, S: NetSession<N>, N: NetStream> {
+pub struct NetAccept<L: NetListener<Stream = S::Inner>, S: NetSession> {
     session_context: S::Context,
     listener: L,
     spawned: VecDeque<S>,
 }
 
-impl<L: NetListener<Stream = N>, S: NetSession<N>, N: NetStream> AsRawFd for NetAccept<L, S, N> {
+impl<L: NetListener<Stream = S::Inner>, S: NetSession> AsRawFd for NetAccept<L, S> {
     fn as_raw_fd(&self) -> RawFd {
         self.listener.as_raw_fd()
     }
 }
 
-impl<L: NetListener<Stream = N>, S: NetSession<N>, N: NetStream> io::Write for NetAccept<L, S, N> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+impl<L: NetListener<Stream = S::Inner>, S: NetSession> io::Write for NetAccept<L, S> {
+    fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
         panic!("must not write to network listener")
     }
 
@@ -41,7 +41,7 @@ impl<L: NetListener<Stream = N>, S: NetSession<N>, N: NetStream> io::Write for N
     }
 }
 
-impl<L: NetListener<Stream = N>, S: NetSession<N>, N: NetStream> Resource for NetAccept<L, S, N> {
+impl<L: NetListener<Stream = S::Inner>, S: NetSession> Resource for NetAccept<L, S> {
     type Id = net::SocketAddr;
     type Event = S;
     type Message = (); // Indicates incoming connection
@@ -69,7 +69,7 @@ impl<L: NetListener<Stream = N>, S: NetSession<N>, N: NetStream> Resource for Ne
         }
     }
 
-    fn send(&mut self, msg: Self::Message) -> Result<(), Error> {
+    fn send(&mut self, _msg: Self::Message) -> Result<(), Error> {
         panic!("must not send messages to the network listener")
     }
 
@@ -78,7 +78,7 @@ impl<L: NetListener<Stream = N>, S: NetSession<N>, N: NetStream> Resource for Ne
     }
 }
 
-impl<L: NetListener<Stream = N>, S: NetSession<N>, N: NetStream> Iterator for NetAccept<L, S, N> {
+impl<L: NetListener<Stream = S::Inner>, S: NetSession> Iterator for NetAccept<L, S> {
     type Item = S;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -93,32 +93,33 @@ pub enum SessionEvent<M> {
     Disconnected,
 }
 
-pub struct NetTransport<S: NetSession<N>, N: NetStream, F: Frame> {
+pub struct NetTransport<S: NetSession, F: Frame> {
     session: S,
     framer: F,
     events: VecDeque<SessionEvent<F::Message>>,
-    _phantom: PhantomData<N>,
 }
 
-impl<S: NetSession<N>, N: NetStream, F: Frame> AsRawFd for NetTransport<S, N, F> {
+impl<S: NetSession, F: Frame> AsRawFd for NetTransport<S, F> {
     fn as_raw_fd(&self) -> RawFd {
         self.session.as_raw_fd()
     }
 }
 
-impl<S: NetSession<N>, N: NetStream, F: Frame> NetTransport<S, N, F> {
+impl<S: NetSession, F: Frame> NetTransport<S, F> {
     pub fn with(session: S, framer: F) -> Self {
         Self {
             session,
             framer,
             events: empty!(),
-            _phantom: default!(),
         }
     }
 }
 
-impl<S: NetSession<N>, N: NetStream, F: Frame> Resource for NetTransport<S, N, F> {
-    type Id = net::SocketAddr;
+impl<S: NetSession, F: Frame> Resource for NetTransport<S, F>
+where
+    S::Addr: ResourceId,
+{
+    type Id = S::Addr;
     type Event = SessionEvent<F::Message>;
     type Message = F::Message;
 
@@ -142,7 +143,7 @@ impl<S: NetSession<N>, N: NetStream, F: Frame> Resource for NetTransport<S, N, F
     }
 }
 
-impl<S: NetSession<N>, N: NetStream, F: Frame> Iterator for NetTransport<S, N, F> {
+impl<S: NetSession, F: Frame> Iterator for NetTransport<S, F> {
     type Item = SessionEvent<F::Message>;
 
     fn next(&mut self) -> Option<Self::Item> {

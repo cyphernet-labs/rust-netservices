@@ -1,3 +1,10 @@
-pub mod noise_xk;
-pub mod nxk_tcp;
-pub mod peer;
+#[macro_use]
+extern crate amplify;
+
+#[cfg(feature = "re-actor")]
+pub mod actors;
+
+#[cfg(feature = "poll-reactor")]
+pub mod resources;
+
+pub mod stream;

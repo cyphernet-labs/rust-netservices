@@ -19,5 +19,5 @@ socket2 = { version = "0.4.7", optional = true }
 libc = "0.2.71"
 
 [features]
-default = ["popol", "polling", "socket2"]
+default = ["popol", "socket2"]
 all = ["popol", "polling", "epoll", "mio", "zmq", "socket2"]
