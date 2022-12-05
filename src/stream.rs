@@ -6,7 +6,9 @@ use std::{io, net};
 
 use cyphernet::addr::Addr;
 
-use super::Stream;
+pub trait Stream: std::io::Write + std::io::Read {}
+
+impl<T> Stream for T where T: std::io::Write + std::io::Read {}
 
 /// Network stream is an abstraction of TCP stream object.
 pub trait NetStream: Stream + AsRawFd {

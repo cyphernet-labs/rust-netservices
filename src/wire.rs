@@ -6,10 +6,14 @@ use std::{io, net};
 use reactor::poller::IoEv;
 use reactor::resource::{Resource, ResourceId};
 
-use crate::stream::{Frame, NetListener, NetSession, NetStream, READ_TIMEOUT, WRITE_TIMEOUT};
+use crate::{Frame, NetListener, NetSession, NetStream};
 
 /// Socket read buffer size.
 const READ_BUFFER_SIZE: usize = 1024 * 192;
+/// Maximum time to wait when reading from a socket.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
+/// Maximum time to wait when writing to a socket.
+const WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 #[derive(Debug)]
 pub enum ListenerEvent<S: NetSession> {
