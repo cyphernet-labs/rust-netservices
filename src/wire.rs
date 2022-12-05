@@ -6,7 +6,7 @@ use std::{io, net};
 use reactor::poller::IoEv;
 use reactor::resource::{Resource, ResourceId};
 
-use crate::{Frame, NetListener, NetSession, NetStream};
+use crate::{Frame, NetConnection, NetListener, NetSession};
 
 /// Socket read buffer size.
 const READ_BUFFER_SIZE: usize = 1024 * 192;
@@ -22,19 +22,19 @@ pub enum ListenerEvent<S: NetSession> {
 }
 
 #[derive(Debug)]
-pub struct NetAccept<L: NetListener<Stream = S::Inner>, S: NetSession> {
+pub struct NetAccept<L: NetListener<Stream = S::Connection>, S: NetSession> {
     session_context: S::Context,
     listener: L,
     events: VecDeque<ListenerEvent<S>>,
 }
 
-impl<L: NetListener<Stream = S::Inner>, S: NetSession> AsRawFd for NetAccept<L, S> {
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> AsRawFd for NetAccept<L, S> {
     fn as_raw_fd(&self) -> RawFd {
         self.listener.as_raw_fd()
     }
 }
 
-impl<L: NetListener<Stream = S::Inner>, S: NetSession> io::Write for NetAccept<L, S> {
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> io::Write for NetAccept<L, S> {
     fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
         panic!("must not write to network listener")
     }
@@ -44,7 +44,7 @@ impl<L: NetListener<Stream = S::Inner>, S: NetSession> io::Write for NetAccept<L
     }
 }
 
-impl<L: NetListener<Stream = S::Inner>, S: NetSession> NetAccept<L, S> {
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<L, S> {
     pub fn bind(addr: impl Into<net::SocketAddr>, session_context: S::Context) -> io::Result<Self> {
         let listener = L::bind(addr)?;
         listener.set_nonblocking(true)?;
@@ -66,7 +66,7 @@ impl<L: NetListener<Stream = S::Inner>, S: NetSession> NetAccept<L, S> {
     }
 }
 
-impl<L: NetListener<Stream = S::Inner>, S: NetSession> Resource for NetAccept<L, S> {
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAccept<L, S> {
     type Id = net::SocketAddr;
     type Event = ListenerEvent<S>;
     type Message = (); // Indicates incoming connection
@@ -97,7 +97,7 @@ impl<L: NetListener<Stream = S::Inner>, S: NetSession> Resource for NetAccept<L,
     }
 }
 
-impl<L: NetListener<Stream = S::Inner>, S: NetSession> Iterator for NetAccept<L, S> {
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> Iterator for NetAccept<L, S> {
     type Item = ListenerEvent<S>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -189,9 +189,9 @@ impl<S: NetSession, F: Frame> NetTransport<S, F> {
 
 impl<S: NetSession, F: Frame> Resource for NetTransport<S, F>
 where
-    S::Addr: ResourceId,
+    S::PeerAddr: Into<net::SocketAddr>,
 {
-    type Id = S::Addr;
+    type Id = net::SocketAddr;
     type Event = SessionEvent<F>;
     type Message = F::Message;
 

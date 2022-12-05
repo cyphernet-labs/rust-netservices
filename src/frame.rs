@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 
-use crate::stream::Stream;
+use crate::IoStream;
 
-pub trait Frame: Stream + Default {
+pub trait Frame: IoStream + Default {
     type Message;
     type Error;
 
