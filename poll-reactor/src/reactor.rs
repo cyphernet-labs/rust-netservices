@@ -2,7 +2,7 @@ use amplify::confinement::Confined;
 use std::collections::HashMap;
 use std::os::unix::io::RawFd;
 use std::thread::JoinHandle;
-use std::time::Instant;
+use std::time::Duration;
 
 use crossbeam_channel as chan;
 
@@ -30,14 +30,14 @@ pub trait Handler<const MAX_DATA_SIZE: usize = { usize::MAX }>:
         &mut self,
         id: <Self::Listener as Resource>::Id,
         event: <Self::Listener as Resource>::Event,
-        instant: Instant,
+        duration: Duration,
     );
 
     fn handle_connection_event(
         &mut self,
         id: <Self::Connection as Resource>::Id,
         event: <Self::Connection as Resource>::Event,
-        instant: Instant,
+        duration: Duration,
     );
 
     fn handle_command(&mut self, cmd: Self::Command);
@@ -97,27 +97,27 @@ pub struct Runtime<H: Handler, P: Poll> {
 impl<H: Handler, P: Poll> Runtime<H, P> {
     fn run(mut self) {
         loop {
-            let (instant, count) = self.poller.poll();
+            let (duration, count) = self.poller.poll();
             if count > 0 {
-                self.handle_events(instant);
+                self.handle_events(duration);
             }
             // TODO process commands
         }
     }
 
-    fn handle_events(&mut self, instant: Instant) {
+    fn handle_events(&mut self, duration: Duration) {
         for (fd, io) in &mut self.poller {
             if let Some(id) = self.listener_map.get(&fd) {
                 let res = self.listeners.get_mut(id).expect("resource disappeared");
                 res.handle_io(io);
                 for event in res {
-                    self.service.handle_listener_event(*id, event, instant);
+                    self.service.handle_listener_event(*id, event, duration);
                 }
             } else if let Some(id) = self.connection_map.get(&fd) {
                 let res = self.connections.get_mut(id).expect("resource disappeared");
                 res.handle_io(io);
                 for event in res {
-                    self.service.handle_connection_event(*id, event, instant);
+                    self.service.handle_connection_event(*id, event, duration);
                 }
             }
         }
