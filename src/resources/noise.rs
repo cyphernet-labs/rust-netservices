@@ -1,33 +1,78 @@
 use std::io::{self, Read, Write};
-use std::net::Shutdown;
+use std::net;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
-use cyphernet::addr::{LocalNode, NodeId, PeerAddr};
+use cyphernet::addr::{Addr, LocalNode, NodeId, PeerAddr};
 use cyphernet::crypto::Ec;
 
-use crate::resources::socket::NetSession;
-use crate::stream::NetStream;
+use crate::stream::{NetSession, NetStream};
 
-pub struct NoiseXk<C: Ec, S: NetStream> {
-    remote_addr: PeerAddr<NodeId<C>, S::Addr>,
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, From)]
+pub enum XkAddr<Id, A: Addr + Clone> {
+    #[from]
+    Partial(A),
+
+    #[from]
+    Full(PeerAddr<Id, A>),
+}
+
+impl<Id, A: Addr + Clone> Addr for XkAddr<Id, A> {
+    fn port(&self) -> u16 {
+        match self {
+            XkAddr::Partial(a) => a.port(),
+            XkAddr::Full(a) => a.port(),
+        }
+    }
+}
+
+impl<Id, A: Addr + Clone> From<XkAddr<Id, A>> for net::SocketAddr
+where
+    for<'a> &'a A: Into<net::SocketAddr>,
+{
+    fn from(addr: XkAddr<Id, A>) -> Self {
+        addr.to_socket_addr()
+    }
+}
+
+impl<Id, A: Addr + Clone> XkAddr<Id, A> {
+    pub fn addr(&self) -> A {
+        match self {
+            XkAddr::Partial(a) => a.clone(),
+            XkAddr::Full(a) => a.addr().clone(),
+        }
+    }
+
+    pub fn to_socket_addr(&self) -> net::SocketAddr
+    where
+        for<'a> &'a A: Into<net::SocketAddr>,
+    {
+        match self {
+            XkAddr::Partial(a) => a.into(),
+            XkAddr::Full(a) => a.to_socket_addr(),
+        }
+    }
+}
+
+pub struct NoiseXk<C: Ec, S: NetSession> {
+    remote_addr: XkAddr<NodeId<C>, S::RemoteAddr>,
     local_node: LocalNode<C>,
     socket: S,
 }
 
-impl<C: Ec, S: NetStream> AsRawFd for NoiseXk<C, S> {
+impl<C: Ec, S: NetSession> AsRawFd for NoiseXk<C, S> {
     fn as_raw_fd(&self) -> RawFd {
         self.socket.as_raw_fd()
     }
 }
 
-impl<C: Ec, S: NetStream> Read for NoiseXk<C, S> {
+impl<C: Ec, S: NetSession> Read for NoiseXk<C, S> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.socket.read(buf)
     }
 }
 
-impl<C: Ec, S: NetStream> Write for NoiseXk<C, S> {
+impl<C: Ec, S: NetSession> Write for NoiseXk<C, S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.socket.write(buf)
     }
@@ -37,43 +82,48 @@ impl<C: Ec, S: NetStream> Write for NoiseXk<C, S> {
     }
 }
 
-impl<C: Ec, S: NetStream> NetSession for NoiseXk<C, S> {
-    type Context = (NodeId<C>, LocalNode<C>);
+impl<C: Ec, S: NetSession<Context = ()>> NetSession for NoiseXk<C, S>
+where
+    S::RemoteAddr: From<S::Addr>,
+{
+    type Context = LocalNode<C>;
     type Inner = S;
+    type RemoteAddr = PeerAddr<NodeId<C>, S::RemoteAddr>;
 
-    fn with(socket: S, context: &Self::Context) -> Self {
-        let remote_addr = PeerAddr::new(
-            context.0,
-            socket
-                .peer_addr()
-                .expect("constructing NoiseXK with net session object not having remote address"),
-        );
+    fn accept(socket: S, context: &Self::Context) -> Self {
         Self {
-            remote_addr,
-            local_node: context.1.clone(),
+            remote_addr: XkAddr::Partial(socket.peer_addr().into()),
+            local_node: context.clone(),
             socket,
         }
     }
 
-    fn remote_addr(&self) -> Self::Addr {
-        self.remote_addr.clone()
+    fn connect(peer_addr: Self::RemoteAddr, context: &Self::Context) -> io::Result<Self> {
+        let socket = S::connect(peer_addr.addr().clone(), &())?;
+        Ok(Self {
+            remote_addr: XkAddr::Full(peer_addr),
+            local_node: context.clone(),
+            socket,
+        })
     }
 }
 
-impl<C: Ec, S: NetStream> NetStream for NoiseXk<C, S> {
-    type Addr = PeerAddr<NodeId<C>, S::Addr>;
+impl<C: Ec, S: NetSession> NetStream for NoiseXk<C, S>
+where
+    S::RemoteAddr: From<S::Addr>,
+{
+    type Addr = S::RemoteAddr;
 
-    fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
+    fn shutdown(&mut self, how: net::Shutdown) -> io::Result<()> {
         self.socket.shutdown(how)
     }
 
-    fn peer_addr(&self) -> io::Result<Self::Addr> {
-        Ok(self.remote_addr.clone())
+    fn peer_addr(&self) -> Self::Addr {
+        self.remote_addr.addr().clone()
     }
 
-    fn local_addr(&self) -> io::Result<Self::Addr> {
-        let local_addr = self.socket.local_addr()?;
-        Ok(PeerAddr::new(self.local_node.id(), local_addr))
+    fn local_addr(&self) -> Self::Addr {
+        self.socket.local_addr().into()
     }
 
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
