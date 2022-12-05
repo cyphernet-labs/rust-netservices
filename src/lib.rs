@@ -5,6 +5,15 @@ extern crate amplify;
 pub mod actors;
 
 #[cfg(feature = "poll-reactor")]
-pub mod resources;
+pub mod wire;
 
-pub mod stream;
+mod frame;
+mod listener;
+pub mod noise;
+mod session;
+mod stream;
+
+pub use frame::{Frame, VecFrame};
+pub use listener::NetListener;
+pub use session::NetSession;
+pub use stream::{NetStream, Stream};

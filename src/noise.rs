@@ -6,7 +6,7 @@ use std::time::Duration;
 use cyphernet::addr::{Addr, LocalNode, NodeId, PeerAddr};
 use cyphernet::crypto::Ec;
 
-use crate::stream::{NetSession, NetStream};
+use crate::{NetSession, NetStream};
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, From)]
 pub enum XkAddr<Id, A: Addr + Clone> {
