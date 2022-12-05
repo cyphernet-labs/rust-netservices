@@ -2,10 +2,10 @@ use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::io::AsRawFd;
 
-use crate::stream::NetStream;
+use crate::connection::NetConnection;
 
 pub trait NetListener: AsRawFd {
-    type Stream: NetStream;
+    type Stream: NetConnection;
 
     fn bind(addr: impl Into<SocketAddr>) -> io::Result<Self>
     where

@@ -4,15 +4,16 @@ use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
+use crate::IoStream;
 use cyphernet::addr::Addr;
 
-pub trait Stream: std::io::Write + std::io::Read {}
-
-impl<T> Stream for T where T: std::io::Write + std::io::Read {}
-
 /// Network stream is an abstraction of TCP stream object.
-pub trait NetStream: Stream + AsRawFd {
+pub trait NetConnection: IoStream + AsRawFd {
     type Addr: Addr + Clone;
+
+    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self>
+    where
+        Self: Sized;
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()>;
 
@@ -38,8 +39,17 @@ pub trait NetStream: Stream + AsRawFd {
     fn take_error(&self) -> io::Result<Option<io::Error>>;
 }
 
-impl NetStream for TcpStream {
+impl NetConnection for TcpStream {
     type Addr = net::SocketAddr;
+
+    #[cfg(not(feature = "socket2"))]
+    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
+        panic!("non-blocking TcpStream::connect requires socket2 feature")
+    }
+    #[cfg(feature = "socket2")]
+    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
+        <socket2::Socket as NetConnection>::connect_nonblocking(addr).map(Self::from)
+    }
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
         TcpStream::shutdown(self, how)
@@ -95,8 +105,28 @@ impl NetStream for TcpStream {
 }
 
 #[cfg(feature = "socket2")]
-impl NetStream for socket2::Socket {
+impl NetConnection for socket2::Socket {
     type Addr = net::SocketAddr;
+
+    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
+        let addr = addr.into();
+        let socket = socket2::Socket::new(
+            socket2::Domain::for_address(addr),
+            socket2::Type::STREAM,
+            None,
+        )?;
+        socket.set_nonblocking(true)?;
+        match socket2::Socket::connect(&socket, &addr.into()) {
+            Ok(()) => {}
+            Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {}
+            Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
+                return Err(io::Error::from(io::ErrorKind::AlreadyExists))
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+            Err(e) => return Err(e),
+        }
+        Ok(socket)
+    }
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
         socket2::Socket::shutdown(self, how)
