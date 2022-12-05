@@ -1,10 +1,11 @@
 use std::collections::VecDeque;
 use std::fmt::Debug;
+use std::net::TcpListener;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::{io, net};
 
 use reactor::poller::IoEv;
-use reactor::resource::{Resource, ResourceId};
+use reactor::resource::Resource;
 
 use crate::{Frame, NetConnection, NetListener, NetSession};
 
@@ -22,19 +23,19 @@ pub enum ListenerEvent<S: NetSession> {
 }
 
 #[derive(Debug)]
-pub struct NetAccept<L: NetListener<Stream = S::Connection>, S: NetSession> {
+pub struct NetAccept<S: NetSession, L: NetListener<Stream = S::Connection> = TcpListener> {
     session_context: S::Context,
     listener: L,
     events: VecDeque<ListenerEvent<S>>,
 }
 
-impl<L: NetListener<Stream = S::Connection>, S: NetSession> AsRawFd for NetAccept<L, S> {
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> AsRawFd for NetAccept<S, L> {
     fn as_raw_fd(&self) -> RawFd {
         self.listener.as_raw_fd()
     }
 }
 
-impl<L: NetListener<Stream = S::Connection>, S: NetSession> io::Write for NetAccept<L, S> {
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> io::Write for NetAccept<S, L> {
     fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
         panic!("must not write to network listener")
     }
@@ -44,7 +45,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> io::Write for NetAcc
     }
 }
 
-impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<L, S> {
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
     pub fn bind(addr: impl Into<net::SocketAddr>, session_context: S::Context) -> io::Result<Self> {
         let listener = L::bind(addr)?;
         listener.set_nonblocking(true)?;
@@ -66,7 +67,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<L, S> {
     }
 }
 
-impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAccept<L, S> {
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAccept<S, L> {
     type Id = net::SocketAddr;
     type Event = ListenerEvent<S>;
     type Message = (); // Indicates incoming connection
@@ -97,7 +98,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAcce
     }
 }
 
-impl<L: NetListener<Stream = S::Connection>, S: NetSession> Iterator for NetAccept<L, S> {
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> Iterator for NetAccept<S, L> {
     type Item = ListenerEvent<S>;
 
     fn next(&mut self) -> Option<Self::Item> {

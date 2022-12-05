@@ -1,6 +1,7 @@
-use std::io;
+pub mod popol;
+
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::time::Instant;
+use std::time::Duration;
 
 /// Information about I/O events which has happened for an actor
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
@@ -16,8 +17,8 @@ where
     Self: Send + Iterator<Item = (RawFd, IoEv)>,
     for<'a> &'a mut Self: Iterator<Item = (RawFd, IoEv)>,
 {
-    fn register(&mut self, fd: impl AsRawFd) -> Result<bool, io::Error>;
-    fn unregister(&mut self, fd: impl AsRawFd) -> Result<bool, io::Error>;
+    fn register(&mut self, fd: impl AsRawFd);
+    fn unregister(&mut self, fd: impl AsRawFd);
 
-    fn poll(&mut self) -> (Instant, usize);
+    fn poll(&mut self) -> (Duration, usize);
 }

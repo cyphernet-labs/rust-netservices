@@ -1,9 +1,10 @@
 use std::io::{self, Read, Write};
 use std::net;
+use std::net::TcpStream;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
-use cyphernet::addr::{Addr, LocalNode, NodeId, PeerAddr};
+use cyphernet::addr::{Addr, LocalNode, PeerAddr};
 use cyphernet::crypto::Ec;
 
 use crate::{NetConnection, NetSession};
@@ -54,8 +55,8 @@ impl<Id, A: Addr + Clone> XkAddr<Id, A> {
     }
 }
 
-pub struct NoiseXk<C: Ec, S: NetConnection> {
-    remote_addr: XkAddr<NodeId<C>, S::Addr>,
+pub struct NoiseXk<C: Ec, S: NetConnection = TcpStream> {
+    remote_addr: XkAddr<C::PubKey, S::Addr>,
     local_node: LocalNode<C>,
     connection: S,
 }
@@ -68,12 +69,14 @@ impl<C: Ec, S: NetConnection> AsRawFd for NoiseXk<C, S> {
 
 impl<C: Ec, S: NetConnection> Read for NoiseXk<C, S> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        // TODO: Do handshake
         self.connection.read(buf)
     }
 }
 
 impl<C: Ec, S: NetConnection> Write for NoiseXk<C, S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        // TODO: Do handshake
         self.connection.write(buf)
     }
 
@@ -85,8 +88,8 @@ impl<C: Ec, S: NetConnection> Write for NoiseXk<C, S> {
 impl<C: Ec, S: NetConnection> NetSession for NoiseXk<C, S> {
     type Context = LocalNode<C>;
     type Connection = S;
-    type RemoteAddr = PeerAddr<NodeId<C>, S::Addr>;
-    type PeerAddr = XkAddr<NodeId<C>, S::Addr>;
+    type RemoteAddr = PeerAddr<C::PubKey, S::Addr>;
+    type PeerAddr = XkAddr<C::PubKey, S::Addr>;
 
     fn accept(connection: S, context: &Self::Context) -> Self {
         Self {
