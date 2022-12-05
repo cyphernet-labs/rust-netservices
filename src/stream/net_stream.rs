@@ -14,8 +14,8 @@ pub trait NetStream: Stream + AsRawFd {
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()>;
 
-    fn peer_addr(&self) -> io::Result<Self::Addr>;
-    fn local_addr(&self) -> io::Result<Self::Addr>;
+    fn peer_addr(&self) -> Self::Addr;
+    fn local_addr(&self) -> Self::Addr;
 
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()>;
     fn set_write_timeout(&mut self, dur: Option<Duration>) -> io::Result<()>;
@@ -43,12 +43,12 @@ impl NetStream for TcpStream {
         TcpStream::shutdown(self, how)
     }
 
-    fn peer_addr(&self) -> io::Result<Self::Addr> {
-        TcpStream::peer_addr(self)
+    fn peer_addr(&self) -> Self::Addr {
+        TcpStream::peer_addr(self).expect("TCP stream doesn't know remote peer address")
     }
 
-    fn local_addr(&self) -> io::Result<Self::Addr> {
-        TcpStream::local_addr(self)
+    fn local_addr(&self) -> Self::Addr {
+        TcpStream::local_addr(self).expect("TCP stream doesn't has local address")
     }
 
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
@@ -100,16 +100,18 @@ impl NetStream for socket2::Socket {
         socket2::Socket::shutdown(self, how)
     }
 
-    fn peer_addr(&self) -> io::Result<Self::Addr> {
-        Ok(socket2::Socket::peer_addr(self)?
+    fn peer_addr(&self) -> Self::Addr {
+        socket2::Socket::peer_addr(self)
+            .expect("net stream must use only connections")
             .as_socket()
-            .expect("net stream must use only connections"))
+            .expect("net stream must use only connections")
     }
 
-    fn local_addr(&self) -> io::Result<Self::Addr> {
-        Ok(socket2::Socket::local_addr(self)?
+    fn local_addr(&self) -> Self::Addr {
+        socket2::Socket::local_addr(self)
+            .expect("net stream doesn't has local socket")
             .as_socket()
-            .expect("net stream doesn't has local socket"))
+            .expect("net stream doesn't has local socket")
     }
 
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {

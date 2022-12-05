@@ -1,13 +1,14 @@
 use std::collections::VecDeque;
-use std::io::{Error, Read, Write};
+use std::io::{self, Read, Write};
 
 use crate::stream::Stream;
 
-pub trait Frame: Stream {
+pub trait Frame: Stream + Default {
     type Message;
+    type Error;
 
     fn push(&mut self, msg: Self::Message);
-    fn pop(&mut self) -> Result<Option<Self::Message>, Error>;
+    fn pop(&mut self) -> Result<Option<Self::Message>, Self::Error>;
     fn queue_len(&self) -> usize;
 }
 
@@ -35,12 +36,13 @@ impl VecFrame {
 
 impl Frame for VecFrame {
     type Message = Vec<u8>;
+    type Error = ();
 
     fn push(&mut self, msg: Self::Message) {
         self.write_queue.extend(msg);
     }
 
-    fn pop(&mut self) -> Result<Option<Self::Message>, Error> {
+    fn pop(&mut self) -> Result<Option<Self::Message>, Self::Error> {
         Ok(Some(self.read_queue.drain(..).collect()))
     }
 
@@ -50,17 +52,17 @@ impl Frame for VecFrame {
 }
 
 impl Read for VecFrame {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.write_queue.read(buf)
     }
 }
 
 impl Write for VecFrame {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.read_queue.write(buf)
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> io::Result<()> {
         // Do nothing
         Ok(())
     }
