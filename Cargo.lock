@@ -207,7 +207,7 @@ checksum = "f3b7eb4404b8195a9abb6356f4ac07d8ba267045c8d6d220ac4dc992e6cc75df"
 [[package]]
 name = "cyphernet"
 version = "0.1.0"
-source = "git+https://github.com/Internet2-WG/rust-cyphernet#ac4e3832b1bb2373bc0c938e15eacc6bb32116c4"
+source = "git+https://github.com/Internet2-WG/rust-cyphernet#6a0d0d1e3f5908580b733a2ffd702566babef753"
 dependencies = [
  "amplify_derive 2.11.3",
  "ed25519-compact",
@@ -385,12 +385,15 @@ dependencies = [
 name = "netservices"
 version = "0.1.0"
 dependencies = [
- "amplify 3.13.0",
+ "amplify 4.0.0-beta.1",
  "bitcoin_hashes",
  "cyphernet",
  "log",
+ "mio",
+ "poll-reactor",
  "re-actor",
- "streampipes",
+ "socket2",
+ "zmq",
 ]
 
 [[package]]
@@ -597,13 +600,6 @@ dependencies = [
  "byteorder",
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "streampipes"
-version = "0.1.0"
-dependencies = [
- "amplify 3.13.0",
 ]
 
 [[package]]

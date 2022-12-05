@@ -17,6 +17,5 @@ extern crate amplify;
 pub mod poller;
 mod reactor;
 pub mod resource;
-pub mod stream;
 
 pub use reactor::{Handler, Reactor};
