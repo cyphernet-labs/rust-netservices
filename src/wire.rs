@@ -144,6 +144,10 @@ impl<S: NetSession, F: Frame> NetTransport<S, F> {
         Self::upgrade(session)
     }
 
+    pub fn local_addr(&self) -> <S::Connection as NetConnection>::Addr {
+        self.session.local_addr()
+    }
+
     fn handle_writable(&mut self) {
         if let Err(err) = self.session.flush() {
             self.events.push_back(SessionEvent::ConnectionFailure(err));
