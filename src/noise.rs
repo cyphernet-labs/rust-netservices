@@ -88,8 +88,8 @@ impl<C: Ec, S: NetConnection> Write for NoiseXk<C, S> {
 impl<C: Ec, S: NetConnection> NetSession for NoiseXk<C, S> {
     type Context = LocalNode<C>;
     type Connection = S;
-    type RemoteAddr = PeerAddr<C::PubKey, S::Addr>;
-    type PeerAddr = XkAddr<C::PubKey, S::Addr>;
+    type PeerAddr = PeerAddr<C::PubKey, S::Addr>;
+    type TransitionAddr = XkAddr<C::PubKey, S::Addr>;
 
     fn accept(connection: S, context: &Self::Context) -> Self {
         Self {
@@ -99,7 +99,7 @@ impl<C: Ec, S: NetConnection> NetSession for NoiseXk<C, S> {
         }
     }
 
-    fn connect(peer_addr: Self::RemoteAddr, context: &Self::Context) -> io::Result<Self> {
+    fn connect(peer_addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self> {
         let socket = S::connect_nonblocking(peer_addr.addr().clone())?;
         Ok(Self {
             remote_addr: XkAddr::Full(peer_addr),
@@ -109,11 +109,21 @@ impl<C: Ec, S: NetConnection> NetSession for NoiseXk<C, S> {
     }
 
     fn handshake_completed(&self) -> bool {
-        todo!("integrate handshake")
+        match self.remote_addr {
+            XkAddr::Partial(_) => false,
+            XkAddr::Full(_) => true,
+        }
     }
 
-    fn peer_addr(&self) -> Self::PeerAddr {
+    fn transition_addr(&self) -> Self::TransitionAddr {
         self.remote_addr.clone()
+    }
+
+    fn peer_addr(&self) -> Option<Self::PeerAddr> {
+        match self.remote_addr {
+            XkAddr::Partial(_) => None,
+            XkAddr::Full(ref addr) => Some(addr.clone()),
+        }
     }
 
     fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr {

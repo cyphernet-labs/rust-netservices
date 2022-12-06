@@ -106,8 +106,8 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> Iterator for NetAcce
     }
 }
 
-pub enum SessionEvent<F: Frame> {
-    SessionEstablished,
+pub enum SessionEvent<S: NetSession, F: Frame> {
+    SessionEstablished(S::PeerAddr),
     Message(F::Message),
     FrameFailure(F::Error),
     ConnectionFailure(io::Error),
@@ -117,7 +117,7 @@ pub enum SessionEvent<F: Frame> {
 pub struct NetTransport<S: NetSession, F: Frame> {
     session: S,
     framer: F,
-    events: VecDeque<SessionEvent<F>>,
+    events: VecDeque<SessionEvent<S, F>>,
 }
 
 impl<S: NetSession, F: Frame> AsRawFd for NetTransport<S, F> {
@@ -138,7 +138,7 @@ impl<S: NetSession, F: Frame> NetTransport<S, F> {
         })
     }
 
-    pub fn connect(addr: S::RemoteAddr, context: &S::Context) -> io::Result<Self> {
+    pub fn connect(addr: S::PeerAddr, context: &S::Context) -> io::Result<Self> {
         let session = S::connect(addr, context)?;
         Self::upgrade(session)
     }
@@ -150,8 +150,20 @@ impl<S: NetSession, F: Frame> NetTransport<S, F> {
     }
 
     fn handle_readable(&mut self) {
+        // We need to save the state before doing the read below
+        let was_established = self.session.handshake_completed();
         let mut buffer = [0; READ_BUFFER_SIZE];
-        match self.session.read(&mut buffer) {
+        let res = self.session.read(&mut buffer);
+        if !was_established {
+            if let Some(peer_addr) = self.session.peer_addr() {
+                self.events
+                    .push_back(SessionEvent::SessionEstablished(peer_addr));
+            }
+        }
+        match res {
+            Ok(0) if !was_established => {
+                // Do nothing since we haven't established session yet
+            }
             // Nb. Since `poll`, which this reactor is based on, is *level-triggered*,
             // we will be notified again if there is still data to be read on the socket.
             // Hence, there is no use in putting this socket read in a loop, as the second
@@ -189,14 +201,14 @@ impl<S: NetSession, F: Frame> NetTransport<S, F> {
 
 impl<S: NetSession, F: Frame> Resource for NetTransport<S, F>
 where
-    S::PeerAddr: Into<net::SocketAddr>,
+    S::TransitionAddr: Into<net::SocketAddr>,
 {
     type Id = net::SocketAddr;
-    type Event = SessionEvent<F>;
+    type Event = SessionEvent<S, F>;
     type Message = F::Message;
 
     fn id(&self) -> Self::Id {
-        self.session.peer_addr().into()
+        self.session.transition_addr().into()
     }
 
     fn handle_io(&mut self, ev: IoEv) -> usize {
@@ -225,7 +237,7 @@ where
 }
 
 impl<S: NetSession, F: Frame> Iterator for NetTransport<S, F> {
-    type Item = SessionEvent<F>;
+    type Item = SessionEvent<S, F>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.events.pop_front()

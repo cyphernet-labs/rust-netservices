@@ -10,15 +10,16 @@ use crate::{IoStream, NetConnection};
 pub trait NetSession: IoStream + AsRawFd + Sized {
     type Context;
     type Connection: NetConnection;
-    type RemoteAddr: Addr + Clone;
-    type PeerAddr: Addr;
+    type PeerAddr: Addr + Clone;
+    type TransitionAddr: Addr;
 
     fn accept(connection: Self::Connection, context: &Self::Context) -> Self;
-    fn connect(addr: Self::RemoteAddr, context: &Self::Context) -> io::Result<Self>;
+    fn connect(addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self>;
 
     fn handshake_completed(&self) -> bool;
 
-    fn peer_addr(&self) -> Self::PeerAddr;
+    fn transition_addr(&self) -> Self::TransitionAddr;
+    fn peer_addr(&self) -> Option<Self::PeerAddr>;
     fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr;
 
     fn read_timeout(&self) -> io::Result<Option<Duration>>;
@@ -33,14 +34,14 @@ pub trait NetSession: IoStream + AsRawFd + Sized {
 impl NetSession for net::TcpStream {
     type Context = ();
     type Connection = Self;
-    type RemoteAddr = net::SocketAddr;
     type PeerAddr = net::SocketAddr;
+    type TransitionAddr = net::SocketAddr;
 
     fn accept(connection: Self::Connection, _context: &Self::Context) -> Self {
         connection
     }
 
-    fn connect(addr: Self::RemoteAddr, _context: &Self::Context) -> io::Result<Self> {
+    fn connect(addr: Self::PeerAddr, _context: &Self::Context) -> io::Result<Self> {
         Self::connect_nonblocking(addr)
     }
 
@@ -48,8 +49,12 @@ impl NetSession for net::TcpStream {
         true
     }
 
-    fn peer_addr(&self) -> Self::PeerAddr {
+    fn transition_addr(&self) -> Self::TransitionAddr {
         <Self as NetConnection>::peer_addr(self)
+    }
+
+    fn peer_addr(&self) -> Option<Self::PeerAddr> {
+        Some(<Self as NetConnection>::peer_addr(self))
     }
 
     fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr {
@@ -81,14 +86,14 @@ impl NetSession for net::TcpStream {
 impl NetSession for socket2::Socket {
     type Context = ();
     type Connection = Self;
-    type RemoteAddr = net::SocketAddr;
     type PeerAddr = net::SocketAddr;
+    type TransitionAddr = net::SocketAddr;
 
     fn accept(connection: Self::Connection, _context: &Self::Context) -> Self {
         connection
     }
 
-    fn connect(addr: Self::RemoteAddr, _context: &Self::Context) -> io::Result<Self> {
+    fn connect(addr: Self::PeerAddr, _context: &Self::Context) -> io::Result<Self> {
         Self::connect_nonblocking(addr)
     }
 
@@ -96,8 +101,12 @@ impl NetSession for socket2::Socket {
         true
     }
 
-    fn peer_addr(&self) -> Self::PeerAddr {
+    fn transition_addr(&self) -> Self::TransitionAddr {
         <Self as NetConnection>::peer_addr(self)
+    }
+
+    fn peer_addr(&self) -> Option<Self::PeerAddr> {
+        Some(<Self as NetConnection>::peer_addr(self))
     }
 
     fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr {
