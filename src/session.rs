@@ -28,6 +28,8 @@ pub trait NetSession: IoStream + AsRawFd + Sized {
     fn set_write_timeout(&mut self, dur: Option<Duration>) -> io::Result<()>;
 
     fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()>;
+
+    fn disconnect(self) -> io::Result<()>;
 }
 
 #[cfg(feature = "socket2")]
@@ -80,6 +82,10 @@ impl NetSession for net::TcpStream {
     fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()> {
         <Self as NetConnection>::set_nonblocking(self, nonblocking)
     }
+
+    fn disconnect(self) -> io::Result<()> {
+        self.shutdown(net::Shutdown::Both)
+    }
 }
 
 #[cfg(feature = "socket2")]
@@ -131,5 +137,9 @@ impl NetSession for socket2::Socket {
 
     fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()> {
         <Self as NetConnection>::set_nonblocking(self, nonblocking)
+    }
+
+    fn disconnect(self) -> io::Result<()> {
+        self.shutdown(net::Shutdown::Both)
     }
 }

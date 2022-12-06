@@ -149,4 +149,8 @@ impl<C: Ec, S: NetConnection> NetSession for NoiseXk<C, S> {
     fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()> {
         self.connection.set_nonblocking(nonblocking)
     }
+
+    fn disconnect(mut self) -> io::Result<()> {
+        self.connection.shutdown(net::Shutdown::Both)
+    }
 }
