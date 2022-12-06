@@ -107,7 +107,6 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> Iterator for NetAcce
 }
 
 pub enum SessionEvent<F: Frame> {
-    Connected,
     SessionEstablished,
     Message(F::Message),
     FrameFailure(F::Error),

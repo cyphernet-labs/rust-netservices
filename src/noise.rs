@@ -108,8 +108,16 @@ impl<C: Ec, S: NetConnection> NetSession for NoiseXk<C, S> {
         })
     }
 
+    fn handshake_completed(&self) -> bool {
+        todo!("integrate handshake")
+    }
+
     fn peer_addr(&self) -> Self::PeerAddr {
         self.remote_addr.clone()
+    }
+
+    fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr {
+        self.connection.local_addr()
     }
 
     fn read_timeout(&self) -> io::Result<Option<Duration>> {
