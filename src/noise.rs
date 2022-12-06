@@ -58,6 +58,13 @@ impl<Id: XkId, A: ResAddr> XkAddr<Id, A> {
             XkAddr::Full(a) => a.addr(),
         }
     }
+
+    pub fn expect_peer_addr(&self) -> PeerAddr<Id, A> {
+        match self {
+            XkAddr::Partial(_) => panic!("handshake is not complete"),
+            XkAddr::Full(addr) => addr.clone(),
+        }
+    }
 }
 
 pub struct NoiseXk<C: Ec, S: NetConnection = TcpStream> {
