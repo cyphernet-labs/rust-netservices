@@ -28,6 +28,7 @@ pub enum Action<L: Resource, T: Resource> {
     UnregisterListener(L::Id),
     UnregisterTransport(T::Id),
     Send(T::Id, Vec<T::Message>),
+    Wakeup(Duration),
 }
 
 pub trait Handler: Send + Iterator<Item = Action<Self::Listener, Self::Transport>> {
@@ -193,6 +194,7 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
                         .map_err(|err| Error::PeerDisconnected(id, err))?;
                 }
             }
+            Action::Wakeup(duration) => {}
         }
         Ok(())
     }

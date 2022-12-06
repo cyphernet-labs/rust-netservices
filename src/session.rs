@@ -16,7 +16,10 @@ pub trait NetSession: IoStream + AsRawFd + Sized {
     fn accept(connection: Self::Connection, context: &Self::Context) -> Self;
     fn connect(addr: Self::RemoteAddr, context: &Self::Context) -> io::Result<Self>;
 
+    fn handshake_completed(&self) -> bool;
+
     fn peer_addr(&self) -> Self::PeerAddr;
+    fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr;
 
     fn read_timeout(&self) -> io::Result<Option<Duration>>;
     fn write_timeout(&self) -> io::Result<Option<Duration>>;
@@ -41,8 +44,16 @@ impl NetSession for net::TcpStream {
         Self::connect_nonblocking(addr)
     }
 
+    fn handshake_completed(&self) -> bool {
+        true
+    }
+
     fn peer_addr(&self) -> Self::PeerAddr {
         <Self as NetConnection>::peer_addr(self)
+    }
+
+    fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr {
+        <Self as NetConnection>::local_addr(self)
     }
 
     fn read_timeout(&self) -> io::Result<Option<Duration>> {
@@ -81,8 +92,16 @@ impl NetSession for socket2::Socket {
         Self::connect_nonblocking(addr)
     }
 
+    fn handshake_completed(&self) -> bool {
+        true
+    }
+
     fn peer_addr(&self) -> Self::PeerAddr {
         <Self as NetConnection>::peer_addr(self)
+    }
+
+    fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr {
+        <Self as NetConnection>::local_addr(self)
     }
 
     fn read_timeout(&self) -> io::Result<Option<Duration>> {
