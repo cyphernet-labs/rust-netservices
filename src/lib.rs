@@ -13,7 +13,7 @@ mod listener;
 pub mod noise;
 mod session;
 
-pub use connection::NetConnection;
+pub use connection::{NetConnection, ResAddr};
 pub use frame::{Frame, VecFrame};
 pub use listener::NetListener;
 pub use session::NetSession;

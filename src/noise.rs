@@ -1,3 +1,5 @@
+use std::fmt::{Debug, Display};
+use std::hash::Hash;
 use std::io::{self, Read, Write};
 use std::net::{self, TcpStream};
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -5,11 +7,16 @@ use std::time::Duration;
 
 use cyphernet::addr::{Addr, LocalNode, PeerAddr};
 use cyphernet::crypto::Ec;
+use reactor::ResourceId;
 
-use crate::{NetConnection, NetSession};
+use crate::{NetConnection, NetSession, ResAddr};
 
-#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, From)]
-pub enum XkAddr<Id, A: Addr> {
+pub trait XkId: Copy + Ord + Eq + Hash + Debug + Display {}
+impl<T> XkId for T where T: Copy + Ord + Eq + Hash + Debug + Display {}
+
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display, From)]
+#[display(inner)]
+pub enum XkAddr<Id: XkId, A: ResAddr> {
     #[from]
     Partial(A),
 
@@ -17,7 +24,9 @@ pub enum XkAddr<Id, A: Addr> {
     Full(PeerAddr<Id, A>),
 }
 
-impl<Id, A: Addr> Addr for XkAddr<Id, A> {
+impl<Id: XkId, A: ResAddr> ResourceId for XkAddr<Id, A> {}
+
+impl<Id: XkId, A: ResAddr> Addr for XkAddr<Id, A> {
     fn port(&self) -> u16 {
         match self {
             XkAddr::Partial(a) => a.port(),
@@ -33,7 +42,7 @@ impl<Id, A: Addr> Addr for XkAddr<Id, A> {
     }
 }
 
-impl<Id, A: Addr> From<XkAddr<Id, A>> for net::SocketAddr
+impl<Id: XkId, A: ResAddr> From<XkAddr<Id, A>> for net::SocketAddr
 where
     A: Into<net::SocketAddr>,
 {
@@ -42,7 +51,7 @@ where
     }
 }
 
-impl<Id, A: Addr> XkAddr<Id, A> {
+impl<Id: XkId, A: ResAddr> XkAddr<Id, A> {
     pub fn as_addr(&self) -> &A {
         match self {
             XkAddr::Partial(a) => a,
