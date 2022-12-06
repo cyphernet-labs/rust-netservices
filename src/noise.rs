@@ -1,6 +1,5 @@
 use std::io::{self, Read, Write};
-use std::net;
-use std::net::TcpStream;
+use std::net::{self, TcpStream};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
@@ -10,7 +9,7 @@ use cyphernet::crypto::Ec;
 use crate::{NetConnection, NetSession};
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, From)]
-pub enum XkAddr<Id, A: Addr + Clone> {
+pub enum XkAddr<Id, A: Addr> {
     #[from]
     Partial(A),
 
@@ -18,39 +17,36 @@ pub enum XkAddr<Id, A: Addr + Clone> {
     Full(PeerAddr<Id, A>),
 }
 
-impl<Id, A: Addr + Clone> Addr for XkAddr<Id, A> {
+impl<Id, A: Addr> Addr for XkAddr<Id, A> {
     fn port(&self) -> u16 {
         match self {
             XkAddr::Partial(a) => a.port(),
             XkAddr::Full(a) => a.port(),
         }
     }
+
+    fn to_socket_addr(&self) -> net::SocketAddr {
+        match self {
+            XkAddr::Partial(a) => a.to_socket_addr(),
+            XkAddr::Full(a) => a.to_socket_addr(),
+        }
+    }
 }
 
-impl<Id, A: Addr + Clone> From<XkAddr<Id, A>> for net::SocketAddr
+impl<Id, A: Addr> From<XkAddr<Id, A>> for net::SocketAddr
 where
-    for<'a> &'a A: Into<net::SocketAddr>,
+    A: Into<net::SocketAddr>,
 {
     fn from(addr: XkAddr<Id, A>) -> Self {
         addr.to_socket_addr()
     }
 }
 
-impl<Id, A: Addr + Clone> XkAddr<Id, A> {
-    pub fn addr(&self) -> A {
+impl<Id, A: Addr> XkAddr<Id, A> {
+    pub fn as_addr(&self) -> &A {
         match self {
-            XkAddr::Partial(a) => a.clone(),
-            XkAddr::Full(a) => a.addr().clone(),
-        }
-    }
-
-    pub fn to_socket_addr(&self) -> net::SocketAddr
-    where
-        for<'a> &'a A: Into<net::SocketAddr>,
-    {
-        match self {
-            XkAddr::Partial(a) => a.into(),
-            XkAddr::Full(a) => a.to_socket_addr(),
+            XkAddr::Partial(a) => a,
+            XkAddr::Full(a) => a.addr(),
         }
     }
 }

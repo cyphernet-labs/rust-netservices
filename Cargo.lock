@@ -207,7 +207,7 @@ checksum = "f3b7eb4404b8195a9abb6356f4ac07d8ba267045c8d6d220ac4dc992e6cc75df"
 [[package]]
 name = "cyphernet"
 version = "0.1.0"
-source = "git+https://github.com/Cyphernet-WG/rust-cyphernet#6a0d0d1e3f5908580b733a2ffd702566babef753"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet#3e4a9fca7d542afa2ffadd8c7dc0fceb6dd7ff60"
 dependencies = [
  "amplify_derive 2.11.3",
  "ed25519-compact",
