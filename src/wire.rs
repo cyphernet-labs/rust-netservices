@@ -93,8 +93,9 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAcce
         panic!("must not send messages to the network listener")
     }
 
-    fn disconnect(self) {
+    fn disconnect(self) -> io::Result<()> {
         // We disconnect by dropping the self
+        Ok(())
     }
 }
 
@@ -231,8 +232,8 @@ where
         self.session.write_all(&buf)
     }
 
-    fn disconnect(self) {
-        // We just drop the self
+    fn disconnect(self) -> io::Result<()> {
+        self.session.disconnect()
     }
 }
 

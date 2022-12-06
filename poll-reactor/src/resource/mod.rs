@@ -18,9 +18,9 @@ pub trait Resource: AsRawFd + Iterator<Item = Self::Event> {
     /// from the resource I/O.
     fn handle_io(&mut self, ev: IoEv) -> usize;
 
-    fn send(&mut self, msg: Self::Message) -> Result<(), io::Error>;
+    fn send(&mut self, msg: Self::Message) -> io::Result<()>;
 
-    fn disconnect(self);
+    fn disconnect(self) -> io::Result<()>;
 }
 
 impl ResourceId for net::SocketAddr {}
