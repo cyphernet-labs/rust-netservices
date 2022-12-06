@@ -7,13 +7,13 @@ edition = "2021"
 amplify = "4.0.0-beta.1"
 re-actor = { path = "re-actor", optional = true }
 poll-reactor = { path = "poll-reactor", optional = true }
-cyphernet = { git = "https://github.com/Internet2-WG/rust-cyphernet", features = ["ed25519"] }
+cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet", features = ["ed25519"] }
 mio = { version = "0.8.5", optional = true }
 socket2 = { version = "0.4.7", optional = true }
 libc = "0.2.138"
 
 [dev-dependencies]
-cyphernet = { git = "https://github.com/Internet2-WG/rust-cyphernet", features = ["ed25519", "rand"] }
+cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet", features = ["ed25519", "rand"] }
 bitcoin_hashes = "0.11.0"
 log = "0.4.17"
 
