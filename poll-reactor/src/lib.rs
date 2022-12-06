@@ -16,6 +16,7 @@ extern crate amplify;
 
 pub mod poller;
 mod reactor;
-pub mod resource;
+mod resource;
 
-pub use reactor::{Action, Handler, Reactor};
+pub use reactor::{Action, Error, Handler, Reactor};
+pub use resource::{Resource, ResourceId};

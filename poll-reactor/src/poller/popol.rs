@@ -1,11 +1,8 @@
 use std::collections::VecDeque;
-use std::io;
-use std::io::Error;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
 use crate::poller::{IoEv, Poll};
-use crate::resource::Resource;
 
 /// Manager for a set of resources which are polled for an event loop by the
 /// re-actor by using [`popol`] library.

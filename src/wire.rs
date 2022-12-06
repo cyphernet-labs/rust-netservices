@@ -5,7 +5,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::{io, net};
 
 use reactor::poller::IoEv;
-use reactor::resource::Resource;
+use reactor::Resource;
 
 use crate::{Frame, NetConnection, NetListener, NetSession};
 
@@ -214,7 +214,9 @@ where
     fn send(&mut self, msg: Self::Message) -> io::Result<()> {
         self.framer.push(msg);
         let mut buf = vec![0u8; self.framer.queue_len()];
-        self.framer.read_exact(&mut buf)?;
+        self.framer.read_exact(&mut buf).expect(
+            "queue length reported by framer doesn't exceeds the length of the returned data",
+        );
         self.session.write_all(&buf)
     }
 
