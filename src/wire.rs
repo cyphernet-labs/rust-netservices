@@ -204,12 +204,12 @@ impl<S: NetSession, F: Frame> Resource for NetTransport<S, F>
 where
     S::TransitionAddr: Into<net::SocketAddr>,
 {
-    type Id = net::SocketAddr;
+    type Id = S::TransitionAddr;
     type Event = SessionEvent<S, F>;
     type Message = F::Message;
 
     fn id(&self) -> Self::Id {
-        self.session.transition_addr().into()
+        self.session.transition_addr()
     }
 
     fn handle_io(&mut self, ev: IoEv) -> usize {

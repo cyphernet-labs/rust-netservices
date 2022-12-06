@@ -1,15 +1,21 @@
+use std::fmt::{Debug, Display};
+use std::hash::Hash;
 use std::mem::MaybeUninit;
 use std::net::{Shutdown, TcpStream};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
-use crate::IoStream;
 use cyphernet::addr::Addr;
+
+use crate::IoStream;
+
+pub trait ResAddr: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
+impl<T> ResAddr for T where T: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
 
 /// Network stream is an abstraction of TCP stream object.
 pub trait NetConnection: IoStream + AsRawFd {
-    type Addr: Addr + Clone;
+    type Addr: ResAddr;
 
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self>
     where

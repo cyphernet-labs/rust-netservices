@@ -4,14 +4,15 @@ use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
 use cyphernet::addr::Addr;
+use reactor::ResourceId;
 
 use crate::{IoStream, NetConnection};
 
 pub trait NetSession: IoStream + AsRawFd + Sized {
     type Context;
     type Connection: NetConnection;
-    type PeerAddr: Addr + Clone;
-    type TransitionAddr: Addr;
+    type PeerAddr: Addr;
+    type TransitionAddr: Addr + ResourceId;
 
     fn accept(connection: Self::Connection, context: &Self::Context) -> Self;
     fn connect(addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self>;
