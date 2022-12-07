@@ -3,7 +3,7 @@ use std::io::{self, Read, Write};
 
 use crate::IoStream;
 
-pub trait Frame: IoStream + Default {
+pub trait Marshall: IoStream + Default {
     type Message;
     type Error;
 
@@ -34,7 +34,7 @@ impl VecFrame {
     }
 }
 
-impl Frame for VecFrame {
+impl Marshall for VecFrame {
     type Message = Vec<u8>;
     type Error = ();
 

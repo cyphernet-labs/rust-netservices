@@ -1,6 +1,6 @@
 use std::io;
 use std::net;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
 use cyphernet::addr::Addr;
@@ -11,11 +11,18 @@ use crate::{IoStream, NetConnection};
 pub trait NetSession: IoStream + AsRawFd + Sized {
     type Context;
     type Connection: NetConnection;
+    /// A unique identifier of the session. Usually a part of a transition address.
+    type Id: ResourceId;
+    /// Address used for outgoing connections. May not be known initially for the incoming
+    /// connections
     type PeerAddr: Addr;
-    type TransitionAddr: Addr + ResourceId;
+    /// Address which combines what is known for both incoming and outgoing connections.
+    type TransitionAddr: Addr;
 
     fn accept(connection: Self::Connection, context: &Self::Context) -> Self;
     fn connect(addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self>;
+
+    fn id(&self) -> Self::Id;
 
     fn handshake_completed(&self) -> bool;
 
@@ -37,6 +44,7 @@ pub trait NetSession: IoStream + AsRawFd + Sized {
 impl NetSession for net::TcpStream {
     type Context = ();
     type Connection = Self;
+    type Id = RawFd;
     type PeerAddr = net::SocketAddr;
     type TransitionAddr = net::SocketAddr;
 
@@ -48,16 +56,20 @@ impl NetSession for net::TcpStream {
         Self::connect_nonblocking(addr)
     }
 
+    fn id(&self) -> Self::Id {
+        self.as_raw_fd()
+    }
+
     fn handshake_completed(&self) -> bool {
         true
     }
 
     fn transition_addr(&self) -> Self::TransitionAddr {
-        <Self as NetConnection>::peer_addr(self)
+        <Self as NetConnection>::remote_addr(self)
     }
 
     fn peer_addr(&self) -> Option<Self::PeerAddr> {
-        Some(<Self as NetConnection>::peer_addr(self))
+        Some(<Self as NetConnection>::remote_addr(self))
     }
 
     fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr {
@@ -93,6 +105,7 @@ impl NetSession for net::TcpStream {
 impl NetSession for socket2::Socket {
     type Context = ();
     type Connection = Self;
+    type Id = RawFd;
     type PeerAddr = net::SocketAddr;
     type TransitionAddr = net::SocketAddr;
 
@@ -104,16 +117,20 @@ impl NetSession for socket2::Socket {
         Self::connect_nonblocking(addr)
     }
 
+    fn id(&self) -> Self::Id {
+        self.as_raw_fd()
+    }
+
     fn handshake_completed(&self) -> bool {
         true
     }
 
     fn transition_addr(&self) -> Self::TransitionAddr {
-        <Self as NetConnection>::peer_addr(self)
+        <Self as NetConnection>::remote_addr(self)
     }
 
     fn peer_addr(&self) -> Option<Self::PeerAddr> {
-        Some(<Self as NetConnection>::peer_addr(self))
+        Some(<Self as NetConnection>::remote_addr(self))
     }
 
     fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr {
