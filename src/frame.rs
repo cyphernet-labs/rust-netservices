@@ -1,24 +1,23 @@
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 
-use crate::IoStream;
+pub trait Frame: Sized {
+    type Error: std::error::Error;
 
-pub trait Marshall: IoStream + Default {
-    type Message;
-    type Error;
-
-    fn push(&mut self, msg: Self::Message);
-    fn pop(&mut self) -> Result<Option<Self::Message>, Self::Error>;
-    fn queue_len(&self) -> usize;
+    /// Reads frame from the stream.
+    ///
+    /// If the stream doesn't contain the whole message yet must return `Ok(None)`
+    fn unmarshall(reader: impl Read) -> Result<Option<Self>, Self::Error>;
+    fn marshall(&self, writer: impl Write) -> Result<usize, Self::Error>;
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct VecFrame {
+pub struct Marshaller {
     read_queue: VecDeque<u8>,
     write_queue: VecDeque<u8>,
 }
 
-impl VecFrame {
+impl Marshaller {
     pub fn new() -> Self {
         Self {
             read_queue: VecDeque::new(),
@@ -32,32 +31,36 @@ impl VecFrame {
             write_queue: VecDeque::with_capacity(capacity),
         }
     }
-}
 
-impl Marshall for VecFrame {
-    type Message = Vec<u8>;
-    type Error = ();
-
-    fn push(&mut self, msg: Self::Message) {
-        self.write_queue.extend(msg);
+    pub fn push<F: Frame>(&mut self, frame: F) {
+        frame
+            .marshall(&mut self.write_queue)
+            .expect("in-memory write operation");
     }
 
-    fn pop(&mut self) -> Result<Option<Self::Message>, Self::Error> {
-        Ok(Some(self.read_queue.drain(..).collect()))
+    pub fn pop<F: Frame>(&mut self) -> Result<Option<F>, F::Error> {
+        let slice = self.read_queue.make_contiguous();
+        let mut cursor = io::Cursor::new(slice.as_ref());
+        let frame = F::unmarshall(&mut cursor)?;
+        let pos = cursor.position() as usize;
+        if frame.is_some() {
+            self.read_queue.drain(..pos);
+        }
+        return Ok(frame);
     }
 
-    fn queue_len(&self) -> usize {
+    pub fn queue_len(&self) -> usize {
         self.write_queue.len()
     }
 }
 
-impl Read for VecFrame {
+impl Read for Marshaller {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.write_queue.read(buf)
     }
 }
 
-impl Write for VecFrame {
+impl Write for Marshaller {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.read_queue.write(buf)
     }
