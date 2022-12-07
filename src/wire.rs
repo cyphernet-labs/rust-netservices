@@ -164,6 +164,10 @@ impl<S: NetSession, M: Marshall> NetTransport<S, M> {
         self.session.local_addr()
     }
 
+    pub fn expect_peer_id(&self) -> S::Id {
+        self.session.expect_id()
+    }
+
     fn handle_writable(&mut self) {
         if let Err(err) = self.session.flush() {
             self.events.push_back(SessionEvent::ConnectionFailure(err));
