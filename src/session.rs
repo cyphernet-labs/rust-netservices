@@ -4,7 +4,6 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
 use cyphernet::addr::Addr;
-use reactor::ResourceId;
 
 use crate::{IoStream, NetConnection};
 
@@ -12,7 +11,7 @@ pub trait NetSession: IoStream + AsRawFd + Sized {
     type Context;
     type Connection: NetConnection;
     /// A unique identifier of the session. Usually a part of a transition address.
-    type Id: ResourceId;
+    type Id;
     /// Address used for outgoing connections. May not be known initially for the incoming
     /// connections
     type PeerAddr: Addr;
@@ -22,7 +21,7 @@ pub trait NetSession: IoStream + AsRawFd + Sized {
     fn accept(connection: Self::Connection, context: &Self::Context) -> Self;
     fn connect(addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self>;
 
-    fn id(&self) -> Self::Id;
+    fn expect_id(&self) -> Self::Id;
 
     fn handshake_completed(&self) -> bool;
 
@@ -56,7 +55,7 @@ impl NetSession for net::TcpStream {
         Self::connect_nonblocking(addr)
     }
 
-    fn id(&self) -> Self::Id {
+    fn expect_id(&self) -> Self::Id {
         self.as_raw_fd()
     }
 
@@ -117,7 +116,7 @@ impl NetSession for socket2::Socket {
         Self::connect_nonblocking(addr)
     }
 
-    fn id(&self) -> Self::Id {
+    fn expect_id(&self) -> Self::Id {
         self.as_raw_fd()
     }
 
