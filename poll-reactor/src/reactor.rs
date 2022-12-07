@@ -58,6 +58,11 @@ pub trait Handler: Send + Iterator<Item = Action<Self::Listener, Self::Transport
         &mut self,
         err: Error<<Self::Listener as Resource>::Id, <Self::Transport as Resource>::Id>,
     );
+
+    /// Called by the reactor upon receiving [`Action::UnregisterListener`]
+    fn handover_listener(&mut self, listener: Self::Listener);
+    /// Called by the reactor upon receiving [`Action::UnregisterTransport`]
+    fn handover_transport(&mut self, transport: Self::Transport);
 }
 
 pub struct Reactor<S: Handler> {
@@ -174,6 +179,7 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
                     .remove(&fd)
                     .expect("listener index content doesn't match registered listeners");
                 self.poller.unregister(fd);
+                self.service.handover_listener(listener);
             }
             Action::UnregisterTransport(id) => {
                 let transport = self.transports.remove(&id).ok_or(Error::PeerUnknown(id))?;
@@ -182,6 +188,7 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
                     .remove(&fd)
                     .expect("transport index content doesn't match registered transports");
                 self.poller.unregister(fd);
+                self.service.handover_transport(transport);
             }
             Action::Send(id, msgs) => {
                 let transport = self.transports.get_mut(&id).ok_or(Error::PeerUnknown(id))?;
