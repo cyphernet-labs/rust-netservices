@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::fmt::Debug;
+use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::{io, net};
@@ -7,7 +8,7 @@ use std::{io, net};
 use reactor::poller::IoEv;
 use reactor::Resource;
 
-use crate::{Marshall, NetConnection, NetListener, NetSession};
+use crate::{Frame, Marshaller, NetConnection, NetListener, NetSession};
 
 /// Socket read buffer size.
 const READ_BUFFER_SIZE: usize = 1024 * 192;
@@ -107,28 +108,28 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> Iterator for NetAcce
     }
 }
 
-pub enum SessionEvent<S: NetSession, F: Marshall> {
+pub enum SessionEvent<S: NetSession, F: Frame> {
     SessionEstablished(S::Id),
-    Message(F::Message),
+    Message(F),
     FrameFailure(F::Error),
     ConnectionFailure(io::Error),
     Disconnected,
 }
 
-pub struct NetTransport<S: NetSession, M: Marshall> {
+pub struct NetTransport<S: NetSession, F: Frame> {
     session: S,
-    marshaller: M,
+    marshaller: Marshaller,
     inbound: bool,
-    events: VecDeque<SessionEvent<S, M>>,
+    events: VecDeque<SessionEvent<S, F>>,
 }
 
-impl<S: NetSession, M: Marshall> AsRawFd for NetTransport<S, M> {
+impl<S: NetSession, F: Frame> AsRawFd for NetTransport<S, F> {
     fn as_raw_fd(&self) -> RawFd {
         self.session.as_raw_fd()
     }
 }
 
-impl<S: NetSession, M: Marshall> NetTransport<S, M> {
+impl<S: NetSession, F: Frame> NetTransport<S, F> {
     pub fn upgrade(mut session: S) -> io::Result<Self> {
         session.set_read_timeout(Some(READ_TIMEOUT))?;
         session.set_write_timeout(Some(WRITE_TIMEOUT))?;
@@ -222,13 +223,13 @@ impl<S: NetSession, M: Marshall> NetTransport<S, M> {
     }
 }
 
-impl<S: NetSession, M: Marshall> Resource for NetTransport<S, M>
+impl<S: NetSession, F: Frame> Resource for NetTransport<S, F>
 where
     S::TransitionAddr: Into<net::SocketAddr>,
 {
     type Id = RawFd;
-    type Event = SessionEvent<S, M>;
-    type Message = M::Message;
+    type Event = SessionEvent<S, F>;
+    type Message = F;
 
     fn id(&self) -> Self::Id {
         self.session.as_raw_fd()
@@ -259,8 +260,8 @@ where
     }
 }
 
-impl<S: NetSession, M: Marshall> Iterator for NetTransport<S, M> {
-    type Item = SessionEvent<S, M>;
+impl<S: NetSession, F: Frame> Iterator for NetTransport<S, F> {
+    type Item = SessionEvent<S, F>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.events.pop_front()
