@@ -108,7 +108,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> Iterator for NetAcce
 }
 
 pub enum SessionEvent<S: NetSession, F: Marshall> {
-    SessionEstablished(S::PeerAddr),
+    SessionEstablished(S::Id),
     Message(F::Message),
     FrameFailure(F::Error),
     ConnectionFailure(io::Error),
@@ -118,6 +118,7 @@ pub enum SessionEvent<S: NetSession, F: Marshall> {
 pub struct NetTransport<S: NetSession, M: Marshall> {
     session: S,
     marshaller: M,
+    inbound: bool,
     events: VecDeque<SessionEvent<S, M>>,
 }
 
@@ -135,13 +136,28 @@ impl<S: NetSession, M: Marshall> NetTransport<S, M> {
         Ok(Self {
             session,
             marshaller: default!(),
+            inbound: true,
             events: empty!(),
         })
     }
 
     pub fn connect(addr: S::PeerAddr, context: &S::Context) -> io::Result<Self> {
         let session = S::connect(addr, context)?;
-        Self::upgrade(session)
+        let mut me = Self::upgrade(session)?;
+        me.inbound = false;
+        Ok(me)
+    }
+
+    pub fn is_inbound(&self) -> bool {
+        self.inbound
+    }
+
+    pub fn is_outbound(&self) -> bool {
+        !self.is_inbound()
+    }
+
+    pub fn handshake_completed(&self) -> bool {
+        self.session.handshake_completed()
     }
 
     pub fn local_addr(&self) -> <S::Connection as NetConnection>::Addr {
@@ -156,14 +172,12 @@ impl<S: NetSession, M: Marshall> NetTransport<S, M> {
 
     fn handle_readable(&mut self) {
         // We need to save the state before doing the read below
-        let was_established = self.session.handshake_completed();
+        let was_established = self.handshake_completed();
         let mut buffer = [0; READ_BUFFER_SIZE];
         let res = self.session.read(&mut buffer);
-        if !was_established {
-            if let Some(peer_addr) = self.session.peer_addr() {
-                self.events
-                    .push_back(SessionEvent::SessionEstablished(peer_addr));
-            }
+        if !was_established && self.handshake_completed() {
+            self.events
+                .push_back(SessionEvent::SessionEstablished(self.session.expect_id()));
         }
         match res {
             Ok(0) if !was_established => {
@@ -208,12 +222,12 @@ impl<S: NetSession, M: Marshall> Resource for NetTransport<S, M>
 where
     S::TransitionAddr: Into<net::SocketAddr>,
 {
-    type Id = S::Id;
+    type Id = RawFd;
     type Event = SessionEvent<S, M>;
     type Message = M::Message;
 
     fn id(&self) -> Self::Id {
-        self.session.id()
+        self.session.as_raw_fd()
     }
 
     fn handle_io(&mut self, ev: IoEv) -> usize {
