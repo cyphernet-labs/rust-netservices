@@ -11,12 +11,21 @@ use reactor::ResourceId;
 
 use crate::{NetConnection, NetSession, ResAddr};
 
-pub trait XkId: Copy + Ord + Eq + Hash + Debug + Display {}
-impl<T> XkId for T where T: Copy + Ord + Eq + Hash + Debug + Display {}
+pub trait PeerId: Copy + Ord + Eq + Hash + Debug + Display {}
+impl<T> PeerId for T where T: Copy + Ord + Eq + Hash + Debug + Display {}
+
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display)]
+#[display(inner)]
+pub enum XkId<Id: PeerId> {
+    Final(Id),
+    Temporary(net::SocketAddr),
+}
+
+impl<Id: PeerId> ResourceId for XkId<Id> {}
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display, From)]
 #[display(inner)]
-pub enum XkAddr<Id: XkId, A: ResAddr> {
+pub enum XkAddr<Id: PeerId, A: ResAddr> {
     #[from]
     Partial(A),
 
@@ -24,9 +33,7 @@ pub enum XkAddr<Id: XkId, A: ResAddr> {
     Full(PeerAddr<Id, A>),
 }
 
-impl<Id: XkId, A: ResAddr> ResourceId for XkAddr<Id, A> {}
-
-impl<Id: XkId, A: ResAddr> Addr for XkAddr<Id, A> {
+impl<Id: PeerId, A: ResAddr> Addr for XkAddr<Id, A> {
     fn port(&self) -> u16 {
         match self {
             XkAddr::Partial(a) => a.port(),
@@ -42,7 +49,7 @@ impl<Id: XkId, A: ResAddr> Addr for XkAddr<Id, A> {
     }
 }
 
-impl<Id: XkId, A: ResAddr> From<XkAddr<Id, A>> for net::SocketAddr
+impl<Id: PeerId, A: ResAddr> From<XkAddr<Id, A>> for net::SocketAddr
 where
     A: Into<net::SocketAddr>,
 {
@@ -51,7 +58,7 @@ where
     }
 }
 
-impl<Id: XkId, A: ResAddr> XkAddr<Id, A> {
+impl<Id: PeerId, A: ResAddr> XkAddr<Id, A> {
     pub fn as_addr(&self) -> &A {
         match self {
             XkAddr::Partial(a) => a,
@@ -100,12 +107,13 @@ impl<C: Ec, S: NetConnection> Write for NoiseXk<C, S> {
 impl<C: Ec, S: NetConnection> NetSession for NoiseXk<C, S> {
     type Context = LocalNode<C>;
     type Connection = S;
+    type Id = XkId<C::PubKey>;
     type PeerAddr = PeerAddr<C::PubKey, S::Addr>;
     type TransitionAddr = XkAddr<C::PubKey, S::Addr>;
 
     fn accept(connection: S, context: &Self::Context) -> Self {
         Self {
-            remote_addr: XkAddr::Partial(connection.peer_addr()),
+            remote_addr: XkAddr::Partial(connection.remote_addr()),
             local_node: context.clone(),
             connection,
         }
@@ -118,6 +126,13 @@ impl<C: Ec, S: NetConnection> NetSession for NoiseXk<C, S> {
             local_node: context.clone(),
             connection: socket,
         })
+    }
+
+    fn id(&self) -> Self::Id {
+        match self.remote_addr {
+            XkAddr::Partial(a) => XkId::Temporary(a.to_socket_addr()),
+            XkAddr::Full(a) => XkId::Final(*a.id()),
+        }
     }
 
     fn handshake_completed(&self) -> bool {

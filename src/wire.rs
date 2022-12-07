@@ -7,7 +7,7 @@ use std::{io, net};
 use reactor::poller::IoEv;
 use reactor::Resource;
 
-use crate::{Frame, NetConnection, NetListener, NetSession};
+use crate::{Marshall, NetConnection, NetListener, NetSession};
 
 /// Socket read buffer size.
 const READ_BUFFER_SIZE: usize = 1024 * 192;
@@ -107,7 +107,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> Iterator for NetAcce
     }
 }
 
-pub enum SessionEvent<S: NetSession, F: Frame> {
+pub enum SessionEvent<S: NetSession, F: Marshall> {
     SessionEstablished(S::PeerAddr),
     Message(F::Message),
     FrameFailure(F::Error),
@@ -115,26 +115,26 @@ pub enum SessionEvent<S: NetSession, F: Frame> {
     Disconnected,
 }
 
-pub struct NetTransport<S: NetSession, F: Frame> {
+pub struct NetTransport<S: NetSession, M: Marshall> {
     session: S,
-    framer: F,
-    events: VecDeque<SessionEvent<S, F>>,
+    marshaller: M,
+    events: VecDeque<SessionEvent<S, M>>,
 }
 
-impl<S: NetSession, F: Frame> AsRawFd for NetTransport<S, F> {
+impl<S: NetSession, M: Marshall> AsRawFd for NetTransport<S, M> {
     fn as_raw_fd(&self) -> RawFd {
         self.session.as_raw_fd()
     }
 }
 
-impl<S: NetSession, F: Frame> NetTransport<S, F> {
+impl<S: NetSession, M: Marshall> NetTransport<S, M> {
     pub fn upgrade(mut session: S) -> io::Result<Self> {
         session.set_read_timeout(Some(READ_TIMEOUT))?;
         session.set_write_timeout(Some(WRITE_TIMEOUT))?;
         session.set_nonblocking(true)?;
         Ok(Self {
             session,
-            framer: default!(),
+            marshaller: default!(),
             events: empty!(),
         })
     }
@@ -179,11 +179,11 @@ impl<S: NetSession, F: Frame> NetTransport<S, F> {
                 self.events.push_back(SessionEvent::Disconnected)
             }
             Ok(len) => {
-                self.framer
+                self.marshaller
                     .write_all(&buffer[..len])
                     .expect("in-memory writer");
                 loop {
-                    match self.framer.pop() {
+                    match self.marshaller.pop() {
                         Ok(Some(msg)) => self.events.push_back(SessionEvent::Message(msg)),
                         Ok(None) => break,
                         Err(err) => {
@@ -204,16 +204,16 @@ impl<S: NetSession, F: Frame> NetTransport<S, F> {
     }
 }
 
-impl<S: NetSession, F: Frame> Resource for NetTransport<S, F>
+impl<S: NetSession, M: Marshall> Resource for NetTransport<S, M>
 where
     S::TransitionAddr: Into<net::SocketAddr>,
 {
-    type Id = S::TransitionAddr;
-    type Event = SessionEvent<S, F>;
-    type Message = F::Message;
+    type Id = S::Id;
+    type Event = SessionEvent<S, M>;
+    type Message = M::Message;
 
     fn id(&self) -> Self::Id {
-        self.session.transition_addr()
+        self.session.id()
     }
 
     fn handle_io(&mut self, ev: IoEv) -> usize {
@@ -228,9 +228,9 @@ where
     }
 
     fn send(&mut self, msg: Self::Message) -> io::Result<()> {
-        self.framer.push(msg);
-        let mut buf = vec![0u8; self.framer.queue_len()];
-        self.framer.read_exact(&mut buf).expect(
+        self.marshaller.push(msg);
+        let mut buf = vec![0u8; self.marshaller.queue_len()];
+        self.marshaller.read_exact(&mut buf).expect(
             "queue length reported by framer doesn't exceeds the length of the returned data",
         );
         self.session.write_all(&buf)
@@ -241,8 +241,8 @@ where
     }
 }
 
-impl<S: NetSession, F: Frame> Iterator for NetTransport<S, F> {
-    type Item = SessionEvent<S, F>;
+impl<S: NetSession, M: Marshall> Iterator for NetTransport<S, M> {
+    type Item = SessionEvent<S, M>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.events.pop_front()

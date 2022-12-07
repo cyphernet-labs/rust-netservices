@@ -23,7 +23,7 @@ pub trait NetConnection: IoStream + AsRawFd {
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()>;
 
-    fn peer_addr(&self) -> Self::Addr;
+    fn remote_addr(&self) -> Self::Addr;
     fn local_addr(&self) -> Self::Addr;
 
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()>;
@@ -61,7 +61,7 @@ impl NetConnection for TcpStream {
         TcpStream::shutdown(self, how)
     }
 
-    fn peer_addr(&self) -> Self::Addr {
+    fn remote_addr(&self) -> Self::Addr {
         TcpStream::peer_addr(self).expect("TCP stream doesn't know remote peer address")
     }
 
@@ -138,7 +138,7 @@ impl NetConnection for socket2::Socket {
         socket2::Socket::shutdown(self, how)
     }
 
-    fn peer_addr(&self) -> Self::Addr {
+    fn remote_addr(&self) -> Self::Addr {
         socket2::Socket::peer_addr(self)
             .expect("net stream must use only connections")
             .as_socket()

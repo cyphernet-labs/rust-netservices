@@ -1,6 +1,7 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::os::unix::io::AsRawFd;
+use std::os::unix::prelude::RawFd;
 use std::{io, net};
 
 use crate::poller::IoEv;
@@ -24,3 +25,4 @@ pub trait Resource: AsRawFd + Iterator<Item = Self::Event> {
 }
 
 impl ResourceId for net::SocketAddr {}
+impl ResourceId for RawFd {}
