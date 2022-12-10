@@ -5,7 +5,7 @@ use std::net::{self, TcpStream};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
-use cyphernet::addr::{Addr, PeerAddr};
+use cyphernet::addr::{Addr, PeerAddr, ToSocketAddr};
 use cyphernet::crypto::{EcPk, Ecdh};
 
 use crate::{NetConnection, NetSession, ResAddr};
@@ -43,7 +43,9 @@ impl<Id: PeerId, A: ResAddr> Addr for XkAddr<Id, A> {
             XkAddr::Full(a) => a.port(),
         }
     }
+}
 
+impl<Id: PeerId, A: ResAddr + ToSocketAddr> ToSocketAddr for XkAddr<Id, A> {
     fn to_socket_addr(&self) -> net::SocketAddr {
         match self {
             XkAddr::Partial(a) => a.to_socket_addr(),
@@ -54,7 +56,7 @@ impl<Id: PeerId, A: ResAddr> Addr for XkAddr<Id, A> {
 
 impl<Id: PeerId, A: ResAddr> From<XkAddr<Id, A>> for net::SocketAddr
 where
-    A: Into<net::SocketAddr>,
+    A: ToSocketAddr,
 {
     fn from(addr: XkAddr<Id, A>) -> Self {
         addr.to_socket_addr()
