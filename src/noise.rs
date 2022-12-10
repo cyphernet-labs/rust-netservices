@@ -1,26 +1,40 @@
-use std::fmt::{Debug, Display};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::io::{self, Read, Write};
 use std::net::{self, TcpStream};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
-use cyphernet::addr::{Addr, LocalNode, PeerAddr};
-use cyphernet::crypto::Ec;
+use cyphernet::addr::{Addr, PeerAddr};
+use cyphernet::crypto::{EcPk, EcSk, Ecdh};
 
 use crate::{NetConnection, NetSession, ResAddr};
 
-pub trait PeerId: Copy + Ord + Eq + Hash + Debug + Display {}
-impl<T> PeerId for T where T: Copy + Ord + Eq + Hash + Debug + Display {}
+pub trait PeerId: EcPk {}
+impl<T> PeerId for T where T: EcPk {}
 
-#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display, From)]
-#[display(inner)]
+pub trait NodeKeys: Ecdh + Clone {}
+impl<Sk: EcSk> NodeKeys for cyphernet::addr::NodeKeys<Sk> where Self: Ecdh + Clone {}
+
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, From)]
 pub enum XkAddr<Id: PeerId, A: ResAddr> {
     #[from]
     Partial(A),
 
     #[from]
     Full(PeerAddr<Id, A>),
+}
+
+impl<Id: PeerId, A: ResAddr> Display for XkAddr<Id, A>
+where
+    Id: Display,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            XkAddr::Partial(addr) => Display::fmt(addr, f),
+            XkAddr::Full(addr) => Display::fmt(addr, f),
+        }
+    }
 }
 
 impl<Id: PeerId, A: ResAddr> Addr for XkAddr<Id, A> {
@@ -56,34 +70,34 @@ impl<Id: PeerId, A: ResAddr> XkAddr<Id, A> {
         }
     }
 
-    pub fn expect_peer_addr(&self) -> PeerAddr<Id, A> {
+    pub fn expect_peer_addr(&self) -> &PeerAddr<Id, A> {
         match self {
             XkAddr::Partial(_) => panic!("handshake is not complete"),
-            XkAddr::Full(addr) => addr.clone(),
+            XkAddr::Full(addr) => addr,
         }
     }
 }
 
-pub struct NoiseXk<C: Ec, S: NetConnection = TcpStream> {
-    remote_addr: XkAddr<C::PubKey, S::Addr>,
-    local_node: LocalNode<C>,
+pub struct NoiseXk<E: Ecdh, S: NetConnection = TcpStream> {
+    remote_addr: XkAddr<E::Pk, S::Addr>,
+    local_node: E,
     connection: S,
 }
 
-impl<C: Ec, S: NetConnection> AsRawFd for NoiseXk<C, S> {
+impl<E: Ecdh, S: NetConnection> AsRawFd for NoiseXk<E, S> {
     fn as_raw_fd(&self) -> RawFd {
         self.connection.as_raw_fd()
     }
 }
 
-impl<C: Ec, S: NetConnection> Read for NoiseXk<C, S> {
+impl<E: Ecdh, S: NetConnection> Read for NoiseXk<E, S> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         // TODO: Do handshake
         self.connection.read(buf)
     }
 }
 
-impl<C: Ec, S: NetConnection> Write for NoiseXk<C, S> {
+impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         // TODO: Do handshake
         self.connection.write(buf)
@@ -94,12 +108,16 @@ impl<C: Ec, S: NetConnection> Write for NoiseXk<C, S> {
     }
 }
 
-impl<C: Ec, S: NetConnection> NetSession for NoiseXk<C, S> {
-    type Context = LocalNode<C>;
+impl<E: Ecdh, S: NetConnection> NetSession for NoiseXk<E, S>
+where
+    E: Clone,
+    E::Pk: Copy,
+{
+    type Context = E;
     type Connection = S;
-    type Id = C::PubKey;
-    type PeerAddr = PeerAddr<C::PubKey, S::Addr>;
-    type TransitionAddr = XkAddr<C::PubKey, S::Addr>;
+    type Id = E::Pk;
+    type PeerAddr = PeerAddr<Self::Id, S::Addr>;
+    type TransitionAddr = XkAddr<Self::Id, S::Addr>;
 
     fn accept(connection: S, context: &Self::Context) -> Self {
         Self {
