@@ -6,14 +6,14 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
 use cyphernet::addr::{Addr, PeerAddr};
-use cyphernet::crypto::{EcPk, EcSk, Ecdh};
+use cyphernet::crypto::{EcPk, Ecdh};
 
 use crate::{NetConnection, NetSession, ResAddr};
 
 pub trait PeerId: EcPk {}
 impl<T> PeerId for T where T: EcPk {}
 
-pub trait NodeKeys: Ecdh + Clone {}
+pub trait NodeKeys: Ecdh {}
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, From)]
 pub enum XkAddr<Id: PeerId, A: ResAddr> {
