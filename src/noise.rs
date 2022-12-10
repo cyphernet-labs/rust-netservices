@@ -14,7 +14,6 @@ pub trait PeerId: EcPk {}
 impl<T> PeerId for T where T: EcPk {}
 
 pub trait NodeKeys: Ecdh + Clone {}
-impl<Sk: EcSk> NodeKeys for cyphernet::addr::NodeKeys<Sk> where Self: Ecdh + Clone {}
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, From)]
 pub enum XkAddr<Id: PeerId, A: ResAddr> {
