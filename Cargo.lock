@@ -14,11 +14,11 @@ dependencies = [
 
 [[package]]
 name = "amplify"
-version = "4.0.0-beta.1"
+version = "4.0.0-beta.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d9bf71f7c341022e54a81b61ec8184282cc2e542a99d1fcb1a7de5b76ae9949"
+checksum = "4ff4d466b0cb5124991d3a2085c28f2aed6d86264c3c0bdbd7d1b64a49b4726b"
 dependencies = [
- "amplify_derive 4.0.0-alpha.1",
+ "amplify_derive 4.0.0-alpha.2",
  "amplify_num",
  "ascii",
  "wasm-bindgen",
@@ -38,9 +38,9 @@ dependencies = [
 
 [[package]]
 name = "amplify_derive"
-version = "4.0.0-alpha.1"
+version = "4.0.0-alpha.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6471f510180b7c9e0efd62108f604704c914ab20d5892299636b863955539a39"
+checksum = "2a258501c851f9dec1549e046d551b645b8b970e30aca85dbec2d6e36cda8e91"
 dependencies = [
  "amplify_syn",
  "proc-macro2",
@@ -207,9 +207,9 @@ checksum = "f3b7eb4404b8195a9abb6356f4ac07d8ba267045c8d6d220ac4dc992e6cc75df"
 [[package]]
 name = "cyphernet"
 version = "0.1.0"
-source = "git+https://github.com/Cyphernet-WG/rust-cyphernet#3e4a9fca7d542afa2ffadd8c7dc0fceb6dd7ff60"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet#d19355cd4b0a432426fee446beaa7ffb848d33db"
 dependencies = [
- "amplify_derive 2.11.3",
+ "amplify 4.0.0-beta.6",
  "ed25519-compact",
  "multibase",
  "rand",
@@ -385,7 +385,7 @@ dependencies = [
 name = "netservices"
 version = "0.1.0"
 dependencies = [
- "amplify 4.0.0-beta.1",
+ "amplify 4.0.0-beta.6",
  "bitcoin_hashes",
  "cyphernet",
  "libc",
@@ -422,7 +422,7 @@ checksum = "6ac9a59f73473f1b8d852421e59e64809f025994837ef743615c6d0c5b305160"
 name = "poll-reactor"
 version = "0.1.0"
 dependencies = [
- "amplify 4.0.0-beta.1",
+ "amplify 4.0.0-beta.6",
  "crossbeam-channel",
  "epoll",
  "libc",
@@ -511,11 +511,10 @@ dependencies = [
 
 [[package]]
 name = "rayon"
-version = "1.6.0"
+version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e060280438193c554f654141c9ea9417886713b7acd75974c85b18a69a88e0b"
+checksum = "6db3a213adf02b3bcfd2d3846bb41cb22857d131789e01df434fb7e7bc0759b7"
 dependencies = [
- "crossbeam-deque",
  "either",
  "rayon-core",
 ]
