@@ -18,5 +18,5 @@ pub mod poller;
 mod reactor;
 mod resource;
 
-pub use reactor::{Action, Error, Handler, Reactor};
+pub use reactor::{Action, Controller, Error, Handler, Reactor};
 pub use resource::{Resource, ResourceId};

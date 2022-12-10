@@ -67,8 +67,7 @@ pub trait Handler: Send + Iterator<Item = Action<Self::Listener, Self::Transport
 
 pub struct Reactor<S: Handler> {
     thread: JoinHandle<()>,
-    control_send: chan::Sender<S::Command>,
-    shutdown_send: chan::Sender<()>,
+    controller: Controller<S::Command>,
 }
 
 impl<S: Handler> Reactor<S> {
@@ -95,11 +94,43 @@ impl<S: Handler> Reactor<S> {
             runtime.run();
         });
 
-        Self {
-            thread,
+        let controller = Controller {
             control_send,
             shutdown_send,
+        };
+        Self { thread, controller }
+    }
+
+    pub fn controller(&self) -> Controller<S::Command> {
+        self.controller.clone()
+    }
+
+    pub fn join(self) -> std::thread::Result<()> {
+        self.thread.join()
+    }
+}
+
+pub struct Controller<C> {
+    control_send: chan::Sender<C>,
+    shutdown_send: chan::Sender<()>,
+}
+
+impl<C> Clone for Controller<C> {
+    fn clone(&self) -> Self {
+        Controller {
+            control_send: self.control_send.clone(),
+            shutdown_send: self.shutdown_send.clone(),
         }
+    }
+}
+
+impl<C> Controller<C> {
+    pub fn send(&self, command: C) -> Result<(), chan::SendError<C>> {
+        self.control_send.send(command)
+    }
+
+    pub fn shutdown(self) -> Result<(), Self> {
+        self.shutdown_send.send(()).map_err(|_| self)
     }
 }
 
