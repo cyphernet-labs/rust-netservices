@@ -201,7 +201,7 @@ pub struct Runtime<H: Handler, P: Poll> {
     listeners: HashMap<<H::Listener as Resource>::Id, H::Listener>,
     transports: HashMap<<H::Transport as Resource>::Id, H::Transport>,
     waker: UnixStream,
-    // timeouts
+    // TODO: timeouts
 }
 
 impl<H: Handler, P: Poll> Runtime<H, P> {
@@ -211,14 +211,27 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
             if count > 0 {
                 self.handle_events(duration);
             }
-            // TODO process commands
+            loop {
+                match self.control_recv.try_recv() {
+                    Err(chan::TryRecvError::Empty) => break,
+                    Err(chan::TryRecvError::Disconnected) => panic!("control channel is broken"),
+                    Ok(cmd) => self.service.handle_command(cmd),
+                }
+            }
+            loop {
+                match self.shutdown_recv.try_recv() {
+                    Err(chan::TryRecvError::Empty) => break,
+                    Err(chan::TryRecvError::Disconnected) => panic!("shutdown channel is broken"),
+                    Ok(_) => return self.handle_shutdown(),
+                }
+            }
         }
     }
 
     fn handle_events(&mut self, duration: Duration) {
         for (fd, io) in &mut self.poller {
             if fd == self.waker.as_raw_fd() {
-                reset_fd(&self.waker).expect("waiker failure")
+                reset_fd(&self.waker).expect("waker failure")
             } else if let Some(id) = self.listener_map.get(&fd) {
                 let res = self.listeners.get_mut(id).expect("resource disappeared");
                 res.handle_io(io);
@@ -299,5 +312,9 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
             }
         }
         Ok(())
+    }
+
+    fn handle_shutdown(self) {
+        // We just drop here?
     }
 }
