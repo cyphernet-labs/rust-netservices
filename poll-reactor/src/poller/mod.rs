@@ -1,5 +1,6 @@
 pub mod popol;
 
+use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
@@ -20,5 +21,5 @@ where
     fn register(&mut self, fd: impl AsRawFd);
     fn unregister(&mut self, fd: impl AsRawFd);
 
-    fn poll(&mut self) -> (Duration, usize);
+    fn poll(&mut self, timeout: Option<Duration>) -> io::Result<usize>;
 }

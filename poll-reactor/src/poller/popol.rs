@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
@@ -29,28 +30,25 @@ impl Poll for Poller {
         self.poll.unregister(&fd.as_raw_fd());
     }
 
-    fn poll(&mut self) -> (Duration, usize) {
-        todo!()
-        /*
+    fn poll(&mut self, timeout: Option<Duration>) -> io::Result<usize> {
         let len = self.events.len();
 
         // Blocking call
         if self.poll.wait_timeout(timeout.into())? {
-            return Ok(());
+            return Ok(0);
         }
 
         for (fd, ev) in self.poll.events() {
-            self.events.push_back(IoSrc {
-                source: *fd,
-                io: IoEv {
+            self.events.push_back((
+                *fd,
+                IoEv {
                     is_readable: ev.is_readable(),
                     is_writable: ev.is_writable(),
                 },
-            })
+            ))
         }
 
-        Ok((_, self.events.len() - len))
-         */
+        Ok(self.events.len() - len)
     }
 }
 

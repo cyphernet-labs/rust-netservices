@@ -5,14 +5,17 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use crossbeam_channel as chan;
 
 use crate::poller::Poll;
-use crate::{Resource, ResourceId};
+use crate::{Resource, ResourceId, TimeoutManager};
 
-#[derive(Debug, Display, Error)]
+/// Maximum amount of time to wait for i/o.
+const WAIT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+#[derive(Debug, Display, Error, From)]
 #[display(doc_comments)]
 pub enum Error<L: ResourceId, T: ResourceId> {
     /// unknown listener {0}
@@ -23,6 +26,10 @@ pub enum Error<L: ResourceId, T: ResourceId> {
 
     /// connection with peer {0} got broken
     PeerDisconnected(T, io::Error),
+
+    /// Error during poll operation
+    #[from]
+    Poll(io::Error),
 }
 
 pub enum Action<L: Resource, T: Resource> {
@@ -39,20 +46,22 @@ pub trait Handler: Send + Iterator<Item = Action<Self::Listener, Self::Transport
     type Transport: Resource;
     type Command: Send;
 
+    fn tick(&mut self, time: Instant);
+
     fn handle_wakeup(&mut self);
 
     fn handle_listener_event(
         &mut self,
         id: <Self::Listener as Resource>::Id,
         event: <Self::Listener as Resource>::Event,
-        duration: Duration,
+        time: Instant,
     );
 
     fn handle_transport_event(
         &mut self,
         id: <Self::Transport as Resource>::Id,
         event: <Self::Transport as Resource>::Event,
-        duration: Duration,
+        time: Instant,
     );
 
     fn handle_command(&mut self, cmd: Self::Command);
@@ -99,6 +108,7 @@ impl<S: Handler> Reactor<S> {
                 listener_map: empty!(),
                 transport_map: empty!(),
                 waker: waker_reader,
+                timeouts: TimeoutManager::new(Duration::from_secs(1)),
             };
 
             runtime.run();
@@ -201,15 +211,32 @@ pub struct Runtime<H: Handler, P: Poll> {
     listeners: HashMap<<H::Listener as Resource>::Id, H::Listener>,
     transports: HashMap<<H::Transport as Resource>::Id, H::Transport>,
     waker: UnixStream,
-    // TODO: timeouts
+    timeouts: TimeoutManager,
 }
 
 impl<H: Handler, P: Poll> Runtime<H, P> {
     fn run(mut self) {
         loop {
-            let (duration, count) = self.poller.poll();
+            let timeout = self
+                .timeouts
+                .next(Instant::now())
+                .unwrap_or(WAIT_TIMEOUT)
+                .into();
+
+            // Blocking
+            let count = match self.poller.poll(Some(timeout)) {
+                Ok(count) => count,
+                Err(err) => {
+                    self.service.handle_error(err.into());
+                    0
+                }
+            };
+
+            let instant = Instant::now();
+            self.service.tick(instant);
+
             if count > 0 {
-                self.handle_events(duration);
+                self.handle_events(instant);
             }
             loop {
                 match self.control_recv.try_recv() {
@@ -228,7 +255,7 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
         }
     }
 
-    fn handle_events(&mut self, duration: Duration) {
+    fn handle_events(&mut self, time: Instant) {
         for (fd, io) in &mut self.poller {
             if fd == self.waker.as_raw_fd() {
                 reset_fd(&self.waker).expect("waker failure")
@@ -236,13 +263,13 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
                 let res = self.listeners.get_mut(id).expect("resource disappeared");
                 res.handle_io(io);
                 for event in res {
-                    self.service.handle_listener_event(*id, event, duration);
+                    self.service.handle_listener_event(*id, event, time);
                 }
             } else if let Some(id) = self.transport_map.get(&fd) {
                 let res = self.transports.get_mut(id).expect("resource disappeared");
                 res.handle_io(io);
                 for event in res {
-                    self.service.handle_transport_event(*id, event, duration);
+                    self.service.handle_transport_event(*id, event, time);
                 }
             }
         }
@@ -250,7 +277,7 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
         while let Some(action) = self.service.next() {
             // NB: Deadlock may happen here if the service will generate events over and over
             // in the handle_* calls we may never get out of this loop
-            if let Err(err) = self.handle_action(action) {
+            if let Err(err) = self.handle_action(action, time) {
                 self.service.handle_error(err);
             }
         }
@@ -259,6 +286,7 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
     fn handle_action(
         &mut self,
         action: Action<H::Listener, H::Transport>,
+        time: Instant,
     ) -> Result<(), Error<<H::Listener as Resource>::Id, <H::Transport as Resource>::Id>> {
         match action {
             Action::RegisterListener(listener) => {
@@ -308,7 +336,7 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
                 }
             }
             Action::SetTimer(duration) => {
-                // TODO: Set timer
+                self.timeouts.register((), time + duration);
             }
         }
         Ok(())
