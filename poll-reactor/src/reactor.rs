@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::io;
+use std::io::Write;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::net::UnixStream;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -28,7 +31,7 @@ pub enum Action<L: Resource, T: Resource> {
     UnregisterListener(L::Id),
     UnregisterTransport(T::Id),
     Send(T::Id, Vec<T::Message>),
-    Wakeup(Duration),
+    SetTimer(Duration),
 }
 
 pub trait Handler: Send + Iterator<Item = Action<Self::Listener, Self::Transport>> {
@@ -71,7 +74,7 @@ pub struct Reactor<S: Handler> {
 }
 
 impl<S: Handler> Reactor<S> {
-    pub fn new<P: Poll>(service: S, poller: P) -> Self
+    pub fn new<P: Poll>(service: S, mut poller: P) -> Result<Self, io::Error>
     where
         S: 'static,
         P: 'static,
@@ -79,7 +82,13 @@ impl<S: Handler> Reactor<S> {
         let (shutdown_send, shutdown_recv) = chan::bounded(1);
         let (control_send, control_recv) = chan::unbounded();
 
+        let (waker_writer, waker_reader) = UnixStream::pair()?;
+        waker_reader.set_nonblocking(true)?;
+        waker_writer.set_nonblocking(true)?;
+
         let thread = std::thread::spawn(move || {
+            poller.register(waker_reader.as_raw_fd());
+
             let runtime = Runtime {
                 service,
                 poller,
@@ -89,6 +98,7 @@ impl<S: Handler> Reactor<S> {
                 transports: empty!(),
                 listener_map: empty!(),
                 transport_map: empty!(),
+                waker: waker_reader,
             };
 
             runtime.run();
@@ -97,8 +107,9 @@ impl<S: Handler> Reactor<S> {
         let controller = Controller {
             control_send,
             shutdown_send,
+            waker: Arc::new(Mutex::new(waker_writer)),
         };
-        Self { thread, controller }
+        Ok(Self { thread, controller })
     }
 
     pub fn controller(&self) -> Controller<S::Command> {
@@ -113,6 +124,7 @@ impl<S: Handler> Reactor<S> {
 pub struct Controller<C> {
     control_send: chan::Sender<C>,
     shutdown_send: chan::Sender<()>,
+    waker: Arc<Mutex<UnixStream>>,
 }
 
 impl<C> Clone for Controller<C> {
@@ -120,17 +132,62 @@ impl<C> Clone for Controller<C> {
         Controller {
             control_send: self.control_send.clone(),
             shutdown_send: self.shutdown_send.clone(),
+            waker: self.waker.clone(),
         }
     }
 }
 
 impl<C> Controller<C> {
-    pub fn send(&self, command: C) -> Result<(), chan::SendError<C>> {
-        self.control_send.send(command)
+    pub fn send(&self, command: C) -> Result<(), io::Error> {
+        self.control_send
+            .send(command)
+            .map_err(|_| io::ErrorKind::BrokenPipe)?;
+        self.wake()?;
+        Ok(())
     }
 
     pub fn shutdown(self) -> Result<(), Self> {
-        self.shutdown_send.send(()).map_err(|_| self)
+        let res = self.shutdown_send.send(());
+        self.wake().expect("waker socket failure");
+        res.map_err(|_| self)
+    }
+
+    fn wake(&self) -> io::Result<()> {
+        use io::ErrorKind::*;
+
+        let mut waker = self.waker.lock().map_err(|_| io::ErrorKind::WouldBlock)?;
+        match waker.write_all(&[0x1]) {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == WouldBlock => {
+                reset_fd(&waker.as_raw_fd())?;
+                self.wake()
+            }
+            Err(e) if e.kind() == Interrupted => self.wake(),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+fn reset_fd(fd: &impl AsRawFd) -> io::Result<()> {
+    let mut buf = [0u8; 4096];
+
+    loop {
+        // We use a low-level "read" here because the alternative is to create a `UnixStream`
+        // from the `RawFd`, which has "drop" semantics which we want to avoid.
+        match unsafe {
+            libc::read(
+                fd.as_raw_fd(),
+                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.len(),
+            )
+        } {
+            -1 => match io::Error::last_os_error() {
+                e if e.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+                e => return Err(e),
+            },
+            0 => return Ok(()),
+            _ => continue,
+        }
     }
 }
 
@@ -143,7 +200,7 @@ pub struct Runtime<H: Handler, P: Poll> {
     transport_map: HashMap<RawFd, <H::Transport as Resource>::Id>,
     listeners: HashMap<<H::Listener as Resource>::Id, H::Listener>,
     transports: HashMap<<H::Transport as Resource>::Id, H::Transport>,
-    // waker
+    waker: UnixStream,
     // timeouts
 }
 
@@ -160,7 +217,9 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
 
     fn handle_events(&mut self, duration: Duration) {
         for (fd, io) in &mut self.poller {
-            if let Some(id) = self.listener_map.get(&fd) {
+            if fd == self.waker.as_raw_fd() {
+                reset_fd(&self.waker).expect("waiker failure")
+            } else if let Some(id) = self.listener_map.get(&fd) {
                 let res = self.listeners.get_mut(id).expect("resource disappeared");
                 res.handle_io(io);
                 for event in res {
@@ -178,6 +237,9 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
         while let Some(action) = self.service.next() {
             // NB: Deadlock may happen here if the service will generate events over and over
             // in the handle_* calls we may never get out of this loop
+            if let Err(err) = self.handle_action(action) {
+                self.service.handle_error(err);
+            }
         }
     }
 
@@ -232,7 +294,9 @@ impl<H: Handler, P: Poll> Runtime<H, P> {
                         .map_err(|err| Error::PeerDisconnected(id, err))?;
                 }
             }
-            Action::Wakeup(duration) => {}
+            Action::SetTimer(duration) => {
+                // TODO: Set timer
+            }
         }
         Ok(())
     }
