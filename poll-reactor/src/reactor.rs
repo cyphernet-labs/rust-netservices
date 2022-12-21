@@ -5,7 +5,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use crossbeam_channel as chan;
 
