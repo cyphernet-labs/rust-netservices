@@ -21,6 +21,6 @@ log = "0.4.17"
 default = ["io-reactor", "socket2"]
 
 [workspace]
-members = ["re-actor", "io-reactor"]
+members = ["re-actor", "io-reactor", "node"]
 default-members = ["io-reactor"]
 exclude = ["nsh"]
