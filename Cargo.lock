@@ -316,6 +316,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "io-reactor"
+version = "0.1.0"
+dependencies = [
+ "amplify 4.0.0-beta.6",
+ "crossbeam-channel",
+ "epoll",
+ "libc",
+ "mio",
+ "polling",
+ "popol",
+ "socket2",
+ "zmq",
+]
+
+[[package]]
 name = "jobserver"
 version = "0.1.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -388,10 +403,10 @@ dependencies = [
  "amplify 4.0.0-beta.6",
  "bitcoin_hashes",
  "cyphernet",
+ "io-reactor",
  "libc",
  "log",
  "mio",
- "poll-reactor",
  "re-actor",
  "socket2",
 ]
@@ -417,21 +432,6 @@ name = "pkg-config"
 version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ac9a59f73473f1b8d852421e59e64809f025994837ef743615c6d0c5b305160"
-
-[[package]]
-name = "poll-reactor"
-version = "0.1.0"
-dependencies = [
- "amplify 4.0.0-beta.6",
- "crossbeam-channel",
- "epoll",
- "libc",
- "mio",
- "polling",
- "popol",
- "socket2",
- "zmq",
-]
 
 [[package]]
 name = "polling"

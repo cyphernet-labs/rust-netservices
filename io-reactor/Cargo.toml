@@ -1,5 +1,5 @@
 [package]
-name = "poll-reactor"
+name = "io-reactor"
 description = "Rust implementation of reactor pattern for I/O resources"
 version = "0.1.0"
 edition = "2021"

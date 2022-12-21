@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 amplify = "4.0.0-beta.1"
 re-actor = { path = "re-actor", optional = true }
-poll-reactor = { path = "poll-reactor", optional = true }
+io-reactor = { path = "io-reactor", optional = true }
 cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet", features = ["ed25519"] }
 mio = { version = "0.8.5", optional = true }
 socket2 = { version = "0.4.7", optional = true }
@@ -18,9 +18,9 @@ bitcoin_hashes = "0.11.0"
 log = "0.4.17"
 
 [features]
-default = ["poll-reactor", "socket2"]
+default = ["io-reactor", "socket2"]
 
 [workspace]
-members = ["re-actor", "poll-reactor"]
-default-members = ["poll-reactor"]
+members = ["re-actor", "io-reactor"]
+default-members = ["io-reactor"]
 exclude = ["nsh"]
