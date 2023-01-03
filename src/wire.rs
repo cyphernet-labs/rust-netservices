@@ -130,23 +130,53 @@ impl<S: NetSession, F: Frame> AsRawFd for NetTransport<S, F> {
 }
 
 impl<S: NetSession, F: Frame> NetTransport<S, F> {
-    pub fn upgrade(mut session: S) -> io::Result<Self> {
+    pub fn upgrade(mut session: S, inbound: bool) -> io::Result<Self> {
         session.set_read_timeout(Some(READ_TIMEOUT))?;
         session.set_write_timeout(Some(WRITE_TIMEOUT))?;
         session.set_nonblocking(true)?;
         Ok(Self {
             session,
             marshaller: default!(),
-            inbound: true,
+            inbound,
             events: empty!(),
         })
     }
 
     pub fn connect(addr: S::PeerAddr, context: &S::Context) -> io::Result<Self> {
         let session = S::connect(addr, context)?;
-        let mut me = Self::upgrade(session)?;
+        let mut me = Self::upgrade(session, true)?;
         me.inbound = false;
         Ok(me)
+    }
+
+    /// Downgrades transport into an underlying session object and a buffer
+    /// which contains data which were not consumed in form of messages.
+    ///
+    /// # Errors
+    ///
+    /// If the output queue has unset data fails to downgrade and returns
+    /// unmodified self back
+    pub fn downgrade(mut self) -> Result<(S, Vec<u8>), Self> {
+        let buf = match self.marshaller.drain() {
+            Err(marshaller) => {
+                self.marshaller = marshaller;
+                return Err(self);
+            }
+            Ok(buf) => buf,
+        };
+        let mut drain = Vec::<u8>::with_capacity(buf.len());
+        for ev in self.events {
+            match ev {
+                SessionEvent::Message(frame) => {
+                    frame
+                        .marshall(&mut drain)
+                        .expect("unable to marshall already unmarshalled message");
+                }
+                _ => {}
+            }
+        }
+        drain.extend(buf);
+        Ok((self.session, drain))
     }
 
     pub fn is_inbound(&self) -> bool {

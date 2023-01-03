@@ -52,6 +52,18 @@ impl Marshaller {
     pub fn queue_len(&self) -> usize {
         self.write_queue.len()
     }
+
+    /// # Errors
+    ///
+    /// If write queue is not empty (i.e. some messages were not sent) fails
+    /// to drain and returns back unmodified self
+    pub fn drain(mut self) -> Result<Vec<u8>, Self> {
+        if self.write_queue.is_empty() {
+            Ok(self.read_queue.drain(..).collect())
+        } else {
+            Err(self)
+        }
+    }
 }
 
 impl Read for Marshaller {
