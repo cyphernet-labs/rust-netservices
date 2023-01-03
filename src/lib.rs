@@ -4,7 +4,7 @@ extern crate amplify;
 #[cfg(feature = "re-actor")]
 pub mod actors;
 
-#[cfg(feature = "poll-reactor")]
+#[cfg(feature = "io-reactor")]
 pub mod wire;
 
 mod connection;
