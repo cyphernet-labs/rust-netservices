@@ -111,8 +111,8 @@ impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
 
 impl<E: Ecdh, S: NetConnection> NetSession for NoiseXk<E, S>
 where
-    E: Clone,
-    E::Pk: Copy,
+    E: Send + Clone,
+    E::Pk: Send + Copy,
 {
     type Context = E;
     type Connection = S;
