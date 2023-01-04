@@ -4,7 +4,7 @@ use std::os::unix::io::AsRawFd;
 
 use crate::connection::NetConnection;
 
-pub trait NetListener: AsRawFd {
+pub trait NetListener: AsRawFd + Send {
     type Stream: NetConnection;
 
     fn bind(addr: impl Into<SocketAddr>) -> io::Result<Self>

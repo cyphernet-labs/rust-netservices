@@ -14,8 +14,8 @@ pub trait ResAddr: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
 impl<T> ResAddr for T where T: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
 
 /// Network stream is an abstraction of TCP stream object.
-pub trait NetConnection: IoStream + AsRawFd {
-    type Addr: ResAddr;
+pub trait NetConnection: Send + IoStream + AsRawFd {
+    type Addr: ResAddr + Send;
 
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self>
     where

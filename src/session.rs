@@ -7,11 +7,11 @@ use cyphernet::addr::Addr;
 
 use crate::{IoStream, NetConnection};
 
-pub trait NetSession: IoStream + AsRawFd + Sized {
-    type Context;
+pub trait NetSession: IoStream + AsRawFd + Send + Sized {
+    type Context: Send;
     type Connection: NetConnection;
     /// A unique identifier of the session. Usually a part of a transition address.
-    type Id;
+    type Id: Send;
     /// Address used for outgoing connections. May not be known initially for the incoming
     /// connections
     type PeerAddr: Addr;

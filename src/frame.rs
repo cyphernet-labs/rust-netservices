@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 
-pub trait Frame: Sized {
-    type Error: std::error::Error;
+pub trait Frame: Send + Sized {
+    type Error: std::error::Error + Send;
 
     /// Reads frame from the stream.
     ///
