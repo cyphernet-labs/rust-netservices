@@ -11,7 +11,7 @@ use reactor::Resource;
 use crate::{Frame, Marshaller, NetConnection, NetListener, NetSession};
 
 /// Socket read buffer size.
-const READ_BUFFER_SIZE: usize = 1024 * 192;
+const READ_BUFFER_SIZE: usize = u16::MAX as usize;
 /// Maximum time to wait when reading from a socket.
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
 /// Maximum time to wait when writing to a socket.
@@ -176,6 +176,9 @@ impl<S: NetSession, F: Frame> NetTransport<S, F> {
                     frame
                         .marshall(&mut drain)
                         .expect("unable to marshall already unmarshalled message");
+                }
+                SessionEvent::FrameFailure(_) => {
+                    // Just ignore this since the message data are in the buffer
                 }
                 _ => {}
             }
