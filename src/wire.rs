@@ -57,6 +57,10 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
         })
     }
 
+    pub fn local_addr(&self) -> net::SocketAddr {
+        self.listener.local_addr()
+    }
+
     fn handle_accept(&mut self) -> io::Result<()> {
         let mut stream = self.listener.accept()?;
         stream.set_read_timeout(Some(READ_TIMEOUT))?;
