@@ -90,8 +90,13 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAcce
         }
     }
 
-    fn send(&mut self, _msg: Self::Message) -> io::Result<()> {
+    fn post(&mut self, _msg: Self::Message) -> io::Result<()> {
         panic!("must not send messages to the network listener")
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        // Nothing to do here
+        Ok(())
     }
 
     fn disconnect(self) -> io::Result<()> {
@@ -276,13 +281,17 @@ where
         self.events.len() - len
     }
 
-    fn send(&mut self, msg: Self::Message) -> io::Result<()> {
+    fn post(&mut self, msg: Self::Message) -> io::Result<()> {
         self.marshaller.push(msg);
         let mut buf = vec![0u8; self.marshaller.queue_len()];
         self.marshaller.read_exact(&mut buf).expect(
             "queue length reported by framer doesn't exceeds the length of the returned data",
         );
         self.session.write_all(&buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.session.flush()
     }
 
     fn disconnect(self) -> io::Result<()> {
