@@ -95,7 +95,7 @@ impl reactor::Handler for Service {
     }
 
     fn handover_transport(&mut self, transport: Self::Transport) {
-        log::warn!(target: "transport", "Remote peer {}@{:?} discunnected", transport.transient_addr(), transport.id());
+        log::warn!(target: "transport", "Remote peer {}@{:?} disconnected", transport.transient_addr(), Resource::id(&transport));
     }
 }
 
