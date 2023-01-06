@@ -12,6 +12,7 @@ mod frame;
 mod listener;
 pub mod noise;
 mod session;
+pub mod socks5;
 pub mod tunnel;
 
 pub use connection::{NetConnection, ResAddr, StreamNonblocking};
