@@ -5,6 +5,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 use std::{io, net};
 
+use reactor::poller::IoEv;
 use reactor::{Io, Resource};
 
 use crate::{NetConnection, NetListener, NetSession};
@@ -75,6 +76,10 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAcce
         self.listener.local_addr()
     }
 
+    fn interests(&self) -> IoEv {
+        IoEv::read_only()
+    }
+
     fn handle_io(&mut self, io: Io) -> Option<Self::Event> {
         match io {
             Io::Read => None,
@@ -108,6 +113,7 @@ pub struct NetTransport<S: NetSession> {
     state: TransportState,
     session: S,
     inbound: bool,
+    needs_flush: bool,
 }
 
 impl<S: NetSession> AsRawFd for NetTransport<S> {
@@ -185,6 +191,7 @@ impl<S: NetSession> NetTransport<S> {
             state: TransportState::Handshake,
             session,
             inbound,
+            needs_flush: true,
         })
     }
 
@@ -237,6 +244,7 @@ impl<S: NetSession> NetTransport<S> {
             TransportState::Terminated,
             "read on terminated transport"
         );
+        self.needs_flush = false;
         match self.session.flush() {
             Err(err) => Some(SessionEvent::Terminated(err)),
             Ok(_) => None,
@@ -299,6 +307,14 @@ where
         self.session.as_raw_fd()
     }
 
+    fn interests(&self) -> IoEv {
+        if self.needs_flush {
+            IoEv::read_write()
+        } else {
+            IoEv::read_only()
+        }
+    }
+
     fn handle_io(&mut self, io: Io) -> Option<Self::Event> {
         match io {
             Io::Read => self.handle_readable(),
@@ -323,6 +339,7 @@ impl<S: NetSession> Write for NetTransport<S> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        self.needs_flush = false;
         self.session.flush()
     }
 }
@@ -415,6 +432,7 @@ mod split {
                 state: read.state,
                 inbound: read.inbound,
                 session: S::from_split_io(read.session, write.session),
+                needs_flush: true,
             }
         }
     }
