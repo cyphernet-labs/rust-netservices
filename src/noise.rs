@@ -164,12 +164,10 @@ where
         })
     }
 
-    fn expect_id(&self) -> Self::Id {
+    fn id(&self) -> Option<Self::Id> {
         match self.remote_addr {
-            XkAddr::Partial(_) => {
-                unreachable!("NoiseXk::id must not be called until the handshake is complete")
-            }
-            XkAddr::Full(a) => *a.id(),
+            XkAddr::Partial(_) => None,
+            XkAddr::Full(a) => Some(*a.id()),
         }
     }
 
@@ -180,7 +178,7 @@ where
         }
     }
 
-    fn transition_addr(&self) -> Self::TransitionAddr {
+    fn transient_addr(&self) -> Self::TransitionAddr {
         self.remote_addr.clone()
     }
 

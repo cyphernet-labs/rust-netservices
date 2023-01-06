@@ -156,6 +156,18 @@ impl<S: NetSession> NetTransport<S> {
         self.session.local_addr()
     }
 
+    pub fn remote_addr(&self) -> Option<S::PeerAddr> {
+        self.session.peer_addr()
+    }
+
+    pub fn transient_addr(&self) -> S::TransitionAddr {
+        self.session.transient_addr()
+    }
+
+    pub fn peer_id(&self) -> Option<S::Id> {
+        self.session.id()
+    }
+
     pub fn expect_peer_id(&self) -> S::Id {
         self.session.expect_id()
     }
