@@ -14,9 +14,7 @@ pub mod noise;
 mod session;
 pub mod tunnel;
 
-pub use connection::{
-    IoStatus, NetConnection, ReadNonblocking, ResAddr, StreamNonblocking, WriteNonblocking,
-};
+pub use connection::{NetConnection, ResAddr, StreamNonblocking};
 pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
 pub use session::NetSession;

@@ -1,11 +1,13 @@
-use reactor::poller::Poll;
 use std::collections::VecDeque;
 use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
-use crate::{IoStatus, NetSession, ReadNonblocking, WriteNonblocking};
+use reactor::poller::Poll;
+use reactor::{IoStatus, ReadNonblocking, WriteNonblocking};
+
+use crate::NetSession;
 
 pub const READ_BUFFER_SIZE: usize = u16::MAX as usize;
 

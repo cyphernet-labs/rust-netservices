@@ -7,9 +7,10 @@ use std::time::Duration;
 
 use cyphernet::addr::{Addr, PeerAddr, ToSocketAddr};
 use cyphernet::crypto::{EcPk, Ecdh};
+use reactor::{ReadNonblocking, WriteNonblocking};
 
 use crate::wire::{SplitIo, SplitIoError};
-use crate::{NetConnection, NetSession, ReadNonblocking, ResAddr, WriteNonblocking};
+use crate::{NetConnection, NetSession, ResAddr};
 
 pub trait PeerId: EcPk {}
 impl<T> PeerId for T where T: EcPk {}
