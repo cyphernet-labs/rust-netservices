@@ -1,10 +1,9 @@
 use cyphernet::crypto::ed25519::PrivateKey;
-use ed25519_compact::x25519::PublicKey;
 use netservices::noise::NoiseXk;
 use reactor::{Error, Resource};
 use std::collections::VecDeque;
-use std::net;
 use std::time::Instant;
+use std::{io, net};
 
 pub type NetTransport = netservices::NetTransport<NoiseXk<PrivateKey>>;
 pub type NetAccept = netservices::NetAccept<NoiseXk<PrivateKey>>;
@@ -16,10 +15,11 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn new(node_keys: NodeKeys, listen: net::SocketAddr) -> Self {
-        Self {
-            action_queue: empty!(),
-        }
+    pub fn with(ecdh: PrivateKey, listen: net::SocketAddr) -> io::Result<Self> {
+        let mut action_queue = VecDeque::new();
+        let listener = NetAccept::bind(listen, ecdh)?;
+        action_queue.push_back(Action::RegisterListener(listener));
+        Ok(Self { action_queue })
     }
 }
 

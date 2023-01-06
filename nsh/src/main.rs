@@ -137,7 +137,7 @@ fn main() -> Result<(), AppError> {
             println!("Listening on {} ...", socket_addr);
 
             // TODO: Listen on an address
-            let service = Service::new(config.node_keys, socket_addr);
+            let service = Service::with(config.node_keys.ecdh().clone(), socket_addr)?;
             let reactor = Reactor::new(service, popol::Poller::new())?;
 
             reactor.join()?;

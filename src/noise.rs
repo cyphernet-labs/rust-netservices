@@ -14,7 +14,7 @@ use crate::{NetConnection, NetSession, ResAddr};
 pub trait PeerId: EcPk {}
 impl<T> PeerId for T where T: EcPk {}
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Getters, Clone, Eq, PartialEq)]
 pub struct NodeKeys<E: Ecdh> {
     pk: E::Pk,
     ecdh: E,
