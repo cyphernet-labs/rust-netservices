@@ -261,3 +261,55 @@ where
         self.session.flush()
     }
 }
+
+mod split {
+    use super::*;
+
+    pub trait SplitIo: Sized {
+        type Read: Read + Sized + Send;
+        type Write: Write + Sized + Send;
+        type Error: std::error::Error;
+
+        fn split_io(self) -> Result<(Self::Read, Self::Write), Self::Error> {
+            todo!()
+        }
+        fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
+            todo!()
+        }
+    }
+
+    pub struct NetReader<S: NetSession> {
+        state: TransportState,
+        session: <S as SplitIo>::Read,
+        inbound: bool,
+    }
+
+    impl<S: NetSession> Read for NetReader<S> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.session.read(buf)
+        }
+    }
+
+    pub struct NetWriter<S: NetSession> {
+        state: TransportState,
+        session: <S as SplitIo>::Write,
+        inbound: bool,
+    }
+
+    impl<S: NetSession> Write for NetWriter<S> {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.session.write(buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.session.flush()
+        }
+    }
+
+    impl<S: NetSession> SplitIo for NetTransport<S> {
+        type Read = NetReader<S>;
+        type Write = NetWriter<S>;
+        type Error = <S as SplitIo>::Error;
+    }
+}
+pub use split::*;
