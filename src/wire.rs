@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::time::Duration;
 use std::{io, net};
 
 use reactor::{Io, Resource};
@@ -112,6 +113,66 @@ pub struct NetTransport<S: NetSession> {
 impl<S: NetSession> AsRawFd for NetTransport<S> {
     fn as_raw_fd(&self) -> RawFd {
         self.session.as_raw_fd()
+    }
+}
+
+impl<S: NetSession> NetSession for NetTransport<S> {
+    type Context = S::Context;
+    type Connection = S::Connection;
+    type Id = S::Id;
+    type PeerAddr = S::PeerAddr;
+    type TransitionAddr = S::TransitionAddr;
+
+    fn accept(connection: Self::Connection, context: &Self::Context) -> Self {
+        todo!()
+    }
+
+    fn connect(addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self> {
+        todo!()
+    }
+
+    fn id(&self) -> Option<Self::Id> {
+        todo!()
+    }
+
+    fn handshake_completed(&self) -> bool {
+        todo!()
+    }
+
+    fn transient_addr(&self) -> Self::TransitionAddr {
+        todo!()
+    }
+
+    fn peer_addr(&self) -> Option<Self::PeerAddr> {
+        todo!()
+    }
+
+    fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr {
+        todo!()
+    }
+
+    fn read_timeout(&self) -> io::Result<Option<Duration>> {
+        todo!()
+    }
+
+    fn write_timeout(&self) -> io::Result<Option<Duration>> {
+        todo!()
+    }
+
+    fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
+        todo!()
+    }
+
+    fn set_write_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
+        todo!()
+    }
+
+    fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()> {
+        todo!()
+    }
+
+    fn disconnect(self) -> io::Result<()> {
+        todo!()
     }
 }
 
@@ -256,10 +317,7 @@ impl<S: NetSession> Read for NetTransport<S> {
     }
 }
 
-impl<S: NetSession> Write for NetTransport<S>
-where
-    S::TransitionAddr: Into<net::SocketAddr>,
-{
+impl<S: NetSession> Write for NetTransport<S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.session.write(&buf)
     }

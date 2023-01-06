@@ -12,7 +12,7 @@ mod frame;
 mod listener;
 pub mod noise;
 mod session;
-mod tunnel;
+pub mod tunnel;
 
 pub use connection::{NetConnection, ResAddr};
 pub use frame::{Frame, Marshaller};
