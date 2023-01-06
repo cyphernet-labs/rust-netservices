@@ -268,14 +268,12 @@ mod split {
     pub trait SplitIo: Sized {
         type Read: Read + Sized + Send;
         type Write: Write + Sized + Send;
-        type Error: std::error::Error;
 
-        fn split_io(self) -> Result<(Self::Read, Self::Write), Self::Error> {
-            todo!()
-        }
-        fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
-            todo!()
-        }
+        /// # Panics
+        ///
+        /// If the split operation is not possible
+        fn split_io(self) -> (Self::Read, Self::Write);
+        fn from_split_io(read: Self::Read, write: Self::Write) -> Self;
     }
 
     pub struct NetReader<S: NetSession> {
@@ -309,7 +307,31 @@ mod split {
     impl<S: NetSession> SplitIo for NetTransport<S> {
         type Read = NetReader<S>;
         type Write = NetWriter<S>;
-        type Error = <S as SplitIo>::Error;
+
+        fn split_io(self) -> (Self::Read, Self::Write) {
+            let (r, w) = self.session.split_io();
+            let reader = NetReader {
+                state: self.state,
+                session: r,
+                inbound: self.inbound,
+            };
+            let writer = NetWriter {
+                state: self.state,
+                session: w,
+                inbound: self.inbound,
+            };
+            (reader, writer)
+        }
+
+        fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
+            debug_assert_eq!(read.state, write.state);
+            debug_assert_eq!(read.inbound, write.inbound);
+            Self {
+                state: read.state,
+                inbound: read.inbound,
+                session: S::from_split_io(read.session, write.session),
+            }
+        }
     }
 }
 pub use split::*;
