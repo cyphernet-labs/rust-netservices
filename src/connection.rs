@@ -1,11 +1,12 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::mem::MaybeUninit;
-use std::net::{Shutdown, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
+use crate::socks5::{Socks5, Socks5Error};
 use cyphernet::addr::Addr;
 use reactor::{ReadNonblocking, WriteNonblocking};
 
@@ -23,6 +24,10 @@ pub trait NetConnection: Send + SplitIo + StreamNonblocking + AsRawFd {
     type Addr: ResAddr + Send;
 
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self>
+    where
+        Self: Sized;
+
+    fn connect_socks5(addr: Self::Addr, proxy: net::SocketAddr) -> Result<Self, Socks5Error>
     where
         Self: Sized;
 
@@ -84,6 +89,22 @@ impl NetConnection for TcpStream {
     #[cfg(feature = "socket2")]
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
         <socket2::Socket as NetConnection>::connect_nonblocking(addr).map(Self::from)
+    }
+
+    #[cfg(not(feature = "socket2"))]
+    fn connect_socks5(addr: Self::Addr, proxy: SocketAddr) -> Result<Self, Socks5Error>
+    where
+        Self: Sized,
+    {
+        panic!("non-blocking TcpStream::connect requires socket2 feature")
+    }
+    #[cfg(feature = "socket2")]
+    fn connect_socks5(addr: Self::Addr, proxy: net::SocketAddr) -> Result<Self, Socks5Error>
+    where
+        Self: Sized,
+    {
+        let me = <socket2::Socket as NetConnection>::connect_nonblocking(proxy).map(Self::from)?;
+        Socks5::from(me).connect(addr)
     }
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
@@ -161,6 +182,14 @@ impl NetConnection for socket2::Socket {
             Err(e) => return Err(e),
         }
         Ok(socket)
+    }
+
+    fn connect_socks5(addr: Self::Addr, proxy: SocketAddr) -> Result<Self, Socks5Error>
+    where
+        Self: Sized,
+    {
+        let me = Self::connect_nonblocking(proxy).map(net::TcpStream::from)?;
+        Socks5::from(me).connect(addr).map(socket2::Socket::from)
     }
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
