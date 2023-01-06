@@ -7,7 +7,7 @@ edition = "2021"
 amplify = "4.0.0-beta.1"
 re-actor = { path = "re-actor", optional = true }
 io-reactor = { path = "io-reactor", optional = true }
-cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet", features = ["ed25519"] }
+cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet", features = ["ed25519", "pem"] }
 mio = { version = "0.8.5", optional = true }
 socket2 = { version = "0.4.7", optional = true }
 libc = "0.2.138"
@@ -21,6 +21,6 @@ log = "0.4.17"
 default = ["io-reactor", "socket2"]
 
 [workspace]
-members = ["re-actor", "io-reactor"]
+members = ["re-actor", "io-reactor", "nsh"]
 default-members = ["io-reactor"]
-exclude = ["nsh"]
+exclude = ["node"]

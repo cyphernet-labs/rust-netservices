@@ -13,7 +13,20 @@ use crate::{NetConnection, NetSession, ResAddr};
 pub trait PeerId: EcPk {}
 impl<T> PeerId for T where T: EcPk {}
 
-pub trait NodeKeys: Ecdh {}
+#[derive(Clone, Eq, PartialEq)]
+pub struct NodeKeys<E: Ecdh> {
+    pk: E::Pk,
+    ecdh: E,
+}
+
+impl<E: Ecdh> From<E> for NodeKeys<E> {
+    fn from(ecdh: E) -> Self {
+        NodeKeys {
+            pk: ecdh.to_pk(),
+            ecdh,
+        }
+    }
+}
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, From)]
 pub enum XkAddr<Id: PeerId, A: ResAddr> {
