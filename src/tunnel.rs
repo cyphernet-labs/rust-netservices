@@ -50,8 +50,8 @@ pub struct Tunnel<S: NetSession> {
 }
 
 impl<S: NetSession> Tunnel<S> {
-    pub fn with(session: S, local_socket: net::SocketAddr) -> io::Result<Self> {
-        let listener = net::TcpListener::bind(local_socket)?;
+    pub fn with(session: S, addr: impl net::ToSocketAddrs) -> io::Result<Self> {
+        let listener = net::TcpListener::bind(addr)?;
         Ok(Self { listener, session })
     }
 
