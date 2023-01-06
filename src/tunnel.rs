@@ -1,48 +1,13 @@
 use reactor::poller::Poll;
 use std::collections::VecDeque;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
-use crate::NetSession;
+use crate::{IoStatus, NetSession, ReadNonblocking, WriteNonblocking};
 
 pub const READ_BUFFER_SIZE: usize = u16::MAX as usize;
-
-pub enum Status {
-    Success(usize),
-    WouldBlock,
-    Shutdown,
-    Err(io::Error),
-}
-
-pub trait ReadNonblocking: Read {
-    fn read_nonblocking(&mut self, buf: &mut [u8]) -> Status {
-        match self.read(buf) {
-            Ok(0) => Status::Shutdown,
-            Ok(len) => Status::Success(len),
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => Status::WouldBlock,
-            Err(err) => Status::Err(err),
-        }
-    }
-}
-impl<T: Read> ReadNonblocking for T {}
-
-pub trait WriteNonblocking: Write {
-    fn write_nonblocking(&mut self, buf: &[u8]) -> Status {
-        if buf.is_empty() {
-            return Status::Success(0);
-        }
-        match self.write(buf) {
-            Ok(0) => Status::WouldBlock,
-            Ok(len) => Status::Success(len),
-            Err(err) if err.kind() == io::ErrorKind::WriteZero => Status::WouldBlock,
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => Status::WouldBlock,
-            Err(err) => Status::Err(err),
-        }
-    }
-}
-impl<T: Write> WriteNonblocking for T {}
 
 pub struct Tunnel<S: NetSession> {
     listener: net::TcpListener,
@@ -93,10 +58,10 @@ impl<S: NetSession> Tunnel<S> {
         macro_rules! handle {
             ($call:expr, |$var:ident| $expr:expr) => {
                 match $call {
-                    Status::Success($var) => $expr,
-                    Status::WouldBlock => {}
-                    Status::Shutdown => return Ok((in_count, out_count)),
-                    Status::Err(err) => return Err(err),
+                    IoStatus::Success($var) => $expr,
+                    IoStatus::WouldBlock => {}
+                    IoStatus::Shutdown => return Ok((in_count, out_count)),
+                    IoStatus::Err(err) => return Err(err),
                 }
             };
         }
@@ -107,7 +72,7 @@ impl<S: NetSession> Tunnel<S> {
             if count > 0 {
                 return Err(io::ErrorKind::TimedOut.into());
             }
-            for (fd, ev) in poller.next() {
+            while let Some((fd, ev)) = poller.next() {
                 if fd == int_fd {
                     if ev.is_writable {
                         handle!(

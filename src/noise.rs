@@ -9,7 +9,7 @@ use cyphernet::addr::{Addr, PeerAddr, ToSocketAddr};
 use cyphernet::crypto::{EcPk, Ecdh};
 
 use crate::wire::{SplitIo, SplitIoError};
-use crate::{NetConnection, NetSession, ResAddr};
+use crate::{NetConnection, NetSession, ReadNonblocking, ResAddr, WriteNonblocking};
 
 pub trait PeerId: EcPk {}
 impl<T> PeerId for T where T: EcPk {}
@@ -112,6 +112,12 @@ impl<E: Ecdh, S: NetConnection> Read for NoiseXk<E, S> {
     }
 }
 
+impl<E: Ecdh, S: NetConnection> ReadNonblocking for NoiseXk<E, S> {
+    fn set_read_nonblocking(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        self.connection.set_read_nonblocking(timeout)
+    }
+}
+
 impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         // TODO: Do handshake
@@ -120,6 +126,12 @@ impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
 
     fn flush(&mut self) -> io::Result<()> {
         self.connection.flush()
+    }
+}
+
+impl<E: Ecdh, S: NetConnection> WriteNonblocking for NoiseXk<E, S> {
+    fn set_write_nonblocking(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        self.connection.set_write_nonblocking(timeout)
     }
 }
 
