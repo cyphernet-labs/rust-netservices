@@ -6,9 +6,9 @@ use std::time::Duration;
 use std::{io, net};
 
 use reactor::poller::IoEv;
-use reactor::{Io, Resource};
+use reactor::{Io, IoStatus, ReadNonblocking, Resource, WriteNonblocking};
 
-use crate::{IoStatus, NetConnection, NetListener, NetSession, ReadNonblocking, WriteNonblocking};
+use crate::{NetConnection, NetListener, NetSession};
 
 /// Socket read buffer size.
 const READ_BUFFER_SIZE: usize = u16::MAX as usize;
@@ -41,6 +41,20 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> io::Write for NetAcc
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        panic!("must not write to network listener")
+    }
+}
+
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> WriteNonblocking for NetAccept<S, L> {
+    fn set_write_nonblocking(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        panic!("must not write to network listener")
+    }
+
+    fn write_nonblocking(&mut self, buf: &[u8]) -> IoStatus {
+        panic!("must not write to network listener")
+    }
+
+    fn flush_nonblocking(&mut self) -> IoStatus {
         panic!("must not write to network listener")
     }
 }
@@ -245,9 +259,10 @@ impl<S: NetSession> NetTransport<S> {
             "read on terminated transport"
         );
         self.needs_flush = false;
-        match self.session.flush() {
-            Err(err) => Some(SessionEvent::Terminated(err)),
-            Ok(_) => None,
+        match self.session.flush_nonblocking() {
+            IoStatus::Success(_) | IoStatus::WouldBlock => None,
+            IoStatus::Shutdown => Some(SessionEvent::Terminated(io::ErrorKind::WriteZero.into())),
+            IoStatus::Err(err) => Some(SessionEvent::Terminated(err)),
         }
     }
 
@@ -346,13 +361,17 @@ impl<S: NetSession> Write for NetTransport<S> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.needs_flush = false;
         self.session.flush()
     }
 }
 impl<S: NetSession> WriteNonblocking for NetTransport<S> {
     fn set_write_nonblocking(&mut self, timeout: Option<Duration>) -> io::Result<()> {
         self.session.set_write_nonblocking(timeout)
+    }
+
+    fn flush_nonblocking(&mut self) -> IoStatus {
+        self.needs_flush = false;
+        self.session.flush_nonblocking()
     }
 }
 
