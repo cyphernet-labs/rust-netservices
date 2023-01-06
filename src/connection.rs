@@ -8,7 +8,7 @@ use std::{io, net};
 
 use cyphernet::addr::Addr;
 
-use crate::wire::SplitIo;
+use crate::wire::{SplitIo, SplitIoError};
 use crate::IoStream;
 
 pub trait ResAddr: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
@@ -49,9 +49,16 @@ pub trait NetConnection: Send + SplitIo + IoStream + AsRawFd {
 impl SplitIo for TcpStream {
     type Read = Self;
     type Write = Self;
+    type Err = io::Error;
 
-    fn split_io(self) -> (Self::Read, Self::Write) {
-        (self.try_clone().expect("unable to clone TCP socket"), self)
+    fn split_io(self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
+        match self.try_clone() {
+            Ok(clone) => Ok((clone, self)),
+            Err(error) => Err(SplitIoError {
+                original: self,
+                error,
+            }),
+        }
     }
 
     fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
@@ -228,9 +235,16 @@ impl NetConnection for socket2::Socket {
 impl SplitIo for socket2::Socket {
     type Read = Self;
     type Write = Self;
+    type Err = io::Error;
 
-    fn split_io(self) -> (Self::Read, Self::Write) {
-        (self.try_clone().expect("unable to clone TCP socket"), self)
+    fn split_io(self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
+        match self.try_clone() {
+            Ok(clone) => Ok((clone, self)),
+            Err(error) => Err(SplitIoError {
+                original: self,
+                error,
+            }),
+        }
     }
 
     fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
