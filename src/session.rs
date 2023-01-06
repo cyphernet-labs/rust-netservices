@@ -22,11 +22,15 @@ pub trait NetSession: IoStream + SplitIo + AsRawFd + Send + Sized {
     fn accept(connection: Self::Connection, context: &Self::Context) -> Self;
     fn connect(addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self>;
 
-    fn expect_id(&self) -> Self::Id;
+    fn id(&self) -> Option<Self::Id>;
+    fn expect_id(&self) -> Self::Id {
+        self.id()
+            .expect("net session id is not present when expected")
+    }
 
     fn handshake_completed(&self) -> bool;
 
-    fn transition_addr(&self) -> Self::TransitionAddr;
+    fn transient_addr(&self) -> Self::TransitionAddr;
     fn peer_addr(&self) -> Option<Self::PeerAddr>;
     fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr;
 
@@ -56,15 +60,15 @@ impl NetSession for net::TcpStream {
         Self::connect_nonblocking(addr)
     }
 
-    fn expect_id(&self) -> Self::Id {
-        self.as_raw_fd()
+    fn id(&self) -> Option<Self::Id> {
+        Some(self.as_raw_fd())
     }
 
     fn handshake_completed(&self) -> bool {
         true
     }
 
-    fn transition_addr(&self) -> Self::TransitionAddr {
+    fn transient_addr(&self) -> Self::TransitionAddr {
         <Self as NetConnection>::remote_addr(self)
     }
 
@@ -117,15 +121,15 @@ impl NetSession for socket2::Socket {
         Self::connect_nonblocking(addr)
     }
 
-    fn expect_id(&self) -> Self::Id {
-        self.as_raw_fd()
+    fn id(&self) -> Option<Self::Id> {
+        Some(self.as_raw_fd())
     }
 
     fn handshake_completed(&self) -> bool {
         true
     }
 
-    fn transition_addr(&self) -> Self::TransitionAddr {
+    fn transient_addr(&self) -> Self::TransitionAddr {
         <Self as NetConnection>::remote_addr(self)
     }
 
