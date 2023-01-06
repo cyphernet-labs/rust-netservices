@@ -4,8 +4,7 @@ use std::net::TcpListener;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::{io, net};
 
-use reactor::poller::IoEv;
-use reactor::Resource;
+use reactor::{Io, Resource};
 
 use crate::{NetConnection, NetListener, NetSession};
 
@@ -75,14 +74,13 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAcce
         self.listener.local_addr()
     }
 
-    fn handle_io(&mut self, ev: IoEv) -> Option<Self::Event> {
-        if ev.is_writable {
-            Some(match self.handle_accept() {
+    fn handle_io(&mut self, io: Io) -> Option<Self::Event> {
+        match io {
+            Io::Read => None,
+            Io::Write => Some(match self.handle_accept() {
                 Err(err) => ListenerEvent::Failure(err),
                 Ok(session) => ListenerEvent::Accepted(session),
-            })
-        } else {
-            None
+            }),
         }
     }
 
@@ -240,13 +238,10 @@ where
         self.session.as_raw_fd()
     }
 
-    fn handle_io(&mut self, ev: IoEv) -> Option<Self::Event> {
-        if ev.is_writable {
-            self.handle_writable()
-        } else if ev.is_readable {
-            self.handle_readable()
-        } else {
-            unreachable!()
+    fn handle_io(&mut self, io: Io) -> Option<Self::Event> {
+        match io {
+            Io::Read => self.handle_readable(),
+            Io::Write => self.handle_writable(),
         }
     }
 
@@ -277,12 +272,14 @@ where
 mod split {
     use super::*;
 
-    #[derive(Clone, Debug, Display, Error)]
+    #[derive(Clone, Debug, Display)]
     #[display("{error}")]
     pub struct SplitIoError<T: SplitIo> {
         pub original: T,
         pub error: T::Err,
     }
+
+    impl<T: SplitIo + Debug> std::error::Error for SplitIoError<T> {}
 
     pub trait SplitIo: Sized {
         type Read: Read + Sized;
