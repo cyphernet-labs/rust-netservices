@@ -8,7 +8,7 @@ use std::time::Duration;
 use cyphernet::addr::{Addr, PeerAddr, ToSocketAddr};
 use cyphernet::crypto::{EcPk, Ecdh};
 
-use crate::wire::SplitIo;
+use crate::wire::{SplitIo, SplitIoError};
 use crate::{NetConnection, NetSession, ResAddr};
 
 pub trait PeerId: EcPk {}
@@ -126,8 +126,9 @@ impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
 impl<E: Ecdh, S: NetConnection> SplitIo for NoiseXk<E, S> {
     type Read = <S as SplitIo>::Read;
     type Write = <S as SplitIo>::Write;
+    type Err = <S as SplitIo>::Err;
 
-    fn split_io(self) -> (Self::Read, Self::Write) {
+    fn split_io(self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
         todo!()
     }
 

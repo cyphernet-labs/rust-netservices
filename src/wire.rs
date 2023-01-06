@@ -277,14 +277,22 @@ where
 mod split {
     use super::*;
 
+    #[derive(Clone, Debug, Display, Error)]
+    #[display("{error}")]
+    pub struct SplitIoError<T: SplitIo> {
+        pub original: T,
+        pub error: T::Err,
+    }
+
     pub trait SplitIo: Sized {
-        type Read: Read + Sized + Send;
-        type Write: Write + Sized + Send;
+        type Read: Read + Sized;
+        type Write: Write + Sized;
+        type Err: std::error::Error;
 
         /// # Panics
         ///
         /// If the split operation is not possible
-        fn split_io(self) -> (Self::Read, Self::Write);
+        fn split_io(self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>>;
         fn from_split_io(read: Self::Read, write: Self::Write) -> Self;
     }
 
@@ -319,9 +327,19 @@ mod split {
     impl<S: NetSession> SplitIo for NetTransport<S> {
         type Read = NetReader<S>;
         type Write = NetWriter<S>;
+        type Err = S::Err;
 
-        fn split_io(self) -> (Self::Read, Self::Write) {
-            let (r, w) = self.session.split_io();
+        fn split_io(mut self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
+            let (r, w) = match self.session.split_io() {
+                Err(err) => {
+                    self.session = err.original;
+                    return Err(SplitIoError {
+                        original: self,
+                        error: err.error,
+                    });
+                }
+                Ok(s) => s,
+            };
             let reader = NetReader {
                 state: self.state,
                 session: r,
@@ -332,7 +350,7 @@ mod split {
                 session: w,
                 inbound: self.inbound,
             };
-            (reader, writer)
+            Ok((reader, writer))
         }
 
         fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
