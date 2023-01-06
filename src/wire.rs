@@ -1,5 +1,5 @@
 use std::fmt::Debug;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::{io, net};
@@ -240,6 +240,12 @@ where
 
     fn disconnect(self) -> io::Result<()> {
         self.session.disconnect()
+    }
+}
+
+impl<S: NetSession> Read for NetTransport<S> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.session.read(buf)
     }
 }
 
