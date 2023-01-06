@@ -126,7 +126,14 @@ impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
 impl<E: Ecdh, S: NetConnection> SplitIo for NoiseXk<E, S> {
     type Read = <S as SplitIo>::Read;
     type Write = <S as SplitIo>::Write;
-    type Error = <S as SplitIo>::Error;
+
+    fn split_io(self) -> (Self::Read, Self::Write) {
+        todo!()
+    }
+
+    fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
+        todo!()
+    }
 }
 
 impl<E: Ecdh, S: NetConnection> NetSession for NoiseXk<E, S>

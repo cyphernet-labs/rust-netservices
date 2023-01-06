@@ -49,10 +49,9 @@ pub trait NetConnection: Send + SplitIo + IoStream + AsRawFd {
 impl SplitIo for TcpStream {
     type Read = Self;
     type Write = Self;
-    type Error = io::Error;
 
-    fn split_io(self) -> Result<(Self::Read, Self::Write), Self::Error> {
-        self.try_clone().map(|clone| (self, clone))
+    fn split_io(self) -> (Self::Read, Self::Write) {
+        (self.try_clone().expect("unable to clone TCP socket"), self)
     }
 
     fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
@@ -229,10 +228,9 @@ impl NetConnection for socket2::Socket {
 impl SplitIo for socket2::Socket {
     type Read = Self;
     type Write = Self;
-    type Error = io::Error;
 
-    fn split_io(self) -> Result<(Self::Read, Self::Write), Self::Error> {
-        self.try_clone().map(|clone| (self, clone))
+    fn split_io(self) -> (Self::Read, Self::Write) {
+        (self.try_clone().expect("unable to clone TCP socket"), self)
     }
 
     fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
