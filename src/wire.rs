@@ -8,7 +8,7 @@ use std::{io, net};
 use reactor::poller::IoEv;
 use reactor::{Io, Resource};
 
-use crate::{NetConnection, NetListener, NetSession};
+use crate::{IoStatus, NetConnection, NetListener, NetSession, ReadNonblocking, WriteNonblocking};
 
 /// Socket read buffer size.
 const READ_BUFFER_SIZE: usize = u16::MAX as usize;
@@ -260,10 +260,14 @@ impl<S: NetSession> NetTransport<S> {
 
         // We need to save the state before doing the read below
         let was_established = self.state == TransportState::Handshake;
-        let mut buffer = Vec::with_capacity(READ_BUFFER_SIZE);
-        let res = self.session.read_to_end(&mut buffer);
-        match res {
-            Ok(0) if !was_established => {
+        let mut buffer = vec![0; READ_BUFFER_SIZE];
+
+        // Nb. Since `poll`, which this reactor is based on, is *level-triggered*,
+        // we will be notified again if there is still data to be read on the socket.
+        // Hence, there is no use in putting this socket read in a loop, as the second
+        // invocation would likely block.
+        match self.session.read_nonblocking(&mut buffer) {
+            IoStatus::Success(0) if !was_established => {
                 if self.session.handshake_completed() {
                     self.state = TransportState::Active;
                     return Some(SessionEvent::Established(self.session.expect_id()));
@@ -272,23 +276,21 @@ impl<S: NetSession> NetTransport<S> {
                     None
                 }
             }
-            // Nb. Since `poll`, which this reactor is based on, is *level-triggered*,
-            // we will be notified again if there is still data to be read on the socket.
-            // Hence, there is no use in putting this socket read in a loop, as the second
-            // invocation would likely block.
-            Ok(0) => {
-                // If we get zero bytes read as a return value, it means the peer has
-                // performed an orderly shutdown.
+
+            IoStatus::Shutdown => {
                 self.state = TransportState::Terminated;
                 Some(SessionEvent::Terminated(io::ErrorKind::Interrupted.into()))
             }
-            Ok(len) => {
+
+            IoStatus::Success(len) => {
                 debug_assert!(was_established);
                 debug_assert_eq!(len, buffer.len());
                 Some(SessionEvent::Data(buffer))
             }
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => Some(SessionEvent::Data(buffer)),
-            Err(err) => {
+
+            IoStatus::WouldBlock => Some(SessionEvent::Data(buffer)),
+
+            IoStatus::Err(err) => {
                 self.state = TransportState::Terminated;
                 Some(SessionEvent::Terminated(err))
             }
@@ -332,6 +334,11 @@ impl<S: NetSession> Read for NetTransport<S> {
         self.session.read(buf)
     }
 }
+impl<S: NetSession> ReadNonblocking for NetTransport<S> {
+    fn set_read_nonblocking(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        self.session.set_read_timeout(timeout)
+    }
+}
 
 impl<S: NetSession> Write for NetTransport<S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -341,6 +348,11 @@ impl<S: NetSession> Write for NetTransport<S> {
     fn flush(&mut self) -> io::Result<()> {
         self.needs_flush = false;
         self.session.flush()
+    }
+}
+impl<S: NetSession> WriteNonblocking for NetTransport<S> {
+    fn set_write_nonblocking(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        self.session.set_write_nonblocking(timeout)
     }
 }
 

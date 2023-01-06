@@ -14,13 +14,11 @@ pub mod noise;
 mod session;
 pub mod tunnel;
 
-pub use connection::{NetConnection, ResAddr};
+pub use connection::{
+    IoStatus, NetConnection, ReadNonblocking, ResAddr, StreamNonblocking, WriteNonblocking,
+};
 pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
 pub use session::NetSession;
 #[cfg(feature = "io-reactor")]
 pub use wire::{ListenerEvent, NetAccept, NetTransport, SessionEvent};
-
-pub trait IoStream: std::io::Write + std::io::Read {}
-
-impl<T> IoStream for T where T: std::io::Write + std::io::Read {}
