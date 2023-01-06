@@ -2,6 +2,7 @@
 extern crate amplify;
 
 use std::any::Any;
+use std::io::Write;
 use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::{fs, io, net};
@@ -9,7 +10,10 @@ use std::{fs, io, net};
 use clap::Parser;
 use cyphernet::addr::{PeerAddr, ProxyError, SocketAddr, UniversalAddr};
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
+use netservices::socks5::Socks5Error;
+use nsh::client::Client;
 use nsh::service::{NodeKeys, Service};
+use nsh::RemoteAddr;
 use reactor::poller::popol;
 use reactor::Reactor;
 
@@ -45,7 +49,7 @@ struct Args {
     ///
     /// Remote address, if no proxy is used, should be either IPv4 or IPv6
     /// socket address with optional port information. If SOCKS5 proxy is used,
-    /// (see `--socks5` argument) remote address can be a string representating
+    /// (see `--socks5` argument) remote address can be a string representing
     /// address supported by the specific proxy, for instance Tor, I2P or
     /// Nym address.
     ///
@@ -63,7 +67,7 @@ struct Args {
 enum Command {
     Listen(net::SocketAddr),
     Connect {
-        remote_host: UniversalAddr<PeerAddr<PublicKey, net::SocketAddr>>,
+        remote_host: RemoteAddr,
         remote_command: String,
     },
 }
@@ -87,6 +91,9 @@ pub enum AppError {
 
     #[from]
     Reactor(reactor::Error<net::SocketAddr, RawFd>),
+
+    #[from]
+    Socks5(Socks5Error),
 
     #[from]
     #[display("error creating thread")]
@@ -137,16 +144,28 @@ fn main() -> Result<(), AppError> {
             println!("Listening on {} ...", socket_addr);
 
             // TODO: Listen on an address
-            let service = Service::with(config.node_keys.ecdh().clone(), socket_addr)?;
+            let service = Service::bind(config.node_keys.ecdh().clone(), socket_addr)?;
             let reactor = Reactor::new(service, popol::Poller::new())?;
 
             reactor.join()?;
         }
         Command::Connect {
             remote_host,
-            remote_command: _,
+            remote_command,
         } => {
-            println!("Connecting to {} ...", remote_host);
+            eprintln!("Connecting to {} ...", remote_host);
+
+            let mut client = Client::connect(config.node_keys.ecdh(), remote_host)?;
+            {
+                let printout = client.exec(remote_command);
+                let mut stdout = io::stdout();
+                for batch in printout {
+                    stdout.write_all(&batch)?;
+                }
+            }
+            client.disconnect();
+
+            eprintln!("Done");
         }
     }
 

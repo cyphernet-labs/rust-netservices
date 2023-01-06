@@ -7,7 +7,8 @@ use netservices::noise::NoiseXk;
 use netservices::{ListenerEvent, NetSession, SessionEvent};
 use reactor::{Error, Resource};
 
-pub type NetTransport = netservices::NetTransport<NoiseXk<PrivateKey>>;
+use crate::NetTransport;
+
 pub type NetAccept = netservices::NetAccept<NoiseXk<PrivateKey>>;
 pub type Action = reactor::Action<NetAccept, NetTransport>;
 pub type NodeKeys = netservices::noise::NodeKeys<PrivateKey>;
@@ -17,7 +18,7 @@ pub struct Service {
 }
 
 impl Service {
-    pub fn with(ecdh: PrivateKey, listen: net::SocketAddr) -> io::Result<Self> {
+    pub fn bind(ecdh: PrivateKey, listen: net::SocketAddr) -> io::Result<Self> {
         let mut action_queue = VecDeque::new();
         let listener = NetAccept::bind(listen, ecdh)?;
         action_queue.push_back(Action::RegisterListener(listener));
