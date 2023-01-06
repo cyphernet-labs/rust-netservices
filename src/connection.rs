@@ -8,13 +8,14 @@ use std::{io, net};
 
 use cyphernet::addr::Addr;
 
+use crate::wire::SplitIo;
 use crate::IoStream;
 
 pub trait ResAddr: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
 impl<T> ResAddr for T where T: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
 
 /// Network stream is an abstraction of TCP stream object.
-pub trait NetConnection: Send + IoStream + AsRawFd {
+pub trait NetConnection: Send + SplitIo + IoStream + AsRawFd {
     type Addr: ResAddr + Send;
 
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self>
@@ -43,6 +44,24 @@ pub trait NetConnection: Send + IoStream + AsRawFd {
     where
         Self: Sized;
     fn take_error(&self) -> io::Result<Option<io::Error>>;
+}
+
+impl SplitIo for TcpStream {
+    type Read = Self;
+    type Write = Self;
+    type Error = io::Error;
+
+    fn split_io(self) -> Result<(Self::Read, Self::Write), Self::Error> {
+        self.try_clone().map(|clone| (self, clone))
+    }
+
+    fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
+        // TODO: Do a better detection of unrelated join
+        if read.as_raw_fd() != write.as_raw_fd() {
+            panic!("attempt to join unrelated streams")
+        }
+        read
+    }
 }
 
 impl NetConnection for TcpStream {
@@ -203,5 +222,24 @@ impl NetConnection for socket2::Socket {
 
     fn take_error(&self) -> io::Result<Option<io::Error>> {
         socket2::Socket::take_error(self)
+    }
+}
+
+#[cfg(feature = "socket2")]
+impl SplitIo for socket2::Socket {
+    type Read = Self;
+    type Write = Self;
+    type Error = io::Error;
+
+    fn split_io(self) -> Result<(Self::Read, Self::Write), Self::Error> {
+        self.try_clone().map(|clone| (self, clone))
+    }
+
+    fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
+        // TODO: Do a better detection of unrelated join
+        if read.as_raw_fd() != write.as_raw_fd() {
+            panic!("attempt to join unrelated streams")
+        }
+        read
     }
 }

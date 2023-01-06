@@ -5,9 +5,10 @@ use std::time::Duration;
 
 use cyphernet::addr::Addr;
 
+use crate::wire::SplitIo;
 use crate::{IoStream, NetConnection};
 
-pub trait NetSession: IoStream + AsRawFd + Send + Sized {
+pub trait NetSession: IoStream + SplitIo + AsRawFd + Send + Sized {
     type Context: Send;
     type Connection: NetConnection;
     /// A unique identifier of the session. Usually a part of a transition address.
