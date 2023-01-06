@@ -2,16 +2,16 @@
 extern crate amplify;
 
 use std::any::Any;
+use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::{fs, io, net};
 
 use clap::Parser;
-use cyphernet::addr::{LocalNode, PeerAddr, ProxyError, SocketAddr, UniversalAddr};
-use cyphernet::crypto::ed25519::{Curve25519, PrivateKey};
-use netservices::nxk_tcp::NxkAddr;
-use netservices::peer::{Action, Context, PeerActor};
-use reactor::schedulers::PopolScheduler;
-use reactor::{Actor, Handler, InternalError, Layout, Pool, Reactor, ReactorApi};
+use cyphernet::addr::{PeerAddr, ProxyError, SocketAddr, UniversalAddr};
+use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
+use nsh::service::{NodeKeys, Service};
+use reactor::poller::popol;
+use reactor::Reactor;
 
 pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
@@ -53,7 +53,7 @@ struct Args {
     /// argument, or as a prefix to the remote host address here, in form of
     /// `socks5h://<proxy_address>/<remote_host>`.
     #[arg(conflicts_with = "listen", required_unless_present = "listen")]
-    pub remote_host: Option<UniversalAddr<PeerAddr<Curve25519, SocketAddr<DEFAULT_PORT>>>>,
+    pub remote_host: Option<UniversalAddr<PeerAddr<PublicKey, SocketAddr<DEFAULT_PORT>>>>,
 
     /// Command to execute on the remote host
     #[arg(conflicts_with = "listen", required_unless_present = "listen")]
@@ -63,13 +63,13 @@ struct Args {
 enum Command {
     Listen(net::SocketAddr),
     Connect {
-        remote_host: NxkAddr,
+        remote_host: UniversalAddr<PeerAddr<PublicKey, net::SocketAddr>>,
         remote_command: String,
     },
 }
 
 struct Config {
-    pub node_keys: LocalNode<Curve25519>,
+    pub node_keys: NodeKeys,
     pub command: Command,
 }
 
@@ -86,11 +86,11 @@ pub enum AppError {
     Curve25519(ed25519_compact::Error),
 
     #[from]
-    Reactor(InternalError<NshPool>),
+    Reactor(reactor::Error<net::SocketAddr, RawFd>),
 
     #[from]
-    #[display("other error")]
-    Other(Box<dyn Any + Send>),
+    #[display("error creating thread")]
+    Thread(Box<dyn Any + Send>),
 }
 
 impl TryFrom<Args> for Config {
@@ -118,10 +118,10 @@ impl TryFrom<Args> for Config {
         });
         let id_path = shellexpand::tilde(&id_path.to_string_lossy()).to_string();
         let id_pem = fs::read_to_string(id_path)?;
-        let id = ed25519_compact::SecretKey::from_pem(&id_pem)?;
+        let id = PrivateKey::from_pem(&id_pem)?;
 
         Ok(Config {
-            node_keys: LocalNode::from(id.into()),
+            node_keys: NodeKeys::from(id),
             command,
         })
     }
@@ -132,82 +132,23 @@ fn main() -> Result<(), AppError> {
 
     let config = Config::try_from(args)?;
 
-    let mut reactor = Reactor::<NshPool>::new()?;
-
-    let nsh_socket = Context {
-        method: Action::Connect("127.0.0.1".parse().unwrap()),
-        local_node: LocalNode::from(PrivateKey::test()),
-    };
-    reactor.start_actor(NshPool::Peer, nsh_socket)?;
-
     match config.command {
         Command::Listen(socket_addr) => {
             println!("Listening on {} ...", socket_addr);
+
             // TODO: Listen on an address
+            let service = Service::new(config.node_keys, socket_addr);
+            let reactor = Reactor::new(service, popol::Poller::new())?;
+
+            reactor.join()?;
         }
         Command::Connect {
             remote_host,
             remote_command: _,
         } => {
             println!("Connecting to {} ...", remote_host);
-            let nsh_socket = Context {
-                method: Action::Connect(remote_host),
-                local_node: config.node_keys,
-            };
-            reactor.start_actor(NshPool::Peer, nsh_socket)?;
         }
     }
-    reactor.join()?;
 
     Ok(())
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Display, Debug)]
-#[display(lowercase)]
-pub enum NshPool {
-    Peer = 0,
-}
-
-const PEER_POOL: u32 = NshPool::Peer as u32;
-
-impl Layout for NshPool {
-    type RootActor = NshActor;
-
-    fn default_pools() -> Vec<Pool<NshActor, Self>> {
-        vec![Pool::new(
-            NshPool::Peer,
-            PopolScheduler::<NshActor>::new(),
-            Service,
-        )]
-    }
-
-    fn convert(other_ctx: Box<dyn Any>) -> <Self::RootActor as Actor>::Context {
-        let ctx = other_ctx
-            .downcast::<Context>()
-            .expect("wrong context object");
-        let ctx = *ctx;
-        ctx.into()
-    }
-}
-
-impl From<u32> for NshPool {
-    fn from(value: u32) -> Self {
-        NshPool::Peer
-    }
-}
-
-impl From<NshPool> for u32 {
-    fn from(value: NshPool) -> Self {
-        value as u32
-    }
-}
-
-type NshActor = PeerActor<NshPool, PEER_POOL>;
-
-struct Service;
-
-impl Handler<NshPool> for Service {
-    fn handle_err(&mut self, err: InternalError<NshPool>) {
-        panic!("{}", err);
-    }
 }

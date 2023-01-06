@@ -17,6 +17,8 @@ pub use connection::{NetConnection, ResAddr};
 pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
 pub use session::NetSession;
+#[cfg(feature = "io-reactor")]
+pub use wire::{ListenerEvent, NetAccept, NetTransport, SessionEvent};
 
 pub trait IoStream: std::io::Write + std::io::Read {}
 
