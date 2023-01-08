@@ -7,8 +7,8 @@ use netservices::noise::NoiseXk;
 use std::net;
 
 pub mod client;
-pub mod service;
+pub mod server;
 pub mod shell;
 
 pub type RemoteAddr = PeerAddr<PublicKey, net::SocketAddr>;
-pub type NetTransport = netservices::NetTransport<NoiseXk<PrivateKey>>;
+pub type Transport = netservices::NetTransport<NoiseXk<PrivateKey>>;
