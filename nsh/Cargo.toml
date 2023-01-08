@@ -13,7 +13,7 @@ rust-version = "1.59.0"
 [dependencies]
 amplify = "4.0.0-beta.7"
 io-reactor = { path = "../io-reactor" }
-netservices = { path = ".." }
+netservices = { path = "..", features = ["socket2", "log"] }
 cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet", features = ["ed25519"] }
 ed25519-compact = { version = "2.0.2", features = ["ed25519", "x25519", "pem", "ct-codecs", "random"] }
 clap = { version = "4.0.11", features = ["derive"] }

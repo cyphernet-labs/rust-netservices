@@ -23,11 +23,7 @@ impl<T> StreamNonblocking for T where T: ReadNonblocking + WriteNonblocking {}
 pub trait NetConnection: Send + SplitIo + StreamNonblocking + AsRawFd {
     type Addr: ResAddr + Send;
 
-    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self>
-    where
-        Self: Sized;
-
-    fn connect_socks5(addr: Self::Addr, proxy: net::SocketAddr) -> Result<Self, Socks5Error>
+    fn connect(addr: Self::Addr, nonblocking: bool) -> io::Result<Self>
     where
         Self: Sized;
 
@@ -83,28 +79,16 @@ impl NetConnection for TcpStream {
     type Addr = net::SocketAddr;
 
     #[cfg(not(feature = "socket2"))]
-    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
-        panic!("non-blocking TcpStream::connect requires socket2 feature")
+    fn connect(addr: Self::Addr, nonblocking: bool) -> io::Result<Self> {
+        if nonblocking {
+            panic!("non-blocking TcpStream::connect requires socket2 feature")
+        } else {
+            TcpStream::connect(addr)
+        }
     }
     #[cfg(feature = "socket2")]
-    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
-        <socket2::Socket as NetConnection>::connect_nonblocking(addr).map(Self::from)
-    }
-
-    #[cfg(not(feature = "socket2"))]
-    fn connect_socks5(addr: Self::Addr, proxy: SocketAddr) -> Result<Self, Socks5Error>
-    where
-        Self: Sized,
-    {
-        panic!("non-blocking TcpStream::connect requires socket2 feature")
-    }
-    #[cfg(feature = "socket2")]
-    fn connect_socks5(addr: Self::Addr, proxy: net::SocketAddr) -> Result<Self, Socks5Error>
-    where
-        Self: Sized,
-    {
-        let me = <socket2::Socket as NetConnection>::connect_nonblocking(proxy).map(Self::from)?;
-        Socks5::from(me).connect(addr)
+    fn connect(addr: Self::Addr, nonblocking: bool) -> io::Result<Self> {
+        <socket2::Socket as NetConnection>::connect(addr, nonblocking).map(Self::from)
     }
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
@@ -164,32 +148,39 @@ impl NetConnection for TcpStream {
 impl NetConnection for socket2::Socket {
     type Addr = net::SocketAddr;
 
-    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
+    fn connect(addr: Self::Addr, nonblocking: bool) -> io::Result<Self> {
         let addr = addr.into();
         let socket = socket2::Socket::new(
             socket2::Domain::for_address(addr),
             socket2::Type::STREAM,
             None,
         )?;
-        socket.set_nonblocking(true)?;
+        socket.set_nonblocking(nonblocking)?;
         match socket2::Socket::connect(&socket, &addr.into()) {
-            Ok(()) => {}
-            Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {}
-            Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
-                return Err(io::Error::from(io::ErrorKind::AlreadyExists))
+            Ok(()) => {
+                #[cfg(feature = "log")]
+                log::debug!(target: "netservices", "Connected to {}", addr);
             }
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-            Err(e) => return Err(e),
+            Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {
+                #[cfg(feature = "log")]
+                log::debug!(target: "netservices", "Connecting to {} in a non-blocking way", addr);
+            }
+            Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
+                #[cfg(feature = "log")]
+                log::error!(target: "netservices", "Can't connect to {}: address already in use", addr);
+                return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                #[cfg(feature = "log")]
+                log::error!(target: "netservices", "Can't connect to {} in a non-blocking way", addr);
+            }
+            Err(e) => {
+                #[cfg(feature = "log")]
+                log::debug!(target: "netservices", "Error connecting to {}: {}", addr, e);
+                return Err(e);
+            }
         }
         Ok(socket)
-    }
-
-    fn connect_socks5(addr: Self::Addr, proxy: SocketAddr) -> Result<Self, Socks5Error>
-    where
-        Self: Sized,
-    {
-        let me = Self::connect_nonblocking(proxy).map(net::TcpStream::from)?;
-        Socks5::from(me).connect(addr).map(socket2::Socket::from)
     }
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {

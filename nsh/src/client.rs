@@ -1,13 +1,15 @@
+use std::io::{self, Read, Write};
+
+use amplify::hex::ToHex;
 use cyphernet::crypto::ed25519::PrivateKey;
 use netservices::noise::NoiseXk;
 use netservices::socks5::Socks5Error;
 use netservices::tunnel::READ_BUFFER_SIZE;
 use netservices::NetSession;
-use std::io::{self, Read, Write};
 
 use crate::RemoteAddr;
 
-pub type NetTransport = netservices::NetTransport<NoiseXk<PrivateKey>>;
+pub type Transport = netservices::NetTransport<NoiseXk<PrivateKey>>;
 
 pub struct Response {
     client: Client,
@@ -29,7 +31,7 @@ impl<'a> Iterator for &'a mut Response {
 
 pub struct Client {
     buf: Vec<u8>,
-    session: NetTransport,
+    transport: Transport,
 }
 
 impl Client {
@@ -39,28 +41,32 @@ impl Client {
         // socks5_proxy: net::SocketAddr,
     ) -> Result<Self, Socks5Error> {
         // TODO: Do socks5 connection
-        let session = NetTransport::connect(remote_addr, ecdh)?;
+        let session = Transport::connect(remote_addr, ecdh, false)?;
         Ok(Self {
             buf: vec![0u8; READ_BUFFER_SIZE],
-            session,
+            transport: session,
         })
     }
 
     pub fn exec(mut self, command: String) -> io::Result<Response> {
-        self.session.write_all(command.as_bytes())?;
-        self.session.flush()?;
+        log::debug!(target: "nsh", "Sending command '{}'", command);
+        self.transport.write_all(command.as_bytes())?;
+        self.transport.flush()?;
         Ok(Response { client: self })
     }
 
     fn recv(&mut self) -> Option<Vec<u8>> {
-        return match self.session.read(&mut self.buf) {
-            Ok(len) => Some(self.buf[..len].to_vec()),
+        return match self.transport.read(&mut self.buf) {
+            Ok(len) => {
+                log::trace!(target: "nsh", "Got reply from the remote: {}", self.buf[..len].to_hex());
+                Some(self.buf[..len].to_vec())
+            }
             Err(err) if err.kind() == io::ErrorKind::ConnectionReset => None,
             Err(err) => None,
         };
     }
 
     pub fn disconnect(self) -> io::Result<()> {
-        self.session.disconnect()
+        self.transport.disconnect()
     }
 }
