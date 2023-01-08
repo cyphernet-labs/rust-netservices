@@ -161,12 +161,12 @@ where
     type PeerAddr = PeerAddr<Self::Id, S::Addr>;
     type TransitionAddr = XkAddr<Self::Id, S::Addr>;
 
-    fn accept(connection: S, context: &Self::Context) -> Self {
-        Self {
+    fn accept(connection: S, context: &Self::Context) -> io::Result<Self> {
+        Ok(Self {
             remote_addr: XkAddr::Partial(connection.remote_addr()),
             local_node: context.clone(),
             connection,
-        }
+        })
     }
 
     fn connect(peer_addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self> {
