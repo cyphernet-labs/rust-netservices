@@ -174,6 +174,7 @@ fn run() -> Result<(), AppError> {
             let mut stdout = io::stdout();
             let mut client = Client::connect(config.node_keys.ecdh(), remote_host)?;
             let mut printout = client.exec(remote_command)?;
+            eprintln!("Remote output >>>");
             for batch in &mut printout {
                 stdout.write_all(&batch)?;
             }
@@ -181,7 +182,7 @@ fn run() -> Result<(), AppError> {
             client = printout.complete();
             client.disconnect()?;
 
-            eprintln!("\nDone");
+            eprintln!("<<< done");
         }
     }
 

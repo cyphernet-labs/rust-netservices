@@ -94,7 +94,12 @@ impl reactor::Handler for Server {
                         return;
                     }
                 };
-                match Command::new(cmd).stdout(Stdio::piped()).output() {
+                match Command::new("sh")
+                    .arg("-c")
+                    .arg(cmd)
+                    .stdout(Stdio::piped())
+                    .output()
+                {
                     Ok(output) => {
                         log::debug!(target: "nsh", "Command executed successfully; {} bytes of output collected", output.stdout.len());
                         self.action_queue.push_back(Action::Send(id, output.stdout));
