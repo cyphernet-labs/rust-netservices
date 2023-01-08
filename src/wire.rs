@@ -341,12 +341,14 @@ where
     }
 
     fn interests(&self) -> IoType {
-        if self.state == TransportState::Terminated {
-            IoType::none()
-        } else if self.needs_flush {
-            IoType::read_write()
-        } else {
-            IoType::read_only()
+        match self.state {
+            // During the handshake we always want to write. Plus, even for
+            // zero handshake we still need a write interest for the connection
+            // establishment
+            TransportState::Handshake => IoType::read_write(),
+            TransportState::Terminated => IoType::none(),
+            TransportState::Active if self.needs_flush => IoType::read_write(),
+            TransportState::Active => IoType::read_only(),
         }
     }
 
