@@ -78,7 +78,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
         stream.set_read_timeout(Some(READ_TIMEOUT))?;
         stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
         stream.set_nonblocking(true)?;
-        Ok(S::accept(stream, &self.session_context))
+        S::accept(stream, &self.session_context)
     }
 }
 
@@ -143,56 +143,56 @@ impl<S: NetSession> NetSession for NetTransport<S> {
     type PeerAddr = S::PeerAddr;
     type TransitionAddr = S::TransitionAddr;
 
-    fn accept(connection: Self::Connection, context: &Self::Context) -> Self {
-        todo!()
+    fn accept(connection: Self::Connection, context: &Self::Context) -> io::Result<Self> {
+        S::accept(connection, context).and_then(NetTransport::accept)
     }
 
     fn connect(addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self> {
-        todo!()
+        NetTransport::connect(addr, context)
     }
 
     fn id(&self) -> Option<Self::Id> {
-        todo!()
+        self.session.id()
     }
 
     fn handshake_completed(&self) -> bool {
-        todo!()
+        self.session.handshake_completed()
     }
 
     fn transient_addr(&self) -> Self::TransitionAddr {
-        todo!()
+        self.session.transient_addr()
     }
 
     fn peer_addr(&self) -> Option<Self::PeerAddr> {
-        todo!()
+        self.session.peer_addr()
     }
 
     fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr {
-        todo!()
+        self.session.local_addr()
     }
 
     fn read_timeout(&self) -> io::Result<Option<Duration>> {
-        todo!()
+        self.session.read_timeout()
     }
 
     fn write_timeout(&self) -> io::Result<Option<Duration>> {
-        todo!()
+        self.session.write_timeout()
     }
 
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
-        todo!()
+        self.session.set_read_timeout(dur)
     }
 
     fn set_write_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
-        todo!()
+        self.session.set_write_timeout(dur)
     }
 
     fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()> {
-        todo!()
+        self.session.set_nonblocking(nonblocking)
     }
 
     fn disconnect(self) -> io::Result<()> {
-        todo!()
+        self.session.disconnect()
     }
 }
 
