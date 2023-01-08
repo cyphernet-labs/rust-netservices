@@ -13,7 +13,7 @@ use cyphernet::addr::{PeerAddr, ProxyError, SocketAddr};
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
 use netservices::socks5::Socks5Error;
 use nsh::client::Client;
-use nsh::service::{NodeKeys, Service};
+use nsh::server::{NodeKeys, Server};
 use nsh::shell::LogLevel;
 use nsh::RemoteAddr;
 use reactor::poller::popol;
@@ -160,7 +160,7 @@ fn run() -> Result<(), AppError> {
             println!("Listening on {} ...", socket_addr);
 
             // TODO: Listen on an address
-            let service = Service::bind(config.node_keys.ecdh().clone(), socket_addr)?;
+            let service = Server::bind(config.node_keys.ecdh().clone(), socket_addr)?;
             let reactor = Reactor::new(service, popol::Poller::new())?;
 
             reactor.join()?;

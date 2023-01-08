@@ -4,7 +4,7 @@ use std::os::fd::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
-use reactor::poller::Poll;
+use reactor::poller::{IoType, Poll};
 use reactor::{IoStatus, ReadNonblocking, WriteNonblocking};
 
 use crate::NetSession;
@@ -49,8 +49,8 @@ impl<S: NetSession> Tunnel<S> {
 
         let int_fd = stream.as_raw_fd();
         let ext_fd = self.session.as_raw_fd();
-        poller.register(&int_fd);
-        poller.register(&ext_fd);
+        poller.register(&int_fd, IoType::read_only());
+        poller.register(&ext_fd, IoType::read_only());
 
         let mut in_buf = VecDeque::<u8>::new();
         let mut out_buf = VecDeque::<u8>::new();
@@ -79,7 +79,7 @@ impl<S: NetSession> Tunnel<S> {
             }
             while let Some((fd, ev)) = poller.next() {
                 if fd == int_fd {
-                    if ev.is_writable {
+                    if ev.write {
                         handle!(
                             stream.write_nonblocking(in_buf.make_contiguous()),
                             |written| {
@@ -89,13 +89,13 @@ impl<S: NetSession> Tunnel<S> {
                             }
                         );
                     }
-                    if ev.is_readable {
+                    if ev.read {
                         handle!(stream.read_nonblocking(&mut buf), |read| {
                             out_buf.extend(&buf[..read]);
                         });
                     }
                 } else if fd == ext_fd {
-                    if ev.is_writable {
+                    if ev.write {
                         handle!(
                             self.session.write_nonblocking(out_buf.make_contiguous()),
                             |written| {
@@ -105,7 +105,7 @@ impl<S: NetSession> Tunnel<S> {
                             }
                         );
                     }
-                    if ev.is_readable {
+                    if ev.read {
                         handle!(self.session.read_nonblocking(&mut buf), |read| {
                             in_buf.extend(&buf[..read]);
                         });

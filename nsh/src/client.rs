@@ -57,12 +57,22 @@ impl Client {
 
     fn recv(&mut self) -> Option<Vec<u8>> {
         return match self.transport.read(&mut self.buf) {
+            Ok(0) => {
+                log::warn!(target: "nsh", "Connection reset with {}", self.transport.expect_peer_id());
+                None
+            }
+            Err(err) if err.kind() == io::ErrorKind::ConnectionReset => {
+                log::warn!(target: "nsh", "Connection reset with {}", self.transport.expect_peer_id());
+                None
+            }
             Ok(len) => {
                 log::trace!(target: "nsh", "Got reply from the remote: {}", self.buf[..len].to_hex());
                 Some(self.buf[..len].to_vec())
             }
-            Err(err) if err.kind() == io::ErrorKind::ConnectionReset => None,
-            Err(err) => None,
+            Err(err) => {
+                log::error!(target: "nsh", "Error from the remote: {err}");
+                None
+            }
         };
     }
 
