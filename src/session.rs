@@ -19,7 +19,7 @@ pub trait NetSession: StreamNonblocking + SplitIo + AsRawFd + Send + Sized {
     /// Address which combines what is known for both incoming and outgoing connections.
     type TransitionAddr: Addr;
 
-    fn accept(connection: Self::Connection, context: &Self::Context) -> Self;
+    fn accept(connection: Self::Connection, context: &Self::Context) -> io::Result<Self>;
     fn connect(addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self>;
 
     fn id(&self) -> Option<Self::Id>;
@@ -52,8 +52,8 @@ impl NetSession for net::TcpStream {
     type PeerAddr = net::SocketAddr;
     type TransitionAddr = net::SocketAddr;
 
-    fn accept(connection: Self::Connection, _context: &Self::Context) -> Self {
-        connection
+    fn accept(connection: Self::Connection, _context: &Self::Context) -> io::Result<Self> {
+        Ok(connection)
     }
 
     fn connect(addr: Self::PeerAddr, _context: &Self::Context) -> io::Result<Self> {
@@ -113,8 +113,8 @@ impl NetSession for socket2::Socket {
     type PeerAddr = net::SocketAddr;
     type TransitionAddr = net::SocketAddr;
 
-    fn accept(connection: Self::Connection, _context: &Self::Context) -> Self {
-        connection
+    fn accept(connection: Self::Connection, _context: &Self::Context) -> io::Result<Self> {
+        Ok(connection)
     }
 
     fn connect(addr: Self::PeerAddr, _context: &Self::Context) -> io::Result<Self> {

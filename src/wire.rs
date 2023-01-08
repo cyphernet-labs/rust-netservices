@@ -78,7 +78,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
         stream.set_read_timeout(Some(READ_TIMEOUT))?;
         stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
         stream.set_nonblocking(true)?;
-        Ok(S::accept(stream, &self.session_context))
+        S::accept(stream, &self.session_context)
     }
 }
 
@@ -143,8 +143,8 @@ impl<S: NetSession> NetSession for NetTransport<S> {
     type PeerAddr = S::PeerAddr;
     type TransitionAddr = S::TransitionAddr;
 
-    fn accept(connection: Self::Connection, context: &Self::Context) -> Self {
-        todo!()
+    fn accept(connection: Self::Connection, context: &Self::Context) -> io::Result<Self> {
+        S::accept(connection, context).and_then(NetTransport::accept)
     }
 
     fn connect(addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self> {
