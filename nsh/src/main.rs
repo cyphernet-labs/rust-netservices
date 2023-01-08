@@ -1,11 +1,14 @@
 #[macro_use]
 extern crate amplify;
+#[macro_use]
+extern crate clap;
 
 use std::any::Any;
 use std::io::Write;
 use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::str::FromStr;
 use std::time::Duration;
 use std::{fs, io, net};
 
@@ -16,6 +19,7 @@ use netservices::socks5::Socks5Error;
 use netservices::tunnel::Tunnel;
 use netservices::NetSession;
 use nsh::client::Client;
+use nsh::command::Command;
 use nsh::rsh::RemoteShell;
 use nsh::server::{NodeKeys, Server};
 use nsh::shell::LogLevel;
@@ -72,10 +76,10 @@ struct Args {
 
     /// Command to execute on the remote host
     #[arg(conflicts_with_all = ["listen", "tunnel"], required_unless_present_any = ["listen", "tunnel"])]
-    pub command: Option<String>,
+    pub command: Option<Command>,
 }
 
-enum Command {
+enum Mode {
     Listen(net::SocketAddr),
     Tunnel {
         local: String,
@@ -83,13 +87,13 @@ enum Command {
     },
     Connect {
         remote_host: RemoteAddr,
-        remote_command: String,
+        remote_command: Command,
     },
 }
 
 struct Config {
     pub node_keys: NodeKeys,
-    pub command: Command,
+    pub mode: Mode,
 }
 
 #[derive(Debug, Display, Error, From)]
@@ -124,21 +128,21 @@ impl TryFrom<Args> for Config {
     fn try_from(args: Args) -> Result<Self, Self::Error> {
         let command = if let Some(listen) = args.listen {
             let local_socket = listen.unwrap_or_else(SocketAddr::localhost).into();
-            Command::Listen(local_socket)
+            Mode::Listen(local_socket)
         } else if let Some(tunnel) = args.tunnel {
             let local = tunnel
                 .unwrap_or_else(|| SocketAddr::<DEFAULT_PORT>::localhost().to_string())
                 .into();
             let remote = args.remote_host.expect("clap library broken");
-            Command::Tunnel {
+            Mode::Tunnel {
                 local,
                 remote: remote.into(),
             }
         } else {
             let remote_host = args.remote_host.expect("clap library broken");
-            Command::Connect {
+            Mode::Connect {
                 remote_host: remote_host.into(),
-                remote_command: args.command.unwrap_or_else(|| s!("bash")),
+                remote_command: args.command.unwrap_or(Command::ECHO),
             }
         };
 
@@ -169,7 +173,10 @@ impl TryFrom<Args> for Config {
         let node_keys = NodeKeys::from(id);
         println!("Using identity {}", node_keys.pk());
 
-        Ok(Config { node_keys, command })
+        Ok(Config {
+            node_keys,
+            mode: command,
+        })
     }
 }
 
@@ -180,8 +187,8 @@ fn run() -> Result<(), AppError> {
 
     let config = Config::try_from(args)?;
 
-    match config.command {
-        Command::Listen(socket_addr) => {
+    match config.mode {
+        Mode::Listen(socket_addr) => {
             println!("Listening on {socket_addr} ...");
 
             // TODO: Listen on an address
@@ -191,7 +198,7 @@ fn run() -> Result<(), AppError> {
 
             reactor.join()?;
         }
-        Command::Tunnel { remote, local } => {
+        Mode::Tunnel { remote, local } => {
             eprintln!("Tunneling to {remote} from {local}...");
 
             let session = Transport::connect(remote, config.node_keys.ecdh(), false)?;
@@ -205,7 +212,7 @@ fn run() -> Result<(), AppError> {
             let _ = tunnel.tunnel_once(popol::Poller::new(), Duration::from_secs(10))?;
             tunnel.into_session().disconnect()?;
         }
-        Command::Connect {
+        Mode::Connect {
             remote_host,
             remote_command,
         } => {

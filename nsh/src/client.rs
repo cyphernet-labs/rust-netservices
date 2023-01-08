@@ -7,6 +7,7 @@ use netservices::socks5::Socks5Error;
 use netservices::tunnel::READ_BUFFER_SIZE;
 use netservices::NetSession;
 
+use crate::command::Command;
 use crate::RemoteAddr;
 
 pub type Transport = netservices::NetTransport<NoiseXk<PrivateKey>>;
@@ -48,9 +49,9 @@ impl Client {
         })
     }
 
-    pub fn exec(mut self, command: String) -> io::Result<Response> {
+    pub fn exec(mut self, command: Command) -> io::Result<Response> {
         log::debug!(target: "nsh", "Sending command '{}'", command);
-        self.transport.write_all(command.as_bytes())?;
+        self.transport.write_all(command.to_string().as_bytes())?;
         self.transport.flush()?;
         Ok(Response { client: self })
     }
