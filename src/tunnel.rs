@@ -4,7 +4,7 @@ use std::os::fd::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
-use reactor::poller::Poll;
+use reactor::poller::{IoType, Poll};
 use reactor::{IoStatus, ReadNonblocking, WriteNonblocking};
 
 use crate::NetSession;
@@ -49,8 +49,8 @@ impl<S: NetSession> Tunnel<S> {
 
         let int_fd = stream.as_raw_fd();
         let ext_fd = self.session.as_raw_fd();
-        poller.register(&int_fd);
-        poller.register(&ext_fd);
+        poller.register(&int_fd, IoType::read_write());
+        poller.register(&ext_fd, IoType::read_write());
 
         let mut in_buf = VecDeque::<u8>::new();
         let mut out_buf = VecDeque::<u8>::new();

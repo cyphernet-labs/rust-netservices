@@ -33,7 +33,7 @@ impl reactor::Handler for Service {
 
     fn tick(&mut self, time: Instant) {
         let time = time.elapsed().as_micros();
-        log::trace!(target: "transport", "[{time}] reactor ticks");
+        log::trace!(target: "transport", "reactor ticks at {time}");
     }
 
     fn handle_wakeup(&mut self) {

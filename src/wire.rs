@@ -5,7 +5,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 use std::{io, net};
 
-use reactor::poller::IoEv;
+use reactor::poller::IoType;
 use reactor::{Io, IoStatus, ReadNonblocking, Resource, WriteNonblocking};
 
 use crate::{NetConnection, NetListener, NetSession};
@@ -90,8 +90,8 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAcce
         self.listener.local_addr()
     }
 
-    fn interests(&self) -> IoEv {
-        IoEv::read_only()
+    fn interests(&self) -> IoType {
+        IoType::read_only()
     }
 
     fn handle_io(&mut self, io: Io) -> Option<Self::Event> {
@@ -328,11 +328,11 @@ where
         self.session.as_raw_fd()
     }
 
-    fn interests(&self) -> IoEv {
+    fn interests(&self) -> IoType {
         if self.needs_flush {
-            IoEv::read_write()
+            IoType::read_write()
         } else {
-            IoEv::read_only()
+            IoType::read_only()
         }
     }
 
