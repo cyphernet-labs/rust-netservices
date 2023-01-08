@@ -39,7 +39,7 @@ impl Client {
         // socks5_proxy: net::SocketAddr,
     ) -> Result<Self, Socks5Error> {
         // TODO: Do socks5 connection
-        let session = NetTransport::connect(remote_addr.into_remote_addr(), ecdh)?;
+        let session = NetTransport::connect(remote_addr, ecdh)?;
         Ok(Self {
             buf: vec![0u8; READ_BUFFER_SIZE],
             session,

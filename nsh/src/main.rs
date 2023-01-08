@@ -5,10 +5,11 @@ use std::any::Any;
 use std::io::Write;
 use std::os::fd::RawFd;
 use std::path::PathBuf;
+use std::process::ExitCode;
 use std::{fs, io, net};
 
 use clap::Parser;
-use cyphernet::addr::{PeerAddr, ProxyError, SocketAddr, UniversalAddr};
+use cyphernet::addr::{PeerAddr, ProxyError, SocketAddr};
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
 use netservices::socks5::Socks5Error;
 use nsh::client::Client;
@@ -57,7 +58,7 @@ struct Args {
     /// argument, or as a prefix to the remote host address here, in form of
     /// `socks5h://<proxy_address>/<remote_host>`.
     #[arg(conflicts_with = "listen", required_unless_present = "listen")]
-    pub remote_host: Option<UniversalAddr<PeerAddr<PublicKey, SocketAddr<DEFAULT_PORT>>>>,
+    pub remote_host: Option<PeerAddr<PublicKey, SocketAddr<DEFAULT_PORT>>>,
 
     /// Command to execute on the remote host
     #[arg(conflicts_with = "listen", required_unless_present = "listen")]
@@ -108,10 +109,7 @@ impl TryFrom<Args> for Config {
             let local_socket = listen.unwrap_or_else(SocketAddr::localhost).into();
             Command::Listen(local_socket)
         } else {
-            let mut remote_host = args.remote_host.expect("clap library broken");
-            if let Some(proxy) = args.socks5 {
-                remote_host = remote_host.try_proxy(proxy.into())?;
-            }
+            let remote_host = args.remote_host.expect("clap library broken");
             Command::Connect {
                 remote_host: remote_host.into(),
                 remote_command: args.command.unwrap_or_else(|| s!("bash")),
@@ -124,17 +122,32 @@ impl TryFrom<Args> for Config {
             dir
         });
         let id_path = shellexpand::tilde(&id_path.to_string_lossy()).to_string();
-        let id_pem = fs::read_to_string(id_path)?;
+        let id_pem = fs::read_to_string(&id_path).or_else(|err| {
+            if err.kind() == io::ErrorKind::NotFound {
+                println!(
+                    "Identity file not found; creating new identity in '{}'",
+                    id_path
+                );
+                let pair = ::ed25519_compact::KeyPair::generate();
+                let pem = pair.sk.to_pem();
+                let mut dir = PathBuf::from(&id_path);
+                dir.pop();
+                fs::create_dir_all(dir)?;
+                fs::write(id_path, &pem)?;
+                Ok(pem)
+            } else {
+                Err(err)
+            }
+        })?;
         let id = PrivateKey::from_pem(&id_pem)?;
+        let node_keys = NodeKeys::from(id);
+        println!("Using identity {}", node_keys.pk());
 
-        Ok(Config {
-            node_keys: NodeKeys::from(id),
-            command,
-        })
+        Ok(Config { node_keys, command })
     }
 }
 
-fn main() -> Result<(), AppError> {
+fn run() -> Result<(), AppError> {
     let args = Args::parse();
 
     let config = Config::try_from(args)?;
@@ -169,4 +182,14 @@ fn main() -> Result<(), AppError> {
     }
 
     Ok(())
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("Error: {}", err);
+            ExitCode::FAILURE
+        }
+    }
 }

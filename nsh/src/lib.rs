@@ -9,5 +9,5 @@ use std::net;
 pub mod client;
 pub mod service;
 
-pub type RemoteAddr = UniversalAddr<PeerAddr<PublicKey, net::SocketAddr>>;
+pub type RemoteAddr = PeerAddr<PublicKey, net::SocketAddr>;
 pub type NetTransport = netservices::NetTransport<NoiseXk<PrivateKey>>;
