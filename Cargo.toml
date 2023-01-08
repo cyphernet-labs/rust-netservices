@@ -11,6 +11,7 @@ cyphernet = { version = "0.1.0", features = ["ed25519", "pem"] }
 mio = { version = "0.8.5", optional = true }
 socket2 = { version = "0.4.7", optional = true }
 libc = "0.2.138"
+log = { version = "0.4.17", optional = true }
 
 [dev-dependencies]
 cyphernet = { version = "0.1.0", features = ["ed25519", "rand"] }
@@ -19,6 +20,7 @@ log = "0.4.17"
 
 [features]
 default = ["io-reactor", "socket2"]
+all = ["io-reactor", "re-actor", "mio", "socket2", "log"]
 
 [patch.crates-io]
 cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet" }

@@ -147,8 +147,12 @@ impl<S: NetSession> NetSession for NetTransport<S> {
         S::accept(connection, context).and_then(NetTransport::accept)
     }
 
-    fn connect(addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self> {
-        NetTransport::connect(addr, context)
+    fn connect(
+        addr: Self::PeerAddr,
+        context: &Self::Context,
+        nonblocking: bool,
+    ) -> io::Result<Self> {
+        NetTransport::connect(addr, context, nonblocking)
     }
 
     fn id(&self) -> Option<Self::Id> {
@@ -200,7 +204,6 @@ impl<S: NetSession> NetTransport<S> {
     fn upgrade(mut session: S, inbound: bool) -> io::Result<Self> {
         session.set_read_timeout(Some(READ_TIMEOUT))?;
         session.set_write_timeout(Some(WRITE_TIMEOUT))?;
-        session.set_nonblocking(true)?;
         Ok(Self {
             state: TransportState::Handshake,
             session,
@@ -213,8 +216,9 @@ impl<S: NetSession> NetTransport<S> {
         Self::upgrade(session, true)
     }
 
-    pub fn connect(addr: S::PeerAddr, context: &S::Context) -> io::Result<Self> {
-        let session = S::connect(addr, context)?;
+    pub fn connect(addr: S::PeerAddr, context: &S::Context, nonblocking: bool) -> io::Result<Self> {
+        let mut session = S::connect(addr, context, nonblocking)?;
+        session.set_nonblocking(nonblocking)?;
         let mut me = Self::upgrade(session, true)?;
         me.inbound = false;
         Ok(me)

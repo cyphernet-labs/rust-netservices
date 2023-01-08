@@ -169,8 +169,12 @@ where
         })
     }
 
-    fn connect(peer_addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self> {
-        let socket = S::connect_nonblocking(peer_addr.addr().clone())?;
+    fn connect(
+        peer_addr: Self::PeerAddr,
+        context: &Self::Context,
+        nonblocking: bool,
+    ) -> io::Result<Self> {
+        let socket = S::connect(peer_addr.addr().clone(), nonblocking)?;
         Ok(Self {
             remote_addr: XkAddr::Full(peer_addr),
             local_node: context.clone(),
