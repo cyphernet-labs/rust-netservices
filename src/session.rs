@@ -20,7 +20,11 @@ pub trait NetSession: StreamNonblocking + SplitIo + AsRawFd + Send + Sized {
     type TransitionAddr: Addr;
 
     fn accept(connection: Self::Connection, context: &Self::Context) -> io::Result<Self>;
-    fn connect(addr: Self::PeerAddr, context: &Self::Context) -> io::Result<Self>;
+    fn connect(
+        addr: Self::PeerAddr,
+        context: &Self::Context,
+        nonblocking: bool,
+    ) -> io::Result<Self>;
 
     fn id(&self) -> Option<Self::Id>;
     fn expect_id(&self) -> Self::Id {
@@ -56,8 +60,12 @@ impl NetSession for net::TcpStream {
         Ok(connection)
     }
 
-    fn connect(addr: Self::PeerAddr, _context: &Self::Context) -> io::Result<Self> {
-        Self::connect_nonblocking(addr)
+    fn connect(
+        addr: Self::PeerAddr,
+        _context: &Self::Context,
+        nonblocking: bool,
+    ) -> io::Result<Self> {
+        NetConnection::connect(addr, nonblocking)
     }
 
     fn id(&self) -> Option<Self::Id> {
@@ -117,8 +125,12 @@ impl NetSession for socket2::Socket {
         Ok(connection)
     }
 
-    fn connect(addr: Self::PeerAddr, _context: &Self::Context) -> io::Result<Self> {
-        Self::connect_nonblocking(addr)
+    fn connect(
+        addr: Self::PeerAddr,
+        _context: &Self::Context,
+        nonblocking: bool,
+    ) -> io::Result<Self> {
+        NetConnection::connect(addr, nonblocking)
     }
 
     fn id(&self) -> Option<Self::Id> {
