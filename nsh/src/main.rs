@@ -1,14 +1,11 @@
 #[macro_use]
 extern crate amplify;
-#[macro_use]
-extern crate clap;
 
 use std::any::Any;
 use std::io::Write;
 use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::str::FromStr;
 use std::time::Duration;
 use std::{fs, io, net};
 
@@ -20,7 +17,7 @@ use netservices::tunnel::Tunnel;
 use netservices::NetSession;
 use nsh::client::Client;
 use nsh::command::Command;
-use nsh::rsh::RemoteShell;
+use nsh::processor::Processor;
 use nsh::server::{NodeKeys, Server};
 use nsh::shell::LogLevel;
 use nsh::{RemoteAddr, Transport};
@@ -192,8 +189,7 @@ fn run() -> Result<(), AppError> {
             println!("Listening on {socket_addr} ...");
 
             // TODO: Listen on an address
-            let service =
-                Server::<RemoteShell>::bind(config.node_keys.ecdh().clone(), socket_addr)?;
+            let service = Server::<Processor>::bind(config.node_keys.ecdh().clone(), socket_addr)?;
             let reactor = Reactor::new(service, popol::Poller::new())?;
 
             reactor.join()?;

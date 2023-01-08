@@ -10,7 +10,7 @@ use std::net;
 
 pub mod client;
 pub mod command;
-pub mod rsh;
+pub mod processor;
 pub mod server;
 pub mod shell;
 

@@ -16,22 +16,24 @@ pub type NodeKeys = netservices::noise::NodeKeys<PrivateKey>;
 
 pub trait Delegate: Default + Send {
     fn new_client(&mut self, id: RawFd, key: PublicKey) -> Vec<Action>;
-    fn input(&mut self, id: RawFd, data: Vec<u8>) -> Vec<Action>;
+    fn input(&mut self, id: RawFd, data: Vec<u8>, ecdh: &PrivateKey) -> Vec<Action>;
 }
 
 pub struct Server<D: Delegate> {
     action_queue: VecDeque<Action>,
     delegate: D,
+    ecdh: PrivateKey,
 }
 
 impl<D: Delegate> Server<D> {
     pub fn bind(ecdh: PrivateKey, listen: net::SocketAddr) -> io::Result<Self> {
         let mut action_queue = VecDeque::new();
-        let listener = Accept::bind(listen, ecdh)?;
+        let listener = Accept::bind(listen, ecdh.clone())?;
         action_queue.push_back(Action::RegisterListener(listener));
         Ok(Self {
             action_queue,
             delegate: D::default(),
+            ecdh,
         })
     }
 }
@@ -91,7 +93,8 @@ impl<D: Delegate> reactor::Handler for Server<D> {
             }
             SessionEvent::Data(data) => {
                 log::trace!(target: "server", "Incoming data {data:?}");
-                self.action_queue.extend(self.delegate.input(id, data));
+                self.action_queue
+                    .extend(self.delegate.input(id, data, &self.ecdh));
             }
             SessionEvent::Terminated(err) => {
                 log::error!(target: "server", "Connection with {id} is terminated due to an error {err}");
