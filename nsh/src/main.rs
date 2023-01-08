@@ -156,14 +156,13 @@ fn main() -> Result<(), AppError> {
             eprintln!("Connecting to {} ...", remote_host);
 
             let mut client = Client::connect(config.node_keys.ecdh(), remote_host)?;
-            {
-                let printout = client.exec(remote_command);
-                let mut stdout = io::stdout();
-                for batch in printout {
-                    stdout.write_all(&batch)?;
-                }
+            let mut printout = client.exec(remote_command)?;
+            let mut stdout = io::stdout();
+            for batch in &mut printout {
+                stdout.write_all(&batch)?;
             }
-            client.disconnect();
+            client = printout.complete();
+            client.disconnect()?;
 
             eprintln!("Done");
         }

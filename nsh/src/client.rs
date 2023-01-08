@@ -3,8 +3,7 @@ use netservices::noise::NoiseXk;
 use netservices::socks5::Socks5Error;
 use netservices::tunnel::READ_BUFFER_SIZE;
 use netservices::NetSession;
-use std::io::{Read, Write};
-use std::{io, net};
+use std::io::{self, Read, Write};
 
 use crate::RemoteAddr;
 
@@ -20,7 +19,7 @@ impl Response {
     }
 }
 
-impl Iterator for Response {
+impl<'a> Iterator for &'a mut Response {
     type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -37,7 +36,7 @@ impl Client {
     pub fn connect(
         ecdh: &PrivateKey,
         remote_addr: RemoteAddr,
-        socks5_proxy: net::SocketAddr,
+        // socks5_proxy: net::SocketAddr,
     ) -> Result<Self, Socks5Error> {
         // TODO: Do socks5 connection
         let session = NetTransport::connect(remote_addr.into_remote_addr(), ecdh)?;
