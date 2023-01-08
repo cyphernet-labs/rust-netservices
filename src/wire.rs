@@ -219,9 +219,7 @@ impl<S: NetSession> NetTransport<S> {
     pub fn connect(addr: S::PeerAddr, context: &S::Context, nonblocking: bool) -> io::Result<Self> {
         let mut session = S::connect(addr, context, nonblocking)?;
         session.set_nonblocking(nonblocking)?;
-        let mut me = Self::upgrade(session, true)?;
-        me.inbound = false;
-        Ok(me)
+        Self::upgrade(session, false)
     }
 
     pub fn is_inbound(&self) -> bool {
