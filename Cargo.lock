@@ -613,7 +613,7 @@ dependencies = [
 [[package]]
 name = "popol"
 version = "1.0.0"
-source = "git+https://github.com/Internet2-WG/popol?branch=api#02b8d4089bd234f3d9d46ef27f6e64cfbc45118a"
+source = "git+https://github.com/Cyphernet-WG/popol?branch=api#02b8d4089bd234f3d9d46ef27f6e64cfbc45118a"
 dependencies = [
  "libc",
 ]
