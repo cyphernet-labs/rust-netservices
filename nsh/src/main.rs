@@ -6,16 +6,20 @@ use std::io::Write;
 use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 use std::{fs, io, net};
 
 use clap::Parser;
 use cyphernet::addr::{PeerAddr, ProxyError, SocketAddr};
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
 use netservices::socks5::Socks5Error;
+use netservices::tunnel::Tunnel;
+use netservices::NetSession;
 use nsh::client::Client;
+use nsh::rsh::RemoteShell;
 use nsh::server::{NodeKeys, Server};
 use nsh::shell::LogLevel;
-use nsh::RemoteAddr;
+use nsh::{RemoteAddr, Transport};
 use reactor::poller::popol;
 use reactor::Reactor;
 
@@ -23,7 +27,7 @@ pub const DEFAULT_PORT: u16 = 3232;
 pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
 
 pub const DEFAULT_DIR: &'static str = "~/.nsh";
-pub const DEFAULT_ID_FILE: &'static str = "id_ed25519";
+pub const DEFAULT_ID_FILE: &'static str = "ssi_ed25519";
 
 #[derive(Clone, Debug, Parser)]
 #[command(author, version, about)]
@@ -34,7 +38,7 @@ struct Args {
 
     /// Start as a daemon listening on a specific socket.
     ///
-    /// If the socket address is not given, defaults to 127.0.0.1.
+    /// If the socket address is not given, defaults to 127.0.0.1:3232
     #[arg(short, long)]
     pub listen: Option<Option<SocketAddr<DEFAULT_PORT>>>,
 
@@ -44,8 +48,15 @@ struct Args {
 
     /// SOCKS5 proxy, as IPv4 or IPv6 socket. If port is not given, it defaults
     /// to 9050.
-    #[arg(short = '5', long, conflicts_with = "listen")]
-    pub socks5: Option<SocketAddr<DEFAULT_SOCKS5_PORT>>,
+    #[arg(short = 'p', long, conflicts_with = "listen")]
+    pub proxy: Option<SocketAddr<DEFAULT_SOCKS5_PORT>>,
+
+    /// Tunneling mode: listens on a provided address and tunnels all incoming
+    /// connections to the `REMOTE_HOST`.
+    ///
+    /// If the socket address is not given, defaults to 127.0.0.1.
+    #[arg(short, long, conflicts_with = "listen")]
+    pub tunnel: Option<Option<String>>,
 
     /// Address of the remote host to connect.
     ///
@@ -55,19 +66,21 @@ struct Args {
     /// address supported by the specific proxy, for instance Tor, I2P or
     /// Nym address.
     ///
-    /// If SOCKS5 proxy is used, either it has to be provided as `--socks5`
-    /// argument, or as a prefix to the remote host address here, in form of
-    /// `socks5h://<proxy_address>/<remote_host>`.
+    /// If the address is provided without a port, a default port 3232 is used.
     #[arg(conflicts_with = "listen", required_unless_present = "listen")]
     pub remote_host: Option<PeerAddr<PublicKey, SocketAddr<DEFAULT_PORT>>>,
 
     /// Command to execute on the remote host
-    #[arg(conflicts_with = "listen", required_unless_present = "listen")]
+    #[arg(conflicts_with_all = ["listen", "tunnel"], required_unless_present_any = ["listen", "tunnel"])]
     pub command: Option<String>,
 }
 
 enum Command {
     Listen(net::SocketAddr),
+    Tunnel {
+        local: String,
+        remote: RemoteAddr,
+    },
     Connect {
         remote_host: RemoteAddr,
         remote_command: String,
@@ -100,6 +113,9 @@ pub enum AppError {
     #[from]
     #[display("error creating thread")]
     Thread(Box<dyn Any + Send>),
+
+    #[display("unable to construct tunnel with {0}: {1}")]
+    Tunnel(RemoteAddr, io::Error),
 }
 
 impl TryFrom<Args> for Config {
@@ -109,6 +125,15 @@ impl TryFrom<Args> for Config {
         let command = if let Some(listen) = args.listen {
             let local_socket = listen.unwrap_or_else(SocketAddr::localhost).into();
             Command::Listen(local_socket)
+        } else if let Some(tunnel) = args.tunnel {
+            let local = tunnel
+                .unwrap_or_else(|| SocketAddr::<DEFAULT_PORT>::localhost().to_string())
+                .into();
+            let remote = args.remote_host.expect("clap library broken");
+            Command::Tunnel {
+                local,
+                remote: remote.into(),
+            }
         } else {
             let remote_host = args.remote_host.expect("clap library broken");
             Command::Connect {
@@ -157,19 +182,34 @@ fn run() -> Result<(), AppError> {
 
     match config.command {
         Command::Listen(socket_addr) => {
-            println!("Listening on {} ...", socket_addr);
+            println!("Listening on {socket_addr} ...");
 
             // TODO: Listen on an address
-            let service = Server::bind(config.node_keys.ecdh().clone(), socket_addr)?;
+            let service =
+                Server::<RemoteShell>::bind(config.node_keys.ecdh().clone(), socket_addr)?;
             let reactor = Reactor::new(service, popol::Poller::new())?;
 
             reactor.join()?;
+        }
+        Command::Tunnel { remote, local } => {
+            eprintln!("Tunneling to {remote} from {local}...");
+
+            let session = Transport::connect(remote, config.node_keys.ecdh(), false)?;
+            let mut tunnel = match Tunnel::with(session, local) {
+                Ok(tunnel) => tunnel,
+                Err((session, err)) => {
+                    session.disconnect()?;
+                    return Err(AppError::Tunnel(remote, err));
+                }
+            };
+            let _ = tunnel.tunnel_once(popol::Poller::new(), Duration::from_secs(10))?;
+            tunnel.into_session().disconnect()?;
         }
         Command::Connect {
             remote_host,
             remote_command,
         } => {
-            eprintln!("Connecting to {} ...", remote_host);
+            eprintln!("Connecting to {remote_host} ...");
 
             let mut stdout = io::stdout();
             let mut client = Client::connect(config.node_keys.ecdh(), remote_host)?;

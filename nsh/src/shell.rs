@@ -122,17 +122,6 @@ impl LogLevel {
     }
 }
 
-/// Marker trait that can be implemented for data structures used by `Clap` or
-/// by any other form of API handling.
-pub trait Exec {
-    /// Runtime context data type, that is provided for execution context.
-    type Client: Sized;
-    /// Error type that may result from the execution
-    type Error: std::error::Error;
-    /// Main execution routine
-    fn exec(self, client: &mut Self::Client) -> Result<(), Self::Error>;
-}
-
 /// Sets up command-line environment by assigning verbosity level to the logger
 /// and replacing `{data_dir}` and `pat.0` components with the provided
 /// `data_dir` and `pat.1` values. Also replaces the same patterns in the list
@@ -143,7 +132,7 @@ pub trait Exec {
 /// # Panics
 ///
 /// Panics if the `data_dir` can't be created.
-pub fn shell_setup<'endpoints>(verbosity: u8, data_dir: &mut PathBuf, pat: &[(&str, String)]) {
+pub fn shell_setup(verbosity: u8, data_dir: &mut PathBuf, pat: &[(&str, String)]) {
     LogLevel::from_verbosity_flag_count(verbosity).apply();
 
     let mut data_dir_s = data_dir.display().to_string();
@@ -151,7 +140,6 @@ pub fn shell_setup<'endpoints>(verbosity: u8, data_dir: &mut PathBuf, pat: &[(&s
         data_dir_s = data_dir_s.replace(from, to);
     }
     *data_dir = PathBuf::from(shellexpand::tilde(&data_dir_s).to_string());
-    let data_dir_s = data_dir.display().to_string();
 
     fs::create_dir_all(&data_dir)
         .unwrap_or_else(|_| panic!("Unable to access data directory '{}'", data_dir.display()));
