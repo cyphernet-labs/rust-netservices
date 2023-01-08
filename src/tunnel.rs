@@ -17,8 +17,11 @@ pub struct Tunnel<S: NetSession> {
 }
 
 impl<S: NetSession> Tunnel<S> {
-    pub fn with(session: S, addr: impl net::ToSocketAddrs) -> io::Result<Self> {
-        let listener = net::TcpListener::bind(addr)?;
+    pub fn with(session: S, addr: impl net::ToSocketAddrs) -> Result<Self, (S, io::Error)> {
+        let listener = match net::TcpListener::bind(addr) {
+            Err(err) => return Err((session, err)),
+            Ok(listener) => listener,
+        };
         Ok(Self { listener, session })
     }
 
