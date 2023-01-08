@@ -14,6 +14,7 @@ use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
 use netservices::socks5::Socks5Error;
 use nsh::client::Client;
 use nsh::service::{NodeKeys, Service};
+use nsh::shell::LogLevel;
 use nsh::RemoteAddr;
 use reactor::poller::popol;
 use reactor::Reactor;
@@ -149,6 +150,8 @@ impl TryFrom<Args> for Config {
 
 fn run() -> Result<(), AppError> {
     let args = Args::parse();
+
+    LogLevel::from_verbosity_flag_count(args.verbose).apply();
 
     let config = Config::try_from(args)?;
 
