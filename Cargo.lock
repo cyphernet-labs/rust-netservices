@@ -439,6 +439,7 @@ dependencies = [
  "crossbeam-channel",
  "epoll",
  "libc",
+ "log",
  "mio",
  "polling",
  "popol",
