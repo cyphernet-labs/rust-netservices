@@ -48,6 +48,7 @@ impl Client {
 
     pub fn exec(mut self, command: String) -> io::Result<Response> {
         self.session.write_all(command.as_bytes())?;
+        self.session.flush()?;
         Ok(Response { client: self })
     }
 
