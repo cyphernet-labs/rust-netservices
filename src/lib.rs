@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate amplify;
+extern crate log_crate as log;
 
 #[cfg(feature = "re-actor")]
 pub mod actors;
