@@ -50,6 +50,10 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> WriteNonblocking for
         panic!("must not write to network listener")
     }
 
+    fn can_write(&self) -> bool {
+        true
+    }
+
     fn write_nonblocking(&mut self, buf: &[u8]) -> IoStatus {
         panic!("must not write to network listener")
     }
@@ -118,6 +122,7 @@ pub enum SessionEvent<S: NetSession> {
 
 #[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub enum TransportState {
+    Init,
     Handshake,
     Active,
     Terminated,
@@ -143,7 +148,7 @@ impl<S: NetSession> NetSession for NetTransport<S> {
     type Connection = S::Connection;
     type Id = S::Id;
     type PeerAddr = S::PeerAddr;
-    type TransitionAddr = S::TransitionAddr;
+    type TransientAddr = S::TransientAddr;
 
     fn accept(connection: Self::Connection, context: &Self::Context) -> io::Result<Self> {
         S::accept(connection, context).and_then(NetTransport::accept)
@@ -165,7 +170,7 @@ impl<S: NetSession> NetSession for NetTransport<S> {
         self.session.handshake_completed()
     }
 
-    fn transient_addr(&self) -> Self::TransitionAddr {
+    fn transient_addr(&self) -> Self::TransientAddr {
         self.session.transient_addr()
     }
 
@@ -203,11 +208,11 @@ impl<S: NetSession> NetSession for NetTransport<S> {
 }
 
 impl<S: NetSession> NetTransport<S> {
-    fn upgrade(mut session: S, inbound: bool) -> io::Result<Self> {
+    fn with(mut session: S, inbound: bool, state: TransportState) -> io::Result<Self> {
         session.set_read_timeout(Some(READ_TIMEOUT))?;
         session.set_write_timeout(Some(WRITE_TIMEOUT))?;
         Ok(Self {
-            state: TransportState::Handshake,
+            state,
             session,
             inbound,
             needs_flush: false,
@@ -217,13 +222,18 @@ impl<S: NetSession> NetTransport<S> {
     }
 
     pub fn accept(session: S) -> io::Result<Self> {
-        Self::upgrade(session, true)
+        Self::with(session, true, TransportState::Handshake)
     }
 
     pub fn connect(addr: S::PeerAddr, context: &S::Context, nonblocking: bool) -> io::Result<Self> {
         let mut session = S::connect(addr, context, nonblocking)?;
         session.set_nonblocking(nonblocking)?;
-        Self::upgrade(session, false)
+        let state = if nonblocking {
+            TransportState::Init
+        } else {
+            TransportState::Handshake
+        };
+        Self::with(session, false, state)
     }
 
     pub fn is_inbound(&self) -> bool {
@@ -246,7 +256,7 @@ impl<S: NetSession> NetTransport<S> {
         self.session.peer_addr()
     }
 
-    pub fn transient_addr(&self) -> S::TransitionAddr {
+    pub fn transient_addr(&self) -> S::TransientAddr {
         self.session.transient_addr()
     }
 
@@ -258,37 +268,30 @@ impl<S: NetSession> NetTransport<S> {
         self.session.expect_id()
     }
 
-    pub fn drain_buffer(&mut self, len: usize) -> Vec<u8> {
-        let len = self.buffer_len + len;
+    pub fn drain_buffer(&mut self) -> Vec<u8> {
+        let len = self.buffer_len;
         self.buffer_len = 0;
         self.buffer[..len].to_vec()
     }
 
-    fn handle_writable(&mut self) -> Option<SessionEvent<S>> {
-        debug_assert_ne!(
-            self.state,
-            TransportState::Terminated,
-            "write to terminated transport"
-        );
+    fn terminate(&mut self, reason: io::Error) -> SessionEvent<S> {
+        #[cfg(feature = "log")]
+        log::debug!(target: "transport", "Terminating connection {} due to {reason:?}", self.session.as_raw_fd());
 
+        self.state = TransportState::Terminated;
+        SessionEvent::Terminated(reason)
+    }
+
+    fn handle_writable(&mut self) -> Option<SessionEvent<S>> {
         self.needs_flush = false;
         match self.session.flush_nonblocking() {
             IoStatus::Success(_) | IoStatus::WouldBlock => None,
-            IoStatus::Shutdown => Some(SessionEvent::Terminated(io::ErrorKind::WriteZero.into())),
-            IoStatus::Err(err) => Some(SessionEvent::Terminated(err)),
+            IoStatus::Shutdown => Some(self.terminate(io::ErrorKind::WriteZero.into())),
+            IoStatus::Err(err) => Some(self.terminate(err)),
         }
     }
 
     fn handle_readable(&mut self) -> Option<SessionEvent<S>> {
-        debug_assert_ne!(
-            self.state,
-            TransportState::Terminated,
-            "read on terminated transport"
-        );
-
-        // We need to save the state before doing the read below
-        let was_established = self.state != TransportState::Handshake;
-
         // Nb. Since `poll`, which this reactor is based on, is *level-triggered*,
         // we will be notified again if there is still data to be read on the socket.
         // Hence, there is no use in putting this socket read in a loop, as the second
@@ -297,41 +300,21 @@ impl<S: NetSession> NetTransport<S> {
             .session
             .read_nonblocking(&mut self.buffer[self.buffer_len..])
         {
-            IoStatus::Success(len) if !was_established => {
-                debug_assert_eq!(self.buffer_len, 0);
-                if self.session.handshake_completed() {
-                    self.state = TransportState::Active;
-
-                    self.buffer_len += len;
-                    Some(SessionEvent::Established(self.session.expect_id()))
-                } else {
-                    Some(SessionEvent::Data(self.drain_buffer(len)))
-                }
-            }
-
-            IoStatus::Shutdown => {
-                self.state = TransportState::Terminated;
-                Some(SessionEvent::Terminated(io::ErrorKind::Interrupted.into()))
-            }
-
+            IoStatus::Success(0) => None,
             IoStatus::Success(len) => {
-                debug_assert!(was_established);
-                Some(SessionEvent::Data(self.drain_buffer(len)))
+                self.buffer_len += len;
+                Some(SessionEvent::Data(self.drain_buffer()))
             }
-
-            IoStatus::WouldBlock => Some(SessionEvent::Data(self.drain_buffer(0))),
-
-            IoStatus::Err(err) => {
-                self.state = TransportState::Terminated;
-                Some(SessionEvent::Terminated(err))
-            }
+            IoStatus::Shutdown => Some(self.terminate(io::ErrorKind::Interrupted.into())),
+            IoStatus::WouldBlock => Some(SessionEvent::Data(self.drain_buffer())),
+            IoStatus::Err(err) => Some(self.terminate(err)),
         }
     }
 }
 
 impl<S: NetSession> Resource for NetTransport<S>
 where
-    S::TransitionAddr: Into<net::SocketAddr>,
+    S::TransientAddr: Into<net::SocketAddr>,
 {
     type Id = RawFd;
     type Event = SessionEvent<S>;
@@ -342,20 +325,51 @@ where
 
     fn interests(&self) -> IoType {
         match self.state {
-            // During the handshake we always want to write. Plus, even for
-            // zero handshake we still need a write interest for the connection
-            // establishment
-            TransportState::Handshake => IoType::read_write(),
+            TransportState::Init => IoType::read_write(),
             TransportState::Terminated => IoType::none(),
-            TransportState::Active if self.needs_flush => IoType::read_write(),
-            TransportState::Active => IoType::read_only(),
+            TransportState::Active | TransportState::Handshake if self.needs_flush => {
+                IoType::read_write()
+            }
+            TransportState::Active | TransportState::Handshake => IoType::read_only(),
         }
     }
 
     fn handle_io(&mut self, io: Io) -> Option<Self::Event> {
-        match io {
+        debug_assert_ne!(
+            self.state,
+            TransportState::Terminated,
+            "I/O on terminated transport"
+        );
+
+        if self.state == TransportState::Init {
+            #[cfg(feature = "log")]
+            log::trace!(target: "transport", "Transport {} is connected, initializing handshake", Resource::id(self));
+
+            self.state = TransportState::Handshake;
+        } else if self.state == TransportState::Handshake {
+            debug_assert_eq!(self.buffer_len, 0);
+            debug_assert!(!self.session.handshake_completed());
+            #[cfg(feature = "log")]
+            log::trace!(target: "transport", "Transport {} got I/O while in handshake mode", Resource::id(self));
+        }
+
+        let resp = match io {
             Io::Read => self.handle_readable(),
             Io::Write => self.handle_writable(),
+        };
+
+        if self.session.handshake_completed() && self.state == TransportState::Handshake {
+            // During the handshake only termination can happen, but in this case
+            // we would not be in a `TransportState::Handshake` state anymore
+            debug_assert!(resp.is_none());
+
+            #[cfg(feature = "log")]
+            log::trace!(target: "transport", "Handshake for {} is complete", Resource::id(self));
+
+            self.state = TransportState::Active;
+            Some(SessionEvent::Established(self.session.expect_id()))
+        } else {
+            resp
         }
     }
 
@@ -366,6 +380,9 @@ where
 
 impl<S: NetSession> Read for NetTransport<S> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.state == TransportState::Init {
+            return Err(io::ErrorKind::NotConnected.into());
+        }
         self.session.read(buf)
     }
 }
@@ -377,16 +394,26 @@ impl<S: NetSession> ReadNonblocking for NetTransport<S> {
 
 impl<S: NetSession> Write for NetTransport<S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.state == TransportState::Init {
+            return Err(io::ErrorKind::NotConnected.into());
+        }
         self.session.write(&buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        if self.state == TransportState::Init {
+            return Err(io::ErrorKind::NotConnected.into());
+        }
         self.session.flush()
     }
 }
 impl<S: NetSession> WriteNonblocking for NetTransport<S> {
     fn set_write_nonblocking(&mut self, timeout: Option<Duration>) -> io::Result<()> {
         self.session.set_write_nonblocking(timeout)
+    }
+
+    fn can_write(&self) -> bool {
+        self.state != TransportState::Init
     }
 
     fn flush_nonblocking(&mut self) -> IoStatus {
@@ -410,7 +437,6 @@ mod split {
     pub trait SplitIo: Sized {
         type Read: Read + Sized;
         type Write: Write + Sized;
-        type Err: std::error::Error;
 
         /// # Panics
         ///
@@ -453,7 +479,6 @@ mod split {
     impl<S: NetSession> SplitIo for NetTransport<S> {
         type Read = NetReader<S>;
         type Write = NetWriter<S>;
-        type Err = io::Error;
 
         fn split_io(mut self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
             debug_assert_eq!(self.buffer_len, 0);

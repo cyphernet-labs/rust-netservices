@@ -97,7 +97,7 @@ impl<D: Delegate> reactor::Handler for Server<D> {
                     .extend(self.delegate.input(id, data, &self.ecdh));
             }
             SessionEvent::Terminated(err) => {
-                log::error!(target: "server", "Connection with {id} is terminated due to an error {err}");
+                log::error!(target: "server", "Connection with {id} is terminated due to an error: {err}");
             }
         }
     }
