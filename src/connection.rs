@@ -1,12 +1,11 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::mem::MaybeUninit;
-use std::net::{Shutdown, SocketAddr, TcpStream};
+use std::net::{Shutdown, TcpStream};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
-use crate::socks5::{Socks5, Socks5Error};
 use cyphernet::addr::Addr;
 use reactor::{ReadNonblocking, WriteNonblocking};
 

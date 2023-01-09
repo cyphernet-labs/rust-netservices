@@ -106,10 +106,7 @@ impl<D: Delegate> reactor::Handler for Server<D> {
         log::debug!(target: "server", "Command {cmd:?} received");
     }
 
-    fn handle_error(
-        &mut self,
-        err: Error<<Self::Listener as Resource>::Id, <Self::Transport as Resource>::Id>,
-    ) {
+    fn handle_error(&mut self, err: Error<Self::Listener, Self::Transport>) {
         log::error!(target: "server", "Error {err}");
     }
 
