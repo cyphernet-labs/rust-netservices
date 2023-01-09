@@ -26,9 +26,9 @@ pub trait NetSession: StreamNonblocking + SplitIo + AsRawFd + Send + Sized {
         nonblocking: bool,
     ) -> io::Result<Self>;
 
-    fn id(&self) -> Option<Self::Id>;
+    fn session_id(&self) -> Option<Self::Id>;
     fn expect_id(&self) -> Self::Id {
-        self.id()
+        self.session_id()
             .expect("net session id is not present when expected")
     }
 
@@ -68,7 +68,7 @@ impl NetSession for net::TcpStream {
         NetConnection::connect(addr, nonblocking)
     }
 
-    fn id(&self) -> Option<Self::Id> {
+    fn session_id(&self) -> Option<Self::Id> {
         Some(self.as_raw_fd())
     }
 
@@ -133,7 +133,7 @@ impl NetSession for socket2::Socket {
         NetConnection::connect(addr, nonblocking)
     }
 
-    fn id(&self) -> Option<Self::Id> {
+    fn session_id(&self) -> Option<Self::Id> {
         Some(self.as_raw_fd())
     }
 

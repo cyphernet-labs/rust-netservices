@@ -151,7 +151,7 @@ impl<S: NetSession> NetSession for NetTransport<S> {
     type TransientAddr = S::TransientAddr;
 
     fn accept(connection: Self::Connection, context: &Self::Context) -> io::Result<Self> {
-        S::accept(connection, context).and_then(NetTransport::accept)
+        S::accept(connection, context).and_then(Self::new)
     }
 
     fn connect(
@@ -159,11 +159,18 @@ impl<S: NetSession> NetSession for NetTransport<S> {
         context: &Self::Context,
         nonblocking: bool,
     ) -> io::Result<Self> {
-        NetTransport::connect(addr, context, nonblocking)
+        let mut session = S::connect(addr, context, nonblocking)?;
+        session.set_nonblocking(nonblocking)?;
+        let state = if nonblocking {
+            TransportState::Init
+        } else {
+            TransportState::Handshake
+        };
+        Self::with(session, false, state)
     }
 
-    fn id(&self) -> Option<Self::Id> {
-        self.session.id()
+    fn session_id(&self) -> Option<Self::Id> {
+        self.session.session_id()
     }
 
     fn handshake_completed(&self) -> bool {
@@ -208,6 +215,10 @@ impl<S: NetSession> NetSession for NetTransport<S> {
 }
 
 impl<S: NetSession> NetTransport<S> {
+    pub fn new(session: S) -> io::Result<Self> {
+        Self::with(session, true, TransportState::Handshake)
+    }
+
     fn with(mut session: S, inbound: bool, state: TransportState) -> io::Result<Self> {
         session.set_read_timeout(Some(READ_TIMEOUT))?;
         session.set_write_timeout(Some(WRITE_TIMEOUT))?;
@@ -219,21 +230,6 @@ impl<S: NetSession> NetTransport<S> {
             buffer: vec![0; READ_BUFFER_SIZE],
             buffer_len: 0,
         })
-    }
-
-    pub fn accept(session: S) -> io::Result<Self> {
-        Self::with(session, true, TransportState::Handshake)
-    }
-
-    pub fn connect(addr: S::PeerAddr, context: &S::Context, nonblocking: bool) -> io::Result<Self> {
-        let mut session = S::connect(addr, context, nonblocking)?;
-        session.set_nonblocking(nonblocking)?;
-        let state = if nonblocking {
-            TransportState::Init
-        } else {
-            TransportState::Handshake
-        };
-        Self::with(session, false, state)
     }
 
     pub fn is_inbound(&self) -> bool {
@@ -261,7 +257,7 @@ impl<S: NetSession> NetTransport<S> {
     }
 
     pub fn peer_id(&self) -> Option<S::Id> {
-        self.session.id()
+        self.session.session_id()
     }
 
     pub fn expect_peer_id(&self) -> S::Id {

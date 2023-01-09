@@ -62,7 +62,7 @@ impl<D: Delegate> reactor::Handler for Server<D> {
         match event {
             ListenerEvent::Accepted(session) => {
                 log::info!(target: "server", "Incoming connection from {} on {}", session.transient_addr(), session.local_addr());
-                match Transport::accept(session) {
+                match Transport::new(session) {
                     Ok(transport) => {
                         log::info!(target: "server", "Connection accepted, registering {} with reactor", transport.transient_addr());
                         self.action_queue
