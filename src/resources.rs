@@ -128,7 +128,7 @@ pub struct NetResource<S: NetSession> {
     state: TransportState,
     session: S,
     inbound: bool,
-    needs_flush: bool,
+    write_intent: bool,
     read_buffer: Vec<u8>,
     read_buffer_len: usize,
     write_buffer: VecDeque<u8>,
@@ -233,7 +233,7 @@ impl<S: NetSession> NetResource<S> {
             state,
             session,
             inbound,
-            needs_flush: false,
+            write_intent: false,
             read_buffer: vec![0; READ_BUFFER_SIZE],
             read_buffer_len: 0,
             write_buffer: VecDeque::new(),
@@ -289,7 +289,7 @@ impl<S: NetSession> NetResource<S> {
     fn handle_writable(&mut self) -> Option<SessionEvent<S>> {
         match self.flush() {
             Ok(_) => {
-                self.needs_flush = false;
+                self.write_intent = false;
                 None
             }
             // In this case, the write couldn't complete. Leave `needs_flush` set
@@ -297,7 +297,7 @@ impl<S: NetSession> NetResource<S> {
             Err(err)
                 if [io::ErrorKind::WouldBlock, io::ErrorKind::WriteZero].contains(&err.kind()) =>
             {
-                self.needs_flush = true;
+                self.write_intent = true;
                 None
             }
             Err(err) => Some(self.terminate(err)),
@@ -313,7 +313,9 @@ impl<S: NetSession> NetResource<S> {
             .session
             .read(&mut self.read_buffer[self.read_buffer_len..])
         {
-            Ok(0) => None,
+            Ok(0) => Some(SessionEvent::Terminated(
+                io::ErrorKind::ConnectionReset.into(),
+            )),
             Ok(len) => {
                 self.read_buffer_len += len;
                 Some(SessionEvent::Data(self.drain_read_buffer()))
@@ -345,7 +347,7 @@ where
         match self.state {
             TransportState::Init => IoType::write_only(),
             TransportState::Terminated => IoType::none(),
-            TransportState::Active | TransportState::Handshake if self.needs_flush => {
+            TransportState::Active | TransportState::Handshake if self.write_intent => {
                 IoType::read_write()
             }
             TransportState::Active | TransportState::Handshake => IoType::read_only(),
@@ -376,21 +378,29 @@ where
             Io::Write => self.handle_writable(),
         };
 
-        if self.session.handshake_completed() && self.state == TransportState::Handshake {
+        if io == Io::Read && self.state == TransportState::Handshake {
+            self.write_intent = true;
+        }
+
+        if matches!(&resp, Some(SessionEvent::Terminated(e)) if e.kind() == io::ErrorKind::ConnectionReset)
+            && self.state != TransportState::Handshake
+        {
+            #[cfg(feature = "log")]
+            log::debug!(target: "transport", "Peer {self} has reset the connection");
+
+            resp
+        } else if self.session.handshake_completed() && self.state == TransportState::Handshake {
             // During the handshake only termination can happen, but in this case
             // we would not be in a `TransportState::Handshake` state anymore
-            debug_assert!(resp.is_none());
+            debug_assert!(
+                matches!(&resp, Some(SessionEvent::Terminated(e)) if e.kind() == io::ErrorKind::ConnectionReset)
+            );
 
             #[cfg(feature = "log")]
             log::debug!(target: "transport", "Handshake with {self} is complete");
 
             self.state = TransportState::Active;
             Some(SessionEvent::Established(self.session.expect_id()))
-        } else if self.state == TransportState::Active && resp.is_none() {
-            #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Peer {self} has reset the connection");
-
-            Some(self.terminate(io::ErrorKind::ConnectionReset.into()))
         } else {
             resp
         }
@@ -554,7 +564,7 @@ mod split {
                 state: read.state,
                 inbound: read.inbound,
                 session: S::from_split_io(read.session, write.session),
-                needs_flush: write.needs_flush,
+                write_intent: write.needs_flush,
                 read_buffer: vec![0u8; READ_BUFFER_SIZE],
                 read_buffer_len: 0,
                 write_buffer: VecDeque::new(),
