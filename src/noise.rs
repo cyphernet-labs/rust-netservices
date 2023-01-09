@@ -1,15 +1,16 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::io::{self, Read, Write};
-use std::net::{self, TcpStream};
+use std::net::{self, TcpStream, ToSocketAddrs};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
-use cyphernet::addr::{Addr, PeerAddr, ToSocketAddr};
+use cyphernet::addr::{Addr, Host, PeerAddr, ToSocketAddr};
 use cyphernet::crypto::{EcPk, Ecdh};
 
+use crate::connection::Proxy;
 use crate::resources::{SplitIo, SplitIoError};
-use crate::{NetConnection, NetSession, ResAddr};
+use crate::{Address, NetConnection, NetSession};
 
 pub trait PeerId: EcPk {}
 impl<T> PeerId for T where T: EcPk {}
@@ -30,7 +31,7 @@ impl<E: Ecdh> From<E> for NodeKeys<E> {
 }
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, From)]
-pub enum XkAddr<Id: PeerId, A: ResAddr> {
+pub enum XkAddr<Id: PeerId, A: Address> {
     #[from]
     Partial(A),
 
@@ -38,7 +39,7 @@ pub enum XkAddr<Id: PeerId, A: ResAddr> {
     Full(PeerAddr<Id, A>),
 }
 
-impl<Id: PeerId, A: ResAddr> Display for XkAddr<Id, A>
+impl<Id: PeerId, A: Address> Display for XkAddr<Id, A>
 where
     Id: Display,
 {
@@ -50,7 +51,8 @@ where
     }
 }
 
-impl<Id: PeerId, A: ResAddr> Addr for XkAddr<Id, A> {
+impl<Id: PeerId, A: Address> Host for XkAddr<Id, A> {}
+impl<Id: PeerId, A: Address> Addr for XkAddr<Id, A> {
     fn port(&self) -> u16 {
         match self {
             XkAddr::Partial(a) => a.port(),
@@ -59,7 +61,7 @@ impl<Id: PeerId, A: ResAddr> Addr for XkAddr<Id, A> {
     }
 }
 
-impl<Id: PeerId, A: ResAddr + ToSocketAddr> ToSocketAddr for XkAddr<Id, A> {
+impl<Id: PeerId, A: Address + ToSocketAddr> ToSocketAddr for XkAddr<Id, A> {
     fn to_socket_addr(&self) -> net::SocketAddr {
         match self {
             XkAddr::Partial(a) => a.to_socket_addr(),
@@ -68,7 +70,18 @@ impl<Id: PeerId, A: ResAddr + ToSocketAddr> ToSocketAddr for XkAddr<Id, A> {
     }
 }
 
-impl<Id: PeerId, A: ResAddr> From<XkAddr<Id, A>> for net::SocketAddr
+impl<Id: PeerId, A: Address + ToSocketAddrs> ToSocketAddrs for XkAddr<Id, A> {
+    type Iter = A::Iter;
+
+    fn to_socket_addrs(&self) -> io::Result<Self::Iter> {
+        match self {
+            XkAddr::Partial(a) => a.to_socket_addrs(),
+            XkAddr::Full(a) => a.addr().to_socket_addrs(),
+        }
+    }
+}
+
+impl<Id: PeerId, A: Address> From<XkAddr<Id, A>> for net::SocketAddr
 where
     A: ToSocketAddr,
 {
@@ -77,11 +90,11 @@ where
     }
 }
 
-impl<Id: PeerId, A: ResAddr> XkAddr<Id, A> {
+impl<Id: PeerId, A: Address> XkAddr<Id, A> {
     pub fn upgrade(&mut self, id: Id) -> bool {
         match self {
             XkAddr::Partial(addr) => {
-                *self = XkAddr::Full(PeerAddr::new(id, *addr));
+                *self = XkAddr::Full(PeerAddr::new(id, addr.clone()));
                 true
             }
             XkAddr::Full(_) => false,
@@ -218,12 +231,27 @@ where
         })
     }
 
-    fn connect(
+    fn connect_blocking<P: Proxy>(
         peer_addr: Self::PeerAddr,
         context: &Self::Context,
-        nonblocking: bool,
-    ) -> io::Result<Self> {
-        let socket = S::connect(peer_addr.addr().clone(), nonblocking)?;
+        proxy: &P,
+    ) -> Result<Self, P::Error> {
+        let socket = S::connect_blocking(peer_addr.addr().clone(), proxy)?;
+        Ok(Self {
+            remote_addr: XkAddr::Full(peer_addr),
+            local_node: context.clone(),
+            connection: socket,
+            established: false,
+        })
+    }
+
+    #[cfg(feature = "socket2")]
+    fn connect_nonblocking<P: Proxy>(
+        peer_addr: Self::PeerAddr,
+        context: &Self::Context,
+        proxy: &P,
+    ) -> Result<Self, P::Error> {
+        let socket = S::connect_nonblocking(peer_addr.addr().clone(), proxy)?;
         Ok(Self {
             remote_addr: XkAddr::Full(peer_addr),
             local_node: context.clone(),
@@ -233,7 +261,7 @@ where
     }
 
     fn session_id(&self) -> Option<Self::Id> {
-        match self.remote_addr {
+        match &self.remote_addr {
             XkAddr::Partial(_) => None,
             XkAddr::Full(a) => Some(*a.id()),
         }

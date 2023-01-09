@@ -24,7 +24,7 @@ all = ["io-reactor", "re-actor", "mio", "socket2", "log"]
 log = ["log_crate", "io-reactor/log"]
 
 [patch.crates-io]
-cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet" }
+cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet", branch = "refactoring" }
 
 [workspace]
 members = ["re-actor", "io-reactor", "nsh"]
