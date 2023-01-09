@@ -5,6 +5,7 @@ use std::str::FromStr;
 
 use crate::command::Command;
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
+use netservices::NetSession;
 use reactor::Resource;
 
 use crate::server::{Action, Delegate};
