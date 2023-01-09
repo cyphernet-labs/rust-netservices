@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -6,7 +7,7 @@ use std::time::Duration;
 use std::{io, net};
 
 use reactor::poller::IoType;
-use reactor::{Io, IoStatus, ReadNonblocking, Resource, WriteNonblocking};
+use reactor::{Io, Resource, WriteAtomic, WriteError};
 
 use crate::{NetConnection, NetListener, NetSession};
 
@@ -37,29 +38,21 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> AsRawFd for NetAccep
 
 impl<L: NetListener<Stream = S::Connection>, S: NetSession> io::Write for NetAccept<S, L> {
     fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
-        panic!("must not write to network listener")
+        Err(io::ErrorKind::InvalidInput.into())
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        panic!("must not write to network listener")
+        Err(io::ErrorKind::InvalidInput.into())
     }
 }
 
-impl<L: NetListener<Stream = S::Connection>, S: NetSession> WriteNonblocking for NetAccept<S, L> {
-    fn set_write_nonblocking(&mut self, timeout: Option<Duration>) -> io::Result<()> {
-        panic!("must not write to network listener")
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> WriteAtomic for NetAccept<S, L> {
+    fn is_ready_to_write(&self) -> bool {
+        false
     }
 
-    fn can_write(&self) -> bool {
-        true
-    }
-
-    fn write_nonblocking(&mut self, buf: &[u8]) -> IoStatus {
-        panic!("must not write to network listener")
-    }
-
-    fn flush_nonblocking(&mut self) -> IoStatus {
-        panic!("must not write to network listener")
+    fn write_or_buffer(&mut self, _: &[u8]) -> io::Result<()> {
+        Err(io::ErrorKind::InvalidInput.into())
     }
 }
 
@@ -128,22 +121,26 @@ pub enum TransportState {
     Terminated,
 }
 
-pub struct NetTransport<S: NetSession> {
+/// Net transport is an adaptor around specific [`NetSession`] (implementing
+/// session management, including optional handshake, encoding etc) to be used
+/// as a transport resource in a [`reactor::Reactor`].
+pub struct NetResource<S: NetSession> {
     state: TransportState,
     session: S,
     inbound: bool,
     needs_flush: bool,
-    buffer: Vec<u8>,
-    buffer_len: usize,
+    read_buffer: Vec<u8>,
+    read_buffer_len: usize,
+    write_buffer: VecDeque<u8>,
 }
 
-impl<S: NetSession> AsRawFd for NetTransport<S> {
+impl<S: NetSession> AsRawFd for NetResource<S> {
     fn as_raw_fd(&self) -> RawFd {
         self.session.as_raw_fd()
     }
 }
 
-impl<S: NetSession> NetSession for NetTransport<S> {
+impl<S: NetSession> NetSession for NetResource<S> {
     type Context = S::Context;
     type Connection = S::Connection;
     type Id = S::Id;
@@ -214,7 +211,7 @@ impl<S: NetSession> NetSession for NetTransport<S> {
     }
 }
 
-impl<S: NetSession> NetTransport<S> {
+impl<S: NetSession> NetResource<S> {
     pub fn new(session: S) -> io::Result<Self> {
         Self::with(session, true, TransportState::Handshake)
     }
@@ -227,8 +224,9 @@ impl<S: NetSession> NetTransport<S> {
             session,
             inbound,
             needs_flush: false,
-            buffer: vec![0; READ_BUFFER_SIZE],
-            buffer_len: 0,
+            read_buffer: vec![0; READ_BUFFER_SIZE],
+            read_buffer_len: 0,
+            write_buffer: VecDeque::new(),
         })
     }
 
@@ -264,10 +262,10 @@ impl<S: NetSession> NetTransport<S> {
         self.session.expect_id()
     }
 
-    pub fn drain_buffer(&mut self) -> Vec<u8> {
-        let len = self.buffer_len;
-        self.buffer_len = 0;
-        self.buffer[..len].to_vec()
+    pub fn drain_read_buffer(&mut self) -> Vec<u8> {
+        let len = self.read_buffer_len;
+        self.read_buffer_len = 0;
+        self.read_buffer[..len].to_vec()
     }
 
     fn terminate(&mut self, reason: io::Error) -> SessionEvent<S> {
@@ -279,11 +277,20 @@ impl<S: NetSession> NetTransport<S> {
     }
 
     fn handle_writable(&mut self) -> Option<SessionEvent<S>> {
-        self.needs_flush = false;
-        match self.session.flush_nonblocking() {
-            IoStatus::Success(_) | IoStatus::WouldBlock => None,
-            IoStatus::Shutdown => Some(self.terminate(io::ErrorKind::WriteZero.into())),
-            IoStatus::Err(err) => Some(self.terminate(err)),
+        match self.flush() {
+            Ok(_) => {
+                self.needs_flush = false;
+                None
+            }
+            // In this case, the write couldn't complete. Leave `needs_flush` set
+            // to be notified when the socket is ready to write again.
+            Err(err)
+                if [io::ErrorKind::WouldBlock, io::ErrorKind::WriteZero].contains(&err.kind()) =>
+            {
+                self.needs_flush = true;
+                None
+            }
+            Err(err) => Some(self.terminate(err)),
         }
     }
 
@@ -294,21 +301,26 @@ impl<S: NetSession> NetTransport<S> {
         // invocation would likely block.
         match self
             .session
-            .read_nonblocking(&mut self.buffer[self.buffer_len..])
+            .read(&mut self.read_buffer[self.read_buffer_len..])
         {
-            IoStatus::Success(0) => None,
-            IoStatus::Success(len) => {
-                self.buffer_len += len;
-                Some(SessionEvent::Data(self.drain_buffer()))
+            Ok(0) => None,
+            Ok(len) => {
+                self.read_buffer_len += len;
+                Some(SessionEvent::Data(self.drain_read_buffer()))
             }
-            IoStatus::Shutdown => Some(self.terminate(io::ErrorKind::Interrupted.into())),
-            IoStatus::WouldBlock => Some(SessionEvent::Data(self.drain_buffer())),
-            IoStatus::Err(err) => Some(self.terminate(err)),
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                debug_assert!(false, "WOULD_BLOCK on resource which had read intent");
+                // This shouldn't normally happen, since this function is only called
+                // when there's data on the socket. We leave it here in case external
+                // conditions change.
+                None
+            }
+            Err(err) => Some(self.terminate(err)),
         }
     }
 }
 
-impl<S: NetSession> Resource for NetTransport<S>
+impl<S: NetSession> Resource for NetResource<S>
 where
     S::TransientAddr: Into<net::SocketAddr>,
 {
@@ -321,7 +333,7 @@ where
 
     fn interests(&self) -> IoType {
         match self.state {
-            TransportState::Init => IoType::read_write(),
+            TransportState::Init => IoType::write_only(),
             TransportState::Terminated => IoType::none(),
             TransportState::Active | TransportState::Handshake if self.needs_flush => {
                 IoType::read_write()
@@ -339,14 +351,14 @@ where
 
         if self.state == TransportState::Init {
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Transport {} is connected, initializing handshake", Resource::id(self));
+            log::trace!(target: "transport", "Transport {} is connected, initializing handshake", self.transient_addr());
 
             self.state = TransportState::Handshake;
         } else if self.state == TransportState::Handshake {
-            debug_assert_eq!(self.buffer_len, 0);
+            debug_assert_eq!(self.read_buffer_len, 0);
             debug_assert!(!self.session.handshake_completed());
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Transport {} got I/O while in handshake mode", Resource::id(self));
+            log::trace!(target: "transport", "Transport {} got I/O while in handshake mode", self.transient_addr());
         }
 
         let resp = match io {
@@ -360,10 +372,15 @@ where
             debug_assert!(resp.is_none());
 
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Handshake for {} is complete", Resource::id(self));
+            log::trace!(target: "transport", "Handshake with {} is complete", self.expect_peer_id());
 
             self.state = TransportState::Active;
             Some(SessionEvent::Established(self.session.expect_id()))
+        } else if self.state == TransportState::Active && resp.is_none() {
+            #[cfg(feature = "log")]
+            log::trace!(target: "transport", "Connection {} is reset by a remote peer", self.expect_peer_id());
+
+            Some(self.terminate(io::ErrorKind::ConnectionReset.into()))
         } else {
             resp
         }
@@ -374,50 +391,60 @@ where
     }
 }
 
-impl<S: NetSession> Read for NetTransport<S> {
+/// This implementation is used by a reactor and can be used only when the resource
+/// is unregistered from the reactor.
+// TODO: Consider removing this implementation
+impl<S: NetSession> Read for NetResource<S> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.state == TransportState::Init {
-            return Err(io::ErrorKind::NotConnected.into());
+        match self.state {
+            TransportState::Init | TransportState::Handshake => {
+                Err(io::ErrorKind::NotConnected.into())
+            }
+            TransportState::Active => self.session.read(buf),
+            TransportState::Terminated => Err(io::ErrorKind::ConnectionAborted.into()),
         }
-        self.session.read(buf)
-    }
-}
-impl<S: NetSession> ReadNonblocking for NetTransport<S> {
-    fn set_read_nonblocking(&mut self, timeout: Option<Duration>) -> io::Result<()> {
-        self.session.set_read_timeout(timeout)
     }
 }
 
-impl<S: NetSession> Write for NetTransport<S> {
+impl<S: NetSession> Write for NetResource<S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.state == TransportState::Init {
-            return Err(io::ErrorKind::NotConnected.into());
+        match self.write_atomic(buf) {
+            Ok(_) => Ok(buf.len()),
+            Err(WriteError::NotReady) => Err(io::ErrorKind::NotConnected.into()),
+            Err(WriteError::Io(err)) => Err(err),
         }
-        self.session.write(&buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        if self.state == TransportState::Init {
-            return Err(io::ErrorKind::NotConnected.into());
-        }
         self.session.flush()
     }
 }
-impl<S: NetSession> WriteNonblocking for NetTransport<S> {
-    fn set_write_nonblocking(&mut self, timeout: Option<Duration>) -> io::Result<()> {
-        self.session.set_write_nonblocking(timeout)
+
+impl<S: NetSession> WriteAtomic for NetResource<S> {
+    fn is_ready_to_write(&self) -> bool {
+        self.state == TransportState::Active
     }
 
-    fn can_write(&self) -> bool {
-        self.state != TransportState::Init
-    }
-
-    fn flush_nonblocking(&mut self) -> IoStatus {
-        self.needs_flush = false;
-        self.session.flush_nonblocking()
+    fn write_or_buffer(&mut self, buf: &[u8]) -> io::Result<()> {
+        let len = self.session.write(self.write_buffer.make_contiguous())?;
+        if len < self.write_buffer.len() {
+            self.write_buffer.drain(..len);
+            self.write_buffer.extend(buf);
+            return Ok(());
+        }
+        self.write_buffer.drain(..);
+        match self.session.write(&buf) {
+            Err(err) => Err(err),
+            Ok(len) if len < buf.len() => {
+                self.write_buffer.extend(&buf[len..]);
+                Ok(())
+            }
+            Ok(_) => Ok(()),
+        }
     }
 }
 
+// TODO: Replace this with from_session/into_session procedure
 mod split {
     use super::*;
 
@@ -472,33 +499,19 @@ mod split {
         }
     }
 
-    impl<S: NetSession> SplitIo for NetTransport<S> {
+    impl<S: NetSession> SplitIo for NetResource<S> {
         type Read = NetReader<S>;
         type Write = NetWriter<S>;
 
         fn split_io(mut self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
-            debug_assert_eq!(self.buffer_len, 0);
+            debug_assert_eq!(self.read_buffer_len, 0);
+            debug_assert_eq!(self.write_buffer.len(), 0);
 
-            match self.session.flush_nonblocking() {
-                IoStatus::Success(_) => {}
-                IoStatus::WouldBlock => {
-                    return Err(SplitIoError {
-                        original: self,
-                        error: io::ErrorKind::WouldBlock.into(),
-                    });
-                }
-                IoStatus::Shutdown => {
-                    return Err(SplitIoError {
-                        original: self,
-                        error: io::ErrorKind::Interrupted.into(),
-                    });
-                }
-                IoStatus::Err(err) => {
-                    return Err(SplitIoError {
-                        original: self,
-                        error: err,
-                    });
-                }
+            if let Err(err) = self.session.flush() {
+                return Err(SplitIoError {
+                    original: self,
+                    error: err,
+                });
             }
             let (r, w) = match self.session.split_io() {
                 Err(err) => {
@@ -532,8 +545,9 @@ mod split {
                 inbound: read.inbound,
                 session: S::from_split_io(read.session, write.session),
                 needs_flush: write.needs_flush,
-                buffer: vec![0u8; READ_BUFFER_SIZE],
-                buffer_len: 0,
+                read_buffer: vec![0u8; READ_BUFFER_SIZE],
+                read_buffer_len: 0,
+                write_buffer: VecDeque::new(),
             }
         }
     }

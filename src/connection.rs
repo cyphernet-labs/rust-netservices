@@ -7,19 +7,14 @@ use std::time::Duration;
 use std::{io, net};
 
 use cyphernet::addr::Addr;
-use reactor::{ReadNonblocking, WriteNonblocking};
 
-use crate::wire::{SplitIo, SplitIoError};
+use crate::resources::{SplitIo, SplitIoError};
 
 pub trait ResAddr: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
 impl<T> ResAddr for T where T: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
 
-pub trait StreamNonblocking: ReadNonblocking + WriteNonblocking {}
-
-impl<T> StreamNonblocking for T where T: ReadNonblocking + WriteNonblocking {}
-
 /// Network stream is an abstraction of TCP stream object.
-pub trait NetConnection: Send + SplitIo + StreamNonblocking + AsRawFd {
+pub trait NetConnection: Send + SplitIo + io::Read + io::Write + AsRawFd {
     type Addr: ResAddr + Send;
 
     fn connect(addr: Self::Addr, nonblocking: bool) -> io::Result<Self>
