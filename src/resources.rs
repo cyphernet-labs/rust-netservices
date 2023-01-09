@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -132,6 +132,16 @@ pub struct NetResource<S: NetSession> {
     read_buffer: Vec<u8>,
     read_buffer_len: usize,
     write_buffer: VecDeque<u8>,
+}
+
+impl<S: NetSession> Display for NetResource<S> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(addr) = self.session.peer_addr() {
+            Display::fmt(&addr, f)
+        } else {
+            Display::fmt(&self.session.transient_addr(), f)
+        }
+    }
 }
 
 impl<S: NetSession> AsRawFd for NetResource<S> {
@@ -270,7 +280,7 @@ impl<S: NetSession> NetResource<S> {
 
     fn terminate(&mut self, reason: io::Error) -> SessionEvent<S> {
         #[cfg(feature = "log")]
-        log::debug!(target: "transport", "Terminating connection {} due to {reason:?}", self.session.as_raw_fd());
+        log::trace!(target: "transport", "Terminating connection {self} due to {reason:?}");
 
         self.state = TransportState::Terminated;
         SessionEvent::Terminated(reason)
@@ -351,14 +361,14 @@ where
 
         if self.state == TransportState::Init {
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Transport {} is connected, initializing handshake", self.transient_addr());
+            log::debug!(target: "transport", "Transport {self} is connected, initializing handshake");
 
             self.state = TransportState::Handshake;
         } else if self.state == TransportState::Handshake {
             debug_assert_eq!(self.read_buffer_len, 0);
             debug_assert!(!self.session.handshake_completed());
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Transport {} got I/O while in handshake mode", self.transient_addr());
+            log::trace!(target: "transport", "Transport {self} got I/O while in handshake mode");
         }
 
         let resp = match io {
@@ -372,13 +382,13 @@ where
             debug_assert!(resp.is_none());
 
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Handshake with {} is complete", self.expect_peer_id());
+            log::debug!(target: "transport", "Handshake with {self} is complete");
 
             self.state = TransportState::Active;
             Some(SessionEvent::Established(self.session.expect_id()))
         } else if self.state == TransportState::Active && resp.is_none() {
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Connection {} is reset by a remote peer", self.expect_peer_id());
+            log::debug!(target: "transport", "Peer {self} has reset the connection");
 
             Some(self.terminate(io::ErrorKind::ConnectionReset.into()))
         } else {
