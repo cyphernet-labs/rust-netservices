@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::os::fd::RawFd;
 use std::time::Instant;
 use std::{io, net};
@@ -20,6 +20,7 @@ pub trait Delegate: Default + Send {
 }
 
 pub struct Server<D: Delegate> {
+    outbox: HashMap<RawFd, VecDeque<Vec<u8>>>,
     action_queue: VecDeque<Action>,
     delegate: D,
     ecdh: PrivateKey,
@@ -31,6 +32,7 @@ impl<D: Delegate> Server<D> {
         let listener = Accept::bind(listen, ecdh.clone())?;
         action_queue.push_back(Action::RegisterListener(listener));
         Ok(Self {
+            outbox: empty!(),
             action_queue,
             delegate: D::default(),
             ecdh,
@@ -88,8 +90,11 @@ impl<D: Delegate> reactor::Handler for Server<D> {
         log::trace!(target: "server", "I/O on {id} at {time:?}");
         match event {
             SessionEvent::Established(key) => {
-                log::debug!(target: "server", "Connection with remote peer {key}@{id} successfully established");
+                let queue = self.outbox.remove(&id).unwrap_or_default();
+                log::debug!(target: "server", "Connection with remote peer {key}@{id} successfully established; processing {} items from outbox", queue.len());
                 self.action_queue.extend(self.delegate.new_client(id, key));
+                self.action_queue
+                    .extend(queue.into_iter().map(|msg| Action::Send(id, msg)))
             }
             SessionEvent::Data(data) => {
                 log::trace!(target: "server", "Incoming data {data:?}");
@@ -108,21 +113,23 @@ impl<D: Delegate> reactor::Handler for Server<D> {
 
     fn handle_error(&mut self, err: Error<Self::Listener, Self::Transport>) {
         match err {
-            Error::TransportDisconnect(id, transport, _) => {
-                log::warn!(target: "server", "Remote peer {}@{id} disconnected", transport.transient_addr());
+            Error::TransportDisconnect(_id, transport, _) => {
+                log::warn!(target: "server", "Remote peer {transport} disconnected");
                 return;
             }
+            Error::WriteLogicError(id, msg) => {
+                log::debug!(target: "server", "Remote peer {id} is not ready, putting message to outbox");
+                self.outbox.entry(id).or_default().push_back(msg)
+            }
             // All others are errors:
-            Error::ListenerUnknown(_) => {}
-            Error::TransportUnknown(_) => {}
-            Error::WriteFailure(_, _) => {}
-            Error::ListenerDisconnect(_, _, _) => {}
-            Error::ListenerPollError(_, _) => {}
-            Error::TransportPollError(_, _) => {}
-            Error::WriteLogicError(_) => {}
-            Error::Poll(_) => {}
+            err @ Error::ListenerUnknown(_)
+            | err @ Error::TransportUnknown(_)
+            | err @ Error::WriteFailure(_, _)
+            | err @ Error::ListenerDisconnect(_, _, _)
+            | err @ Error::ListenerPollError(_, _)
+            | err @ Error::TransportPollError(_, _)
+            | err @ Error::Poll(_) => log::error!(target: "server", "Error: {err}"),
         }
-        log::error!(target: "server", "Error: {err}");
     }
 
     fn handover_listener(&mut self, listener: Self::Listener) {
