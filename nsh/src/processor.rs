@@ -51,7 +51,6 @@ impl Delegate for Processor {
                     Ok(output) => {
                         log::debug!(target: "nsh", "Command executed successfully; {} bytes of output collected", output.stdout.len());
                         action_queue.push(Action::Send(fd, output.stdout));
-                        action_queue.push(Action::UnregisterTransport(fd));
                     }
                     Err(err) => {
                         log::error!(target: "nsh", "Error executing command: {err}");
