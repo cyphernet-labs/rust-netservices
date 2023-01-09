@@ -10,7 +10,7 @@ use netservices::NetSession;
 use crate::command::Command;
 use crate::RemoteAddr;
 
-pub type Transport = netservices::NetTransport<NoiseXk<PrivateKey>>;
+pub type Transport = netservices::NetResource<NoiseXk<PrivateKey>>;
 
 pub struct Response {
     client: Client,

@@ -7,9 +7,8 @@ use std::time::Duration;
 
 use cyphernet::addr::{Addr, PeerAddr, ToSocketAddr};
 use cyphernet::crypto::{EcPk, Ecdh};
-use reactor::{IoStatus, ReadNonblocking, WriteNonblocking};
 
-use crate::wire::{SplitIo, SplitIoError};
+use crate::resources::{SplitIo, SplitIoError};
 use crate::{NetConnection, NetSession, ResAddr};
 
 pub trait PeerId: EcPk {}
@@ -129,24 +128,6 @@ impl<E: Ecdh, S: NetConnection> Read for NoiseXk<E, S> {
     }
 }
 
-impl<E: Ecdh, S: NetConnection> ReadNonblocking for NoiseXk<E, S> {
-    fn set_read_nonblocking(&mut self, timeout: Option<Duration>) -> io::Result<()> {
-        self.connection.set_read_nonblocking(timeout)
-    }
-
-    fn read_nonblocking(&mut self, buf: &mut [u8]) -> IoStatus {
-        let established = self.established;
-        match self.read(buf) {
-            // If we get zero bytes read as a return value after the handshake
-            // it means the client has made an ordered shutdown
-            Ok(0) if established => IoStatus::Shutdown,
-            Ok(len) => IoStatus::Success(len),
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => IoStatus::WouldBlock,
-            Err(err) => IoStatus::Err(err),
-        }
-    }
-}
-
 impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         // TODO: Do handshake
@@ -158,16 +139,6 @@ impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
 
     fn flush(&mut self) -> io::Result<()> {
         self.connection.flush()
-    }
-}
-
-impl<E: Ecdh, S: NetConnection> WriteNonblocking for NoiseXk<E, S> {
-    fn set_write_nonblocking(&mut self, timeout: Option<Duration>) -> io::Result<()> {
-        self.connection.set_write_nonblocking(timeout)
-    }
-
-    fn can_write(&self) -> bool {
-        self.established
     }
 }
 
@@ -226,7 +197,7 @@ impl<E: Ecdh, S: NetConnection> SplitIo for NoiseXk<E, S> {
 impl<E: Ecdh, S: NetConnection> NetSession for NoiseXk<E, S>
 where
     E: Send + Clone,
-    E::Pk: Send + Copy,
+    E::Pk: Send + Copy + Display,
 {
     type Context = E;
     type Connection = S;

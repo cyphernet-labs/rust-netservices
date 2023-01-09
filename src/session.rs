@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::io;
 use std::net;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -5,19 +6,19 @@ use std::time::Duration;
 
 use cyphernet::addr::Addr;
 
-use crate::wire::SplitIo;
-use crate::{NetConnection, StreamNonblocking};
+use crate::resources::SplitIo;
+use crate::NetConnection;
 
-pub trait NetSession: StreamNonblocking + SplitIo + AsRawFd + Send + Sized {
+pub trait NetSession: io::Read + io::Write + SplitIo + AsRawFd + Send + Sized {
     type Context: Send;
     type Connection: NetConnection;
     /// A unique identifier of the session. Usually a part of a transition address.
-    type Id: Send;
+    type Id: Send + Display;
     /// Address used for outgoing connections. May not be known initially for the incoming
     /// connections
-    type PeerAddr: Addr;
+    type PeerAddr: Addr + Display;
     /// Address which combines what is known for both incoming and outgoing connections.
-    type TransientAddr: Addr;
+    type TransientAddr: Addr + Display;
 
     fn accept(connection: Self::Connection, context: &Self::Context) -> io::Result<Self>;
     fn connect(

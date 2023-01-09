@@ -119,6 +119,7 @@ impl<D: Delegate> reactor::Handler for Server<D> {
             Error::ListenerDisconnect(_, _, _) => {}
             Error::ListenerPollError(_, _) => {}
             Error::TransportPollError(_, _) => {}
+            Error::WriteLogicError(_) => {}
             Error::Poll(_) => {}
         }
         log::error!(target: "server", "Error: {err}");

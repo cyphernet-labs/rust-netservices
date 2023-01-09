@@ -1,11 +1,10 @@
 use std::collections::VecDeque;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
 use reactor::poller::{IoFail, IoType, Poll};
-use reactor::{IoStatus, ReadNonblocking, WriteNonblocking};
 
 use crate::NetSession;
 
@@ -63,10 +62,9 @@ impl<S: NetSession> Tunnel<S> {
         macro_rules! handle {
             ($call:expr, |$var:ident| $expr:expr) => {
                 match $call {
-                    IoStatus::Success($var) => $expr,
-                    IoStatus::WouldBlock => {}
-                    IoStatus::Shutdown => return Ok((in_count, out_count)),
-                    IoStatus::Err(err) => return Err(err),
+                    Ok(0) => return Ok((in_count, out_count)),
+                    Ok($var) => $expr,
+                    Err(err) => return Err(err),
                 }
             };
         }
@@ -85,33 +83,27 @@ impl<S: NetSession> Tunnel<S> {
                 };
                 if fd == int_fd {
                     if ev.write {
-                        handle!(
-                            stream.write_nonblocking(in_buf.make_contiguous()),
-                            |written| {
-                                stream.flush()?;
-                                in_buf.drain(..written);
-                                in_count += written;
-                            }
-                        );
+                        handle!(stream.write(in_buf.make_contiguous()), |written| {
+                            stream.flush()?;
+                            in_buf.drain(..written);
+                            in_count += written;
+                        });
                     }
                     if ev.read {
-                        handle!(stream.read_nonblocking(&mut buf), |read| {
+                        handle!(stream.read(&mut buf), |read| {
                             out_buf.extend(&buf[..read]);
                         });
                     }
                 } else if fd == ext_fd {
                     if ev.write {
-                        handle!(
-                            self.session.write_nonblocking(out_buf.make_contiguous()),
-                            |written| {
-                                self.session.flush()?;
-                                out_buf.drain(..written);
-                                out_count += written;
-                            }
-                        );
+                        handle!(self.session.write(out_buf.make_contiguous()), |written| {
+                            self.session.flush()?;
+                            out_buf.drain(..written);
+                            out_count += written;
+                        });
                     }
                     if ev.read {
-                        handle!(self.session.read_nonblocking(&mut buf), |read| {
+                        handle!(self.session.read(&mut buf), |read| {
                             in_buf.extend(&buf[..read]);
                         });
                     }
