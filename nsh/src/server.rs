@@ -97,7 +97,7 @@ impl<D: Delegate> reactor::Handler for Server<D> {
                     .extend(self.delegate.input(id, data, &self.ecdh));
             }
             SessionEvent::Terminated(err) => {
-                log::error!(target: "server", "Connection with {id} is terminated due to an error {err}");
+                log::error!(target: "server", "Connection with {id} is terminated due to an error: {err}");
             }
         }
     }
@@ -107,7 +107,21 @@ impl<D: Delegate> reactor::Handler for Server<D> {
     }
 
     fn handle_error(&mut self, err: Error<Self::Listener, Self::Transport>) {
-        log::error!(target: "server", "Error {err}");
+        match err {
+            Error::TransportDisconnect(id, transport, _) => {
+                log::warn!(target: "server", "Remote peer {}@{id} disconnected", transport.transient_addr());
+                return;
+            }
+            // All others are errors:
+            Error::ListenerUnknown(_) => {}
+            Error::TransportUnknown(_) => {}
+            Error::WriteFailure(_, _) => {}
+            Error::ListenerDisconnect(_, _, _) => {}
+            Error::ListenerPollError(_, _) => {}
+            Error::TransportPollError(_, _) => {}
+            Error::Poll(_) => {}
+        }
+        log::error!(target: "server", "Error: {err}");
     }
 
     fn handover_listener(&mut self, listener: Self::Listener) {
