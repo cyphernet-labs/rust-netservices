@@ -138,6 +138,10 @@ impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        // TODO: Do handshake
+        if !self.established {
+            self.established = true;
+        }
         self.connection.flush()
     }
 }

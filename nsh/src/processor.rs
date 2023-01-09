@@ -24,10 +24,7 @@ impl Delegate for Processor {
         let mut action_queue = vec![];
 
         let cmd = match String::from_utf8(data) {
-            Ok(cmd) => {
-                log::info!(target: "nsh", "Executing `{cmd}` for {fd}");
-                cmd
-            }
+            Ok(cmd) => cmd,
             Err(err) => {
                 log::warn!(target: "nsh", "Non-UTF8 command from {fd}: {err}");
                 action_queue.push(Action::Send(fd, b"NON_UTF8_COMMAND".to_vec()));
@@ -42,6 +39,7 @@ impl Delegate for Processor {
             return action_queue;
         };
 
+        log::info!(target: "nsh", "Executing '{cmd}' for {fd}");
         match cmd {
             Command::ECHO => {
                 match process::Command::new("sh")

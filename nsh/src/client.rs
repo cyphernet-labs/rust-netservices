@@ -59,11 +59,11 @@ impl Client {
     fn recv(&mut self) -> Option<Vec<u8>> {
         return match self.session.read(&mut self.buf) {
             Ok(0) => {
-                log::warn!(target: "nsh", "Connection reset with {}", self.session.expect_id());
+                log::warn!(target: "nsh", "Connection reset by {}", self.session.expect_id());
                 None
             }
             Err(err) if err.kind() == io::ErrorKind::ConnectionReset => {
-                log::warn!(target: "nsh", "Connection reset with {}", self.session.expect_id());
+                log::warn!(target: "nsh", "Connection reset by {}", self.session.expect_id());
                 None
             }
             Ok(len) => {

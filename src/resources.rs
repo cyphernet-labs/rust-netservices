@@ -361,10 +361,12 @@ where
             "I/O on terminated transport"
         );
 
+        let mut force_write_intent = false;
         if self.state == TransportState::Init {
             #[cfg(feature = "log")]
             log::debug!(target: "transport", "Transport {self} is connected, initializing handshake");
 
+            force_write_intent = true;
             self.state = TransportState::Handshake;
         } else if self.state == TransportState::Handshake {
             debug_assert_eq!(self.read_buffer_len, 0);
@@ -378,7 +380,8 @@ where
             Io::Write => self.handle_writable(),
         };
 
-        if io == Io::Read && self.state == TransportState::Handshake {
+        // During handshake, after each read we need to write
+        if (io == Io::Read && self.state == TransportState::Handshake) || force_write_intent {
             self.write_intent = true;
         }
 
@@ -388,17 +391,14 @@ where
             #[cfg(feature = "log")]
             log::debug!(target: "transport", "Peer {self} has reset the connection");
 
+            self.state = TransportState::Terminated;
             resp
         } else if self.session.handshake_completed() && self.state == TransportState::Handshake {
-            // During the handshake only termination can happen, but in this case
-            // we would not be in a `TransportState::Handshake` state anymore
-            debug_assert!(
-                matches!(&resp, Some(SessionEvent::Terminated(e)) if e.kind() == io::ErrorKind::ConnectionReset)
-            );
-
             #[cfg(feature = "log")]
             log::debug!(target: "transport", "Handshake with {self} is complete");
 
+            // We just got connected; may need to send output
+            self.write_intent = true;
             self.state = TransportState::Active;
             Some(SessionEvent::Established(self.session.expect_id()))
         } else {

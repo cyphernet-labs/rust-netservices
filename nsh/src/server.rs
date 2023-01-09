@@ -103,6 +103,7 @@ impl<D: Delegate> reactor::Handler for Server<D> {
             }
             SessionEvent::Terminated(err) => {
                 log::error!(target: "server", "Connection with {id} is terminated due to an error: {err}");
+                self.action_queue.push_back(Action::UnregisterTransport(id));
             }
         }
     }
@@ -122,13 +123,20 @@ impl<D: Delegate> reactor::Handler for Server<D> {
                 self.outbox.entry(id).or_default().push_back(msg)
             }
             // All others are errors:
-            err @ Error::ListenerUnknown(_)
-            | err @ Error::TransportUnknown(_)
-            | err @ Error::WriteFailure(_, _)
-            | err @ Error::ListenerDisconnect(_, _, _)
-            | err @ Error::ListenerPollError(_, _)
-            | err @ Error::TransportPollError(_, _)
-            | err @ Error::Poll(_) => log::error!(target: "server", "Error: {err}"),
+            ref err @ Error::ListenerUnknown(_)
+            | ref err @ Error::TransportUnknown(_)
+            | ref err @ Error::Poll(_) => {
+                log::error!(target: "server", "Error: {err}");
+            }
+            ref err @ Error::ListenerDisconnect(id, _, _)
+            | ref err @ Error::ListenerPollError(id, _) => {
+                log::error!(target: "server", "Error: {err}");
+                self.action_queue.push_back(Action::UnregisterListener(id));
+            }
+            ref err @ Error::WriteFailure(id, _) | ref err @ Error::TransportPollError(id, _) => {
+                log::error!(target: "server", "Error: {err}");
+                self.action_queue.push_back(Action::UnregisterTransport(id));
+            }
         }
     }
 
