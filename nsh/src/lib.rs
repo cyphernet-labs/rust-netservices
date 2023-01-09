@@ -3,10 +3,9 @@ extern crate amplify;
 #[macro_use]
 extern crate clap;
 
-use cyphernet::addr::PeerAddr;
+use cyphernet::addr::{MixName, NetAddr, PeerAddr};
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
 use netservices::noise::NoiseXk;
-use std::net;
 
 pub mod client;
 pub mod command;
@@ -14,5 +13,5 @@ pub mod processor;
 pub mod server;
 pub mod shell;
 
-pub type RemoteAddr = PeerAddr<PublicKey, net::SocketAddr>;
+pub type RemoteAddr = PeerAddr<PublicKey, NetAddr<MixName>>;
 pub type Transport = netservices::NetResource<NoiseXk<PrivateKey>>;

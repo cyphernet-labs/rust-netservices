@@ -3,18 +3,26 @@ use std::process;
 use std::process::Stdio;
 use std::str::FromStr;
 
-use crate::command::Command;
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
-use netservices::NetSession;
+use netservices::{NetSession, Proxy};
 use reactor::Resource;
 
+use crate::command::Command;
 use crate::server::{Action, Delegate};
 use crate::Transport;
 
-#[derive(Debug, Default)]
-pub struct Processor {}
+#[derive(Debug)]
+pub struct Processor<P: Proxy + Send> {
+    proxy: P,
+}
 
-impl Delegate for Processor {
+impl<P: Proxy + Send> Processor<P> {
+    pub fn new(proxy: P) -> Self {
+        Self { proxy }
+    }
+}
+
+impl<P: Proxy + Send> Delegate for Processor<P> {
     fn new_client(&mut self, _id: RawFd, key: PublicKey) -> Vec<Action> {
         log::debug!(target: "nsh", "Remote {key} is connected");
         vec![]
@@ -59,20 +67,23 @@ impl Delegate for Processor {
                     }
                 }
             }
-            Command::Forward { hop, command } => match Transport::connect(hop, ecdh, true) {
-                Ok(transport) => {
-                    let id = transport.id();
-                    action_queue.push(Action::RegisterTransport(transport));
-                    action_queue.push(Action::Send(id, command.to_string().as_bytes().to_vec()));
+            Command::Forward { hop, command } => {
+                match Transport::connect_nonblocking(hop, ecdh, &self.proxy) {
+                    Ok(transport) => {
+                        let id = transport.id();
+                        action_queue.push(Action::RegisterTransport(transport));
+                        action_queue
+                            .push(Action::Send(id, command.to_string().as_bytes().to_vec()));
+                    }
+                    Err(err) => {
+                        action_queue.push(Action::Send(
+                            fd,
+                            format!("Failure: {err}").as_bytes().to_vec(),
+                        ));
+                        action_queue.push(Action::UnregisterTransport(fd));
+                    }
                 }
-                Err(err) => {
-                    action_queue.push(Action::Send(
-                        fd,
-                        format!("Failure: {err}").as_bytes().to_vec(),
-                    ));
-                    action_queue.push(Action::UnregisterTransport(fd));
-                }
-            },
+            }
         };
 
         action_queue

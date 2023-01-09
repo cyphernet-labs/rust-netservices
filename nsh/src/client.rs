@@ -3,9 +3,8 @@ use std::io::{self, Read, Write};
 use amplify::hex::ToHex;
 use cyphernet::crypto::ed25519::PrivateKey;
 use netservices::noise::NoiseXk;
-use netservices::socks5::Socks5Error;
 use netservices::tunnel::READ_BUFFER_SIZE;
-use netservices::NetSession;
+use netservices::{NetSession, Proxy};
 
 use crate::command::Command;
 use crate::RemoteAddr;
@@ -36,13 +35,12 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn connect(
+    pub fn connect<P: Proxy>(
         ecdh: &PrivateKey,
         remote_addr: RemoteAddr,
-        // socks5_proxy: net::SocketAddr,
-    ) -> Result<Self, Socks5Error> {
-        // TODO: Do socks5 connection
-        let session = Session::connect(remote_addr, ecdh, false)?;
+        proxy: &P,
+    ) -> Result<Self, P::Error> {
+        let session = Session::connect_blocking(remote_addr, ecdh, proxy)?;
         Ok(Self {
             buf: vec![0u8; READ_BUFFER_SIZE],
             session,

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, ToSocketAddrs};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 use std::{io, net};
@@ -57,7 +57,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> WriteAtomic for NetA
 }
 
 impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
-    pub fn bind(addr: impl Into<net::SocketAddr>, session_context: S::Context) -> io::Result<Self> {
+    pub fn bind(addr: &impl ToSocketAddrs, session_context: S::Context) -> io::Result<Self> {
         let listener = L::bind(addr)?;
         listener.set_nonblocking(true)?;
         Ok(Self {
@@ -161,19 +161,23 @@ impl<S: NetSession> NetSession for NetResource<S> {
         S::accept(connection, context).and_then(Self::new)
     }
 
-    fn connect(
+    fn connect_blocking<P: Proxy>(
         addr: Self::PeerAddr,
         context: &Self::Context,
-        nonblocking: bool,
-    ) -> io::Result<Self> {
-        let mut session = S::connect(addr, context, nonblocking)?;
-        session.set_nonblocking(nonblocking)?;
-        let state = if nonblocking {
-            TransportState::Init
-        } else {
-            TransportState::Handshake
-        };
-        Self::with(session, false, state)
+        proxy: &P,
+    ) -> Result<Self, P::Error> {
+        let session = S::connect_blocking(addr, context, proxy)?;
+        Self::with(session, false, TransportState::Handshake).map_err(P::Error::from)
+    }
+
+    #[cfg(feature = "socket2")]
+    fn connect_nonblocking<P: Proxy>(
+        addr: Self::PeerAddr,
+        context: &Self::Context,
+        proxy: &P,
+    ) -> Result<Self, P::Error> {
+        let session = S::connect_nonblocking(addr, context, proxy)?;
+        Self::with(session, false, TransportState::Init).map_err(P::Error::from)
     }
 
     fn session_id(&self) -> Option<Self::Id> {
@@ -332,10 +336,7 @@ impl<S: NetSession> NetResource<S> {
     }
 }
 
-impl<S: NetSession> Resource for NetResource<S>
-where
-    S::TransientAddr: Into<net::SocketAddr>,
-{
+impl<S: NetSession> Resource for NetResource<S> {
     type Id = RawFd;
     type Event = SessionEvent<S>;
 
@@ -572,4 +573,5 @@ mod split {
         }
     }
 }
+use crate::connection::Proxy;
 pub use split::*;
