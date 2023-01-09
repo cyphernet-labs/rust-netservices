@@ -53,7 +53,6 @@ pub trait NetConnection: Send + SplitIo + StreamNonblocking + AsRawFd {
 impl SplitIo for TcpStream {
     type Read = Self;
     type Write = Self;
-    type Err = io::Error;
 
     fn split_io(self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
         match self.try_clone() {
@@ -258,7 +257,6 @@ impl NetConnection for socket2::Socket {
 impl SplitIo for socket2::Socket {
     type Read = Self;
     type Write = Self;
-    type Err = io::Error;
 
     fn split_io(self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
         match self.try_clone() {

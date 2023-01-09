@@ -17,7 +17,7 @@ pub trait NetSession: StreamNonblocking + SplitIo + AsRawFd + Send + Sized {
     /// connections
     type PeerAddr: Addr;
     /// Address which combines what is known for both incoming and outgoing connections.
-    type TransitionAddr: Addr;
+    type TransientAddr: Addr;
 
     fn accept(connection: Self::Connection, context: &Self::Context) -> io::Result<Self>;
     fn connect(
@@ -26,15 +26,15 @@ pub trait NetSession: StreamNonblocking + SplitIo + AsRawFd + Send + Sized {
         nonblocking: bool,
     ) -> io::Result<Self>;
 
-    fn id(&self) -> Option<Self::Id>;
+    fn session_id(&self) -> Option<Self::Id>;
     fn expect_id(&self) -> Self::Id {
-        self.id()
+        self.session_id()
             .expect("net session id is not present when expected")
     }
 
     fn handshake_completed(&self) -> bool;
 
-    fn transient_addr(&self) -> Self::TransitionAddr;
+    fn transient_addr(&self) -> Self::TransientAddr;
     fn peer_addr(&self) -> Option<Self::PeerAddr>;
     fn local_addr(&self) -> <Self::Connection as NetConnection>::Addr;
 
@@ -54,7 +54,7 @@ impl NetSession for net::TcpStream {
     type Connection = Self;
     type Id = RawFd;
     type PeerAddr = net::SocketAddr;
-    type TransitionAddr = net::SocketAddr;
+    type TransientAddr = net::SocketAddr;
 
     fn accept(connection: Self::Connection, _context: &Self::Context) -> io::Result<Self> {
         Ok(connection)
@@ -68,7 +68,7 @@ impl NetSession for net::TcpStream {
         NetConnection::connect(addr, nonblocking)
     }
 
-    fn id(&self) -> Option<Self::Id> {
+    fn session_id(&self) -> Option<Self::Id> {
         Some(self.as_raw_fd())
     }
 
@@ -76,7 +76,7 @@ impl NetSession for net::TcpStream {
         true
     }
 
-    fn transient_addr(&self) -> Self::TransitionAddr {
+    fn transient_addr(&self) -> Self::TransientAddr {
         <Self as NetConnection>::remote_addr(self)
     }
 
@@ -119,7 +119,7 @@ impl NetSession for socket2::Socket {
     type Connection = Self;
     type Id = RawFd;
     type PeerAddr = net::SocketAddr;
-    type TransitionAddr = net::SocketAddr;
+    type TransientAddr = net::SocketAddr;
 
     fn accept(connection: Self::Connection, _context: &Self::Context) -> io::Result<Self> {
         Ok(connection)
@@ -133,7 +133,7 @@ impl NetSession for socket2::Socket {
         NetConnection::connect(addr, nonblocking)
     }
 
-    fn id(&self) -> Option<Self::Id> {
+    fn session_id(&self) -> Option<Self::Id> {
         Some(self.as_raw_fd())
     }
 
@@ -141,7 +141,7 @@ impl NetSession for socket2::Socket {
         true
     }
 
-    fn transient_addr(&self) -> Self::TransitionAddr {
+    fn transient_addr(&self) -> Self::TransientAddr {
         <Self as NetConnection>::remote_addr(self)
     }
 
