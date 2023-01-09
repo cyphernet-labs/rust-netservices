@@ -257,7 +257,7 @@ where
         })
     }
 
-    fn id(&self) -> Option<Self::Id> {
+    fn session_id(&self) -> Option<Self::Id> {
         match self.remote_addr {
             XkAddr::Partial(_) => None,
             XkAddr::Full(a) => Some(*a.id()),
