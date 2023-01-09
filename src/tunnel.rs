@@ -4,7 +4,7 @@ use std::os::fd::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
-use reactor::poller::{IoType, Poll};
+use reactor::poller::{IoFail, IoType, Poll};
 use reactor::{IoStatus, ReadNonblocking, WriteNonblocking};
 
 use crate::NetSession;
@@ -77,7 +77,12 @@ impl<S: NetSession> Tunnel<S> {
             if count > 0 {
                 return Err(io::ErrorKind::TimedOut.into());
             }
-            while let Some((fd, ev)) = poller.next() {
+            while let Some((fd, res)) = poller.next() {
+                let ev = match res {
+                    Ok(ev) => ev,
+                    Err(IoFail::Connectivity(_)) => return Ok((in_count, out_count)),
+                    Err(IoFail::Os(_)) => return Err(io::ErrorKind::BrokenPipe.into()),
+                };
                 if fd == int_fd {
                     if ev.write {
                         handle!(
