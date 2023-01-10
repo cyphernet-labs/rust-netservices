@@ -291,6 +291,11 @@ impl<S: NetSession> NetResource<S> {
     }
 
     fn handle_writable(&mut self) -> Option<SessionEvent<S>> {
+        if !self.session.handshake_completed() {
+            let _ = self.session.write(&[]);
+            self.write_intent = true;
+            return None;
+        }
         match self.flush() {
             Ok(_) => {
                 self.write_intent = false;
