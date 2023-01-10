@@ -4,7 +4,8 @@ use std::net;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
-use cyphernet::addr::Addr;
+use crate::connection::Proxy;
+use cyphernet::addr::{Addr, MixName, NetAddr};
 
 use crate::resources::SplitIo;
 use crate::NetConnection;
@@ -13,7 +14,7 @@ pub trait NetSession: io::Read + io::Write + SplitIo + AsRawFd + Send + Sized {
     type Context: Send;
     type Connection: NetConnection;
     /// A unique identifier of the session. Usually a part of a transition address.
-    type Id: Send + Display;
+    type Id: Send;
     /// Address used for outgoing connections. May not be known initially for the incoming
     /// connections
     type PeerAddr: Addr + Display;
@@ -21,11 +22,19 @@ pub trait NetSession: io::Read + io::Write + SplitIo + AsRawFd + Send + Sized {
     type TransientAddr: Addr + Display;
 
     fn accept(connection: Self::Connection, context: &Self::Context) -> io::Result<Self>;
-    fn connect(
+
+    fn connect_blocking<P: Proxy>(
         addr: Self::PeerAddr,
         context: &Self::Context,
-        nonblocking: bool,
-    ) -> io::Result<Self>;
+        proxy: &P,
+    ) -> Result<Self, P::Error>;
+
+    #[cfg(feature = "socket2")]
+    fn connect_nonblocking<P: Proxy>(
+        addr: Self::PeerAddr,
+        context: &Self::Context,
+        proxy: &P,
+    ) -> Result<Self, P::Error>;
 
     fn session_id(&self) -> Option<Self::Id>;
     fn expect_id(&self) -> Self::Id {
@@ -54,19 +63,28 @@ impl NetSession for net::TcpStream {
     type Context = ();
     type Connection = Self;
     type Id = RawFd;
-    type PeerAddr = net::SocketAddr;
-    type TransientAddr = net::SocketAddr;
+    type PeerAddr = NetAddr<MixName>;
+    type TransientAddr = NetAddr<MixName>;
 
     fn accept(connection: Self::Connection, _context: &Self::Context) -> io::Result<Self> {
         Ok(connection)
     }
 
-    fn connect(
+    fn connect_blocking<P: Proxy>(
         addr: Self::PeerAddr,
         _context: &Self::Context,
-        nonblocking: bool,
-    ) -> io::Result<Self> {
-        NetConnection::connect(addr, nonblocking)
+        proxy: &P,
+    ) -> Result<Self, P::Error> {
+        NetConnection::connect_blocking(addr, proxy)
+    }
+
+    #[cfg(feature = "socket2")]
+    fn connect_nonblocking<P: Proxy>(
+        addr: Self::PeerAddr,
+        _context: &Self::Context,
+        proxy: &P,
+    ) -> Result<Self, P::Error> {
+        NetConnection::connect_nonblocking(addr, proxy)
     }
 
     fn session_id(&self) -> Option<Self::Id> {
@@ -119,19 +137,27 @@ impl NetSession for socket2::Socket {
     type Context = ();
     type Connection = Self;
     type Id = RawFd;
-    type PeerAddr = net::SocketAddr;
-    type TransientAddr = net::SocketAddr;
+    type PeerAddr = NetAddr<MixName>;
+    type TransientAddr = NetAddr<MixName>;
 
     fn accept(connection: Self::Connection, _context: &Self::Context) -> io::Result<Self> {
         Ok(connection)
     }
 
-    fn connect(
+    fn connect_blocking<P: Proxy>(
         addr: Self::PeerAddr,
         _context: &Self::Context,
-        nonblocking: bool,
-    ) -> io::Result<Self> {
-        NetConnection::connect(addr, nonblocking)
+        proxy: &P,
+    ) -> Result<Self, P::Error> {
+        NetConnection::connect_blocking(addr, proxy)
+    }
+
+    fn connect_nonblocking<P: Proxy>(
+        addr: Self::PeerAddr,
+        _context: &Self::Context,
+        proxy: &P,
+    ) -> Result<Self, P::Error> {
+        NetConnection::connect_nonblocking(addr, proxy)
     }
 
     fn session_id(&self) -> Option<Self::Id> {

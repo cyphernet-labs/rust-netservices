@@ -14,9 +14,10 @@ mod listener;
 pub mod noise;
 mod session;
 pub mod socks5;
+mod transcoders;
 pub mod tunnel;
 
-pub use connection::{NetConnection, ResAddr};
+pub use connection::{Address, NetConnection, Proxy};
 pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
 #[cfg(feature = "io-reactor")]

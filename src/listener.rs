@@ -1,5 +1,5 @@
 use std::io;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::os::unix::io::AsRawFd;
 
 use crate::connection::NetConnection;
@@ -7,7 +7,7 @@ use crate::connection::NetConnection;
 pub trait NetListener: AsRawFd + Send {
     type Stream: NetConnection;
 
-    fn bind(addr: impl Into<SocketAddr>) -> io::Result<Self>
+    fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self>
     where
         Self: Sized;
 
@@ -29,11 +29,11 @@ pub trait NetListener: AsRawFd + Send {
 impl NetListener for TcpListener {
     type Stream = TcpStream;
 
-    fn bind(addr: impl Into<SocketAddr>) -> io::Result<Self>
+    fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self>
     where
         Self: Sized,
     {
-        TcpListener::bind(addr.into())
+        TcpListener::bind(addr)
     }
 
     fn accept(&self) -> io::Result<Self::Stream> {
@@ -72,11 +72,14 @@ impl NetListener for TcpListener {
 impl NetListener for socket2::Socket {
     type Stream = socket2::Socket;
 
-    fn bind(addr: impl Into<SocketAddr>) -> io::Result<Self>
+    fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self>
     where
         Self: Sized,
     {
-        let addr = addr.into();
+        let addr = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or(io::ErrorKind::InvalidInput)?;
         let socket = socket2::Socket::new(
             socket2::Domain::for_address(addr),
             socket2::Type::STREAM,

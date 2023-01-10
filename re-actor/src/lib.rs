@@ -26,6 +26,8 @@
 //! controlled by sending them commands of [`Actor::Cmd`] type via
 //! [`Controller::send`].
 
+#![allow(warnings)]
+
 #[macro_use]
 extern crate amplify;
 

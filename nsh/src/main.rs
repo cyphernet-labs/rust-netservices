@@ -6,12 +6,12 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
-use std::{fs, io, net};
+use std::{fs, io};
 
 use clap::Parser;
-use cyphernet::addr::{PeerAddr, ProxyError, SocketAddr};
+use cyphernet::addr::{HostName, Localhost, MixName, NetAddr, PartialAddr, PeerAddr};
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
-use netservices::socks5::Socks5Error;
+use netservices::socks5::{Socks5, Socks5Error};
 use netservices::tunnel::Tunnel;
 use netservices::NetSession;
 use nsh::client::Client;
@@ -29,6 +29,8 @@ pub const DEFAULT_SOCKS5_PORT: u16 = 9050; // We default to Tor proxy
 pub const DEFAULT_DIR: &'static str = "~/.nsh";
 pub const DEFAULT_ID_FILE: &'static str = "ssi_ed25519";
 
+type AddrArg = PartialAddr<HostName, DEFAULT_PORT>;
+
 #[derive(Clone, Debug, Parser)]
 #[command(author, version, about)]
 struct Args {
@@ -40,7 +42,7 @@ struct Args {
     ///
     /// If the socket address is not given, defaults to 127.0.0.1:3232
     #[arg(short, long)]
-    pub listen: Option<Option<SocketAddr<DEFAULT_PORT>>>,
+    pub listen: Option<Option<AddrArg>>,
 
     /// Path to an identity (key) file.
     #[arg(short, long)]
@@ -49,14 +51,14 @@ struct Args {
     /// SOCKS5 proxy, as IPv4 or IPv6 socket. If port is not given, it defaults
     /// to 9050.
     #[arg(short = 'p', long, conflicts_with = "listen")]
-    pub proxy: Option<SocketAddr<DEFAULT_SOCKS5_PORT>>,
+    pub proxy: Option<AddrArg>,
 
     /// Tunneling mode: listens on a provided address and tunnels all incoming
     /// connections to the `REMOTE_HOST`.
     ///
     /// If the socket address is not given, defaults to 127.0.0.1.
     #[arg(short, long, conflicts_with = "listen")]
-    pub tunnel: Option<Option<String>>,
+    pub tunnel: Option<Option<AddrArg>>,
 
     /// Address of the remote host to connect.
     ///
@@ -68,7 +70,7 @@ struct Args {
     ///
     /// If the address is provided without a port, a default port 3232 is used.
     #[arg(conflicts_with = "listen", required_unless_present = "listen")]
-    pub remote_host: Option<PeerAddr<PublicKey, SocketAddr<DEFAULT_PORT>>>,
+    pub remote_host: Option<PeerAddr<PublicKey, PartialAddr<MixName, DEFAULT_PORT>>>,
 
     /// Command to execute on the remote host
     #[arg(conflicts_with_all = ["listen", "tunnel"], required_unless_present_any = ["listen", "tunnel"])]
@@ -76,9 +78,9 @@ struct Args {
 }
 
 enum Mode {
-    Listen(net::SocketAddr),
+    Listen(NetAddr<HostName>),
     Tunnel {
-        local: String,
+        local: NetAddr<HostName>,
         remote: RemoteAddr,
     },
     Connect {
@@ -90,14 +92,12 @@ enum Mode {
 struct Config {
     pub node_keys: NodeKeys,
     pub mode: Mode,
+    pub proxy_addr: NetAddr<HostName>,
 }
 
 #[derive(Debug, Display, Error, From)]
 #[display(inner)]
 pub enum AppError {
-    #[from]
-    Proxy(ProxyError),
-
     #[from]
     Io(io::Error),
 
@@ -123,11 +123,11 @@ impl TryFrom<Args> for Config {
 
     fn try_from(args: Args) -> Result<Self, Self::Error> {
         let command = if let Some(listen) = args.listen {
-            let local_socket = listen.unwrap_or_else(SocketAddr::localhost).into();
+            let local_socket = listen.unwrap_or_else(Localhost::localhost).into();
             Mode::Listen(local_socket)
         } else if let Some(tunnel) = args.tunnel {
             let local = tunnel
-                .unwrap_or_else(|| SocketAddr::<DEFAULT_PORT>::localhost().to_string())
+                .unwrap_or_else(|| PartialAddr::localhost(None))
                 .into();
             let remote = args.remote_host.expect("clap library broken");
             Mode::Tunnel {
@@ -169,9 +169,12 @@ impl TryFrom<Args> for Config {
         let node_keys = NodeKeys::from(id);
         println!("Using identity {}", node_keys.pk());
 
+        let proxy_addr = args.proxy.unwrap_or(Localhost::localhost()).into();
+
         Ok(Config {
             node_keys,
             mode: command,
+            proxy_addr,
         })
     }
 }
@@ -182,13 +185,14 @@ fn run() -> Result<(), AppError> {
     LogLevel::from_verbosity_flag_count(args.verbose).apply();
 
     let config = Config::try_from(args)?;
+    let proxy = Socks5::new(config.proxy_addr)?;
 
     match config.mode {
         Mode::Listen(socket_addr) => {
             println!("Listening on {socket_addr} ...");
 
-            // TODO: Listen on an address
-            let service = Server::<Processor>::bind(config.node_keys.ecdh().clone(), socket_addr)?;
+            let processor = Processor::new(proxy);
+            let service = Server::with(config.node_keys.ecdh().clone(), &socket_addr, processor)?;
             let reactor = Reactor::new(service, popol::Poller::new())?;
 
             reactor.join()?;
@@ -196,7 +200,8 @@ fn run() -> Result<(), AppError> {
         Mode::Tunnel { remote, local } => {
             eprintln!("Tunneling to {remote} from {local}...");
 
-            let session = Transport::connect(remote, config.node_keys.ecdh(), false)?;
+            let session =
+                Transport::connect_blocking(remote.clone(), config.node_keys.ecdh(), &proxy)?;
             let mut tunnel = match Tunnel::with(session, local) {
                 Ok(tunnel) => tunnel,
                 Err((session, err)) => {
@@ -214,7 +219,7 @@ fn run() -> Result<(), AppError> {
             eprintln!("Connecting to {remote_host} ...");
 
             let mut stdout = io::stdout();
-            let mut client = Client::connect(config.node_keys.ecdh(), remote_host)?;
+            let mut client = Client::connect(config.node_keys.ecdh(), remote_host, &proxy)?;
             let mut printout = client.exec(remote_command)?;
             eprintln!("Remote output >>>");
             for batch in &mut printout {
