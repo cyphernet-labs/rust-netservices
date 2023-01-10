@@ -191,7 +191,6 @@ fn run() -> Result<(), AppError> {
         Mode::Listen(socket_addr) => {
             println!("Listening on {socket_addr} ...");
 
-            // TODO: Listen on an address
             let processor = Processor::new(proxy);
             let service = Server::with(config.node_keys.ecdh().clone(), &socket_addr, processor)?;
             let reactor = Reactor::new(service, popol::Poller::new())?;
