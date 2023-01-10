@@ -152,7 +152,6 @@ pub struct NoiseXk<E: Ecdh, S: NetConnection = TcpStream> {
     remote_addr: XkAddr<E::Pk, S::Addr>,
     connection: S,
     transcoder: NoiseTranscoder<NoiseXkState>,
-    established: bool,
 }
 
 impl<E: Ecdh, S: NetConnection> AsRawFd for NoiseXk<E, S> {
@@ -163,11 +162,22 @@ impl<E: Ecdh, S: NetConnection> AsRawFd for NoiseXk<E, S> {
 
 impl<E: Ecdh, S: NetConnection> Read for NoiseXk<E, S> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        // TODO: Do handshake
-        if !self.established {
-            self.established = true;
-            self.remote_addr.upgrade(E::Pk::generator());
-            return Ok(0);
+        if !self.transcoder.is_handshake_complete() {
+            let mut input = vec![0u8; self.transcoder.next_handshake_len()];
+            self.connection.read_exact(&mut input)?;
+            let act = self
+                .transcoder
+                .advance_handshake(&input)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+            match act {
+                None => {
+                    self.remote_addr.upgrade(E::Pk::generator());
+                    return Ok(0);
+                }
+                Some(act) => {
+                    self.write_all(&act)?;
+                }
+            }
         }
         self.connection.read(buf)
     }
@@ -175,18 +185,10 @@ impl<E: Ecdh, S: NetConnection> Read for NoiseXk<E, S> {
 
 impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        // TODO: Do handshake
-        if !self.established {
-            self.established = true;
-        }
         self.connection.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        // TODO: Do handshake
-        if !self.established {
-            self.established = true;
-        }
         self.connection.flush()
     }
 }
@@ -196,7 +198,7 @@ impl<E: Ecdh, S: NetConnection> SplitIo for NoiseXk<E, S> {
     type Write = NoiseXkWriter<E, S>;
 
     fn split_io(mut self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
-        if !self.established {
+        if !self.transcoder.is_handshake_complete() {
             return Err(SplitIoError {
                 original: self,
                 error: io::ErrorKind::NotConnected.into(),
@@ -249,7 +251,6 @@ impl<E: Ecdh, S: NetConnection> SplitIo for NoiseXk<E, S> {
             remote_addr: XkAddr::Full(write.remote_addr),
             transcoder: NoiseTranscoder::with_split(write.encryptor, read.decryptor),
             connection: S::from_split_io(read.reader, write.writer),
-            established: true,
         }
     }
 }
@@ -268,7 +269,6 @@ impl<S: NetConnection> NetSession for NoiseXk<ed25519::PrivateKey, S> {
             remote_addr: XkAddr::Partial(connection.remote_addr()),
             connection,
             transcoder: NoiseTranscoder::with_xk_responder(ecdh),
-            established: false,
         })
     }
 
@@ -286,7 +286,6 @@ impl<S: NetConnection> NetSession for NoiseXk<ed25519::PrivateKey, S> {
             remote_addr: XkAddr::Full(peer_addr),
             connection: socket,
             transcoder: NoiseTranscoder::with_xk_initiator(ecdh, remote_key),
-            established: false,
         })
     }
 
@@ -305,7 +304,6 @@ impl<S: NetConnection> NetSession for NoiseXk<ed25519::PrivateKey, S> {
             remote_addr: XkAddr::Full(peer_addr),
             connection: socket,
             transcoder: NoiseTranscoder::with_xk_initiator(ecdh, remote_key),
-            established: false,
         })
     }
 
@@ -317,7 +315,7 @@ impl<S: NetConnection> NetSession for NoiseXk<ed25519::PrivateKey, S> {
     }
 
     fn handshake_completed(&self) -> bool {
-        self.established
+        self.transcoder.is_handshake_complete()
     }
 
     fn transient_addr(&self) -> Self::TransientAddr {
