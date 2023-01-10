@@ -1,10 +1,10 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
-use std::io;
 use std::mem::MaybeUninit;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
+use std::{io, net};
 
 use cyphernet::addr::{Addr, MixName, NetAddr};
 
@@ -87,12 +87,15 @@ impl NetConnection for TcpStream {
     type Addr = NetAddr<MixName>;
 
     fn connect_blocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
-        proxy.connect_blocking(addr)
+        match addr.host {
+            MixName::Ip(ip) => TcpStream::connect((ip, addr.port)).map_err(P::Error::from),
+            _ => proxy.connect_blocking(addr),
+        }
     }
 
     #[cfg(feature = "socket2")]
     fn connect_nonblocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
-        proxy.connect_nonblocking(addr)
+        Ok(socket2::Socket::connect_nonblocking(addr, proxy)?.into())
     }
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
@@ -157,49 +160,52 @@ impl NetConnection for socket2::Socket {
     type Addr = NetAddr<MixName>;
 
     fn connect_blocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
-        proxy.connect_blocking(addr).map(Self::from)
+        Ok(match addr.host {
+            MixName::Ip(ip) => TcpStream::connect((ip, addr.port))?,
+            _ => proxy.connect_blocking(addr)?,
+        }
+        .into())
     }
 
     fn connect_nonblocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
-        proxy.connect_nonblocking(addr).map(Self::from)
-    }
-
-    /* TODO: Use in proxy implementation
-    fn connect(addr: Self::Addr, nonblocking: bool) -> io::Result<Self> {
-        let addr = addr.into();
-        let socket = socket2::Socket::new(
-            socket2::Domain::for_address(addr),
-            socket2::Type::STREAM,
-            None,
-        )?;
-        socket.set_nonblocking(nonblocking)?;
-        match socket2::Socket::connect(&socket, &addr.into()) {
-            Ok(()) => {
-                #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Connected to {}", addr);
+        match addr.host {
+            MixName::Ip(ip) => {
+                let addr = net::SocketAddr::new(ip, addr.port);
+                let socket = socket2::Socket::new(
+                    socket2::Domain::for_address(addr),
+                    socket2::Type::STREAM,
+                    None,
+                )?;
+                socket.set_nonblocking(true)?;
+                match socket2::Socket::connect(&socket, &addr.into()) {
+                    Ok(()) => {
+                        #[cfg(feature = "log")]
+                        log::debug!(target: "netservices", "Connected to {}", addr);
+                    }
+                    Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {
+                        #[cfg(feature = "log")]
+                        log::debug!(target: "netservices", "Connecting to {} in a non-blocking way", addr);
+                    }
+                    Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
+                        #[cfg(feature = "log")]
+                        log::error!(target: "netservices", "Can't connect to {}: address already in use", addr);
+                        return Err(io::Error::from(io::ErrorKind::AlreadyExists).into());
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        #[cfg(feature = "log")]
+                        log::error!(target: "netservices", "Can't connect to {} in a non-blocking way", addr);
+                    }
+                    Err(e) => {
+                        #[cfg(feature = "log")]
+                        log::debug!(target: "netservices", "Error connecting to {}: {}", addr, e);
+                        return Err(e.into());
+                    }
+                }
+                Ok(socket)
             }
-            Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {
-                #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Connecting to {} in a non-blocking way", addr);
-            }
-            Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
-                #[cfg(feature = "log")]
-                log::error!(target: "netservices", "Can't connect to {}: address already in use", addr);
-                return Err(io::Error::from(io::ErrorKind::AlreadyExists));
-            }
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                #[cfg(feature = "log")]
-                log::error!(target: "netservices", "Can't connect to {} in a non-blocking way", addr);
-            }
-            Err(e) => {
-                #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Error connecting to {}: {}", addr, e);
-                return Err(e);
-            }
+            _ => Ok(proxy.connect_blocking(addr)?.into()),
         }
-        Ok(socket)
     }
-     */
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
         socket2::Socket::shutdown(self, how)
