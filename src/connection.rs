@@ -6,7 +6,7 @@ use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
-use cyphernet::addr::{Addr, MixName, NetAddr};
+use cyphernet::addr::{Addr, HostName, NetAddr};
 
 use crate::resources::{SplitIo, SplitIoError};
 use crate::socks5::ToSocks5Dst;
@@ -84,11 +84,11 @@ impl SplitIo for TcpStream {
 }
 
 impl NetConnection for TcpStream {
-    type Addr = NetAddr<MixName>;
+    type Addr = NetAddr<HostName>;
 
     fn connect_blocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
         match addr.host {
-            MixName::Ip(ip) => TcpStream::connect((ip, addr.port)).map_err(P::Error::from),
+            HostName::Ip(ip) => TcpStream::connect((ip, addr.port)).map_err(P::Error::from),
             _ => proxy.connect_blocking(addr),
         }
     }
@@ -157,11 +157,11 @@ impl NetConnection for TcpStream {
 
 #[cfg(feature = "socket2")]
 impl NetConnection for socket2::Socket {
-    type Addr = NetAddr<MixName>;
+    type Addr = NetAddr<HostName>;
 
     fn connect_blocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
         Ok(match addr.host {
-            MixName::Ip(ip) => TcpStream::connect((ip, addr.port))?,
+            HostName::Ip(ip) => TcpStream::connect((ip, addr.port))?,
             _ => proxy.connect_blocking(addr)?,
         }
         .into())
@@ -169,7 +169,7 @@ impl NetConnection for socket2::Socket {
 
     fn connect_nonblocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
         match addr.host {
-            MixName::Ip(ip) => {
+            HostName::Ip(ip) => {
                 let addr = net::SocketAddr::new(ip, addr.port);
                 let socket = socket2::Socket::new(
                     socket2::Domain::for_address(addr),

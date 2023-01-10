@@ -5,7 +5,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
 use crate::connection::Proxy;
-use cyphernet::addr::{Addr, MixName, NetAddr};
+use cyphernet::addr::{Addr, HostName, NetAddr};
 
 use crate::resources::SplitIo;
 use crate::NetConnection;
@@ -63,8 +63,8 @@ impl NetSession for net::TcpStream {
     type Context = ();
     type Connection = Self;
     type Id = RawFd;
-    type PeerAddr = NetAddr<MixName>;
-    type TransientAddr = NetAddr<MixName>;
+    type PeerAddr = NetAddr<HostName>;
+    type TransientAddr = NetAddr<HostName>;
 
     fn accept(connection: Self::Connection, _context: &Self::Context) -> io::Result<Self> {
         Ok(connection)
@@ -137,8 +137,8 @@ impl NetSession for socket2::Socket {
     type Context = ();
     type Connection = Self;
     type Id = RawFd;
-    type PeerAddr = NetAddr<MixName>;
-    type TransientAddr = NetAddr<MixName>;
+    type PeerAddr = NetAddr<HostName>;
+    type TransientAddr = NetAddr<HostName>;
 
     fn accept(connection: Self::Connection, _context: &Self::Context) -> io::Result<Self> {
         Ok(connection)
