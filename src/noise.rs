@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use cyphernet::addr::{Addr, Host, PeerAddr, ToSocketAddr};
 use cyphernet::crypto::{ed25519, EcPk, Ecdh};
-use cyphernet::noise::framing::NoiseTranscoder;
+use cyphernet::noise::framing::{NoiseDecryptor, NoiseEncryptor, NoiseState, NoiseTranscoder};
 use cyphernet::noise::xk::NoiseXkState;
 use ed25519_compact::x25519;
 
@@ -120,9 +120,36 @@ impl<Id: PeerId, A: Address> XkAddr<Id, A> {
     }
 }
 
+pub struct NoiseXkReader<E: Ecdh, S: NetConnection = TcpStream> {
+    remote_addr: PeerAddr<E::Pk, S::Addr>,
+    reader: S::Read,
+    decryptor: NoiseDecryptor,
+}
+
+pub struct NoiseXkWriter<E: Ecdh, S: NetConnection = TcpStream> {
+    remote_addr: PeerAddr<E::Pk, S::Addr>,
+    writer: S::Write,
+    encryptor: NoiseEncryptor,
+}
+
+impl<E: Ecdh, S: NetConnection> Read for NoiseXkReader<E, S> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.reader.read(buf)
+    }
+}
+
+impl<E: Ecdh, S: NetConnection> Write for NoiseXkWriter<E, S> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.writer.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
+}
+
 pub struct NoiseXk<E: Ecdh, S: NetConnection = TcpStream> {
     remote_addr: XkAddr<E::Pk, S::Addr>,
-    local_node: E,
     connection: S,
     transcoder: NoiseTranscoder<NoiseXkState>,
     established: bool,
@@ -165,21 +192,20 @@ impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
 }
 
 impl<E: Ecdh, S: NetConnection> SplitIo for NoiseXk<E, S> {
-    type Read = Self;
-    type Write = Self;
+    type Read = NoiseXkReader<E, S>;
+    type Write = NoiseXkWriter<E, S>;
 
     fn split_io(mut self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
-        todo!()
-        /*
         if !self.established {
             return Err(SplitIoError {
                 original: self,
                 error: io::ErrorKind::NotConnected.into(),
             });
         }
+        let peer_addr = self.remote_addr.expect_peer_addr().clone();
 
-        let (a, b) = match self.connection.split_io() {
-            Ok((a, b)) => (a, b),
+        let (reader, writer) = match self.connection.split_io() {
+            Ok((reader, writer)) => (reader, writer),
             Err(SplitIoError { original, error }) => {
                 self.connection = original;
                 return Err(SplitIoError {
@@ -188,31 +214,43 @@ impl<E: Ecdh, S: NetConnection> SplitIo for NoiseXk<E, S> {
                 });
             }
         };
-        self.connection = b;
+
+        let (encryptor, decryptor) = match self.transcoder.try_into_split() {
+            Ok((encryptor, decryptor)) => (encryptor, decryptor),
+            Err((transcoder, _)) => {
+                self.transcoder = transcoder;
+                self.connection = S::from_split_io(reader, writer);
+                return Err(SplitIoError {
+                    original: self,
+                    error: io::ErrorKind::NotConnected.into(),
+                });
+            }
+        };
+
         Ok((
-            Self {
-                remote_addr: self.remote_addr.clone(),
-                local_node: self.local_node.clone(),
-                connection: a,
-                established: self.established,
+            NoiseXkReader {
+                remote_addr: peer_addr.clone(),
+                reader,
+                decryptor,
             },
-            self,
+            NoiseXkWriter {
+                remote_addr: peer_addr,
+                writer,
+                encryptor,
+            },
         ))
-         */
     }
 
     fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
-        todo!();
-        /*
-        debug_assert!(read.established);
-        debug_assert_eq!(read.established, write.established);
-        Self {
-            remote_addr: write.remote_addr,
-            local_node: write.local_node,
-            connection: S::from_split_io(read.connection, write.connection),
-            established: read.established & write.established,
+        if read.remote_addr != write.remote_addr {
+            panic!("merging unrelated objects");
         }
-         */
+        Self {
+            remote_addr: XkAddr::Full(write.remote_addr),
+            transcoder: NoiseTranscoder::with_split(write.encryptor, read.decryptor),
+            connection: S::from_split_io(read.reader, write.writer),
+            established: true,
+        }
     }
 }
 
@@ -228,7 +266,6 @@ impl<S: NetConnection> NetSession for NoiseXk<ed25519::PrivateKey, S> {
             x25519::SecretKey::from_ed25519(context.as_inner()).expect("invalid local node key");
         Ok(Self {
             remote_addr: XkAddr::Partial(connection.remote_addr()),
-            local_node: context.clone(),
             connection,
             transcoder: NoiseTranscoder::with_xk_responder(ecdh),
             established: false,
@@ -247,7 +284,6 @@ impl<S: NetConnection> NetSession for NoiseXk<ed25519::PrivateKey, S> {
         let socket = S::connect_blocking(peer_addr.addr().clone(), proxy)?;
         Ok(Self {
             remote_addr: XkAddr::Full(peer_addr),
-            local_node: context.clone(),
             connection: socket,
             transcoder: NoiseTranscoder::with_xk_initiator(ecdh, remote_key),
             established: false,
@@ -267,7 +303,6 @@ impl<S: NetConnection> NetSession for NoiseXk<ed25519::PrivateKey, S> {
         let socket = S::connect_nonblocking(peer_addr.addr().clone(), proxy)?;
         Ok(Self {
             remote_addr: XkAddr::Full(peer_addr),
-            local_node: context.clone(),
             connection: socket,
             transcoder: NoiseTranscoder::with_xk_initiator(ecdh, remote_key),
             established: false,
