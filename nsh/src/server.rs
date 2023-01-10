@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::net::ToSocketAddrs;
 use std::os::fd::RawFd;
-use std::time::Instant;
+use std::time::Duration;
 
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
 use netservices::noise::NoiseXk;
@@ -46,9 +46,8 @@ impl<D: Delegate> reactor::Handler for Server<D> {
     type Transport = Transport;
     type Command = ();
 
-    fn tick(&mut self, time: Instant) {
-        let time = time.elapsed().as_micros();
-        log::trace!(target: "server", "reactor ticks at {time}");
+    fn tick(&mut self, time: Duration) {
+        log::trace!(target: "server", "reactor ticks at {time:?}");
     }
 
     fn handle_wakeup(&mut self) {
@@ -59,7 +58,7 @@ impl<D: Delegate> reactor::Handler for Server<D> {
         &mut self,
         id: <Self::Listener as Resource>::Id,
         event: <Self::Listener as Resource>::Event,
-        time: Instant,
+        time: Duration,
     ) {
         log::trace!(target: "server", "Listener event on {id} at {time:?}");
         match event {
@@ -86,7 +85,7 @@ impl<D: Delegate> reactor::Handler for Server<D> {
         &mut self,
         id: <Self::Transport as Resource>::Id,
         event: <Self::Transport as Resource>::Event,
-        time: Instant,
+        time: Duration,
     ) {
         log::trace!(target: "server", "I/O on {id} at {time:?}");
         match event {
