@@ -70,7 +70,7 @@ struct Args {
     ///
     /// If the address is provided without a port, a default port 3232 is used.
     #[arg(conflicts_with = "listen", required_unless_present = "listen")]
-    pub remote_host: Option<PeerAddr<PublicKey, NetAddr<MixName>>>,
+    pub remote_host: Option<PeerAddr<PublicKey, PartialAddr<MixName, DEFAULT_PORT>>>,
 
     /// Command to execute on the remote host
     #[arg(conflicts_with_all = ["listen", "tunnel"], required_unless_present_any = ["listen", "tunnel"])]
