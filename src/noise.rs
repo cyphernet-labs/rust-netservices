@@ -194,6 +194,7 @@ impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
                 .advance_handshake(&[])
                 .map_err(|err| io::Error::new(io::ErrorKind::ConnectionAborted, err))?;
             if let Some(next_act) = act {
+                log::trace!(target: "handshake", "Sent {next_act:02x?}");
                 self.connection.write_all(&next_act)?
             }
             return Err(io::ErrorKind::Interrupted.into());
