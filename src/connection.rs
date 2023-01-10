@@ -1,26 +1,20 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::mem::MaybeUninit;
-use std::net::{Shutdown, SocketAddr, TcpStream};
+use std::net::{Shutdown, TcpStream};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
-use crate::socks5::{Socks5, Socks5Error};
 use cyphernet::addr::Addr;
-use reactor::{ReadNonblocking, WriteNonblocking};
 
-use crate::wire::{SplitIo, SplitIoError};
+use crate::resources::{SplitIo, SplitIoError};
 
 pub trait ResAddr: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
 impl<T> ResAddr for T where T: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
 
-pub trait StreamNonblocking: ReadNonblocking + WriteNonblocking {}
-
-impl<T> StreamNonblocking for T where T: ReadNonblocking + WriteNonblocking {}
-
 /// Network stream is an abstraction of TCP stream object.
-pub trait NetConnection: Send + SplitIo + StreamNonblocking + AsRawFd {
+pub trait NetConnection: Send + SplitIo + io::Read + io::Write + AsRawFd {
     type Addr: ResAddr + Send;
 
     fn connect(addr: Self::Addr, nonblocking: bool) -> io::Result<Self>
@@ -54,7 +48,6 @@ pub trait NetConnection: Send + SplitIo + StreamNonblocking + AsRawFd {
 impl SplitIo for TcpStream {
     type Read = Self;
     type Write = Self;
-    type Err = io::Error;
 
     fn split_io(self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
         match self.try_clone() {
@@ -259,7 +252,6 @@ impl NetConnection for socket2::Socket {
 impl SplitIo for socket2::Socket {
     type Read = Self;
     type Write = Self;
-    type Err = io::Error;
 
     fn split_io(self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
         match self.try_clone() {
