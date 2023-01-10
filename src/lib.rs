@@ -14,6 +14,7 @@ mod listener;
 pub mod noise;
 mod session;
 pub mod socks5;
+mod transcoders;
 pub mod tunnel;
 
 pub use connection::{Address, NetConnection, Proxy};

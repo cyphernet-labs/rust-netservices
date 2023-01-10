@@ -1,3 +1,4 @@
+use amplify::Wrapper;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::io::{self, Read, Write};
@@ -6,7 +7,10 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
 use cyphernet::addr::{Addr, Host, PeerAddr, ToSocketAddr};
-use cyphernet::crypto::{EcPk, Ecdh};
+use cyphernet::crypto::{ed25519, EcPk, Ecdh};
+use cyphernet::noise::framing::NoiseTranscoder;
+use cyphernet::noise::xk::NoiseXkState;
+use ed25519_compact::x25519;
 
 use crate::connection::Proxy;
 use crate::resources::{SplitIo, SplitIoError};
@@ -120,6 +124,7 @@ pub struct NoiseXk<E: Ecdh, S: NetConnection = TcpStream> {
     remote_addr: XkAddr<E::Pk, S::Addr>,
     local_node: E,
     connection: S,
+    transcoder: NoiseTranscoder<NoiseXkState>,
     established: bool,
 }
 
@@ -211,22 +216,21 @@ impl<E: Ecdh, S: NetConnection> SplitIo for NoiseXk<E, S> {
     }
 }
 
-impl<E: Ecdh, S: NetConnection> NetSession for NoiseXk<E, S>
-where
-    E: Send + Clone,
-    E::Pk: Send + Copy + Display,
-{
-    type Context = E;
+impl<S: NetConnection> NetSession for NoiseXk<ed25519::PrivateKey, S> {
+    type Context = ed25519::PrivateKey;
     type Connection = S;
-    type Id = E::Pk;
+    type Id = ed25519::PublicKey;
     type PeerAddr = PeerAddr<Self::Id, S::Addr>;
     type TransientAddr = XkAddr<Self::Id, S::Addr>;
 
     fn accept(connection: S, context: &Self::Context) -> io::Result<Self> {
+        let ecdh =
+            x25519::SecretKey::from_ed25519(context.as_inner()).expect("invalid local node key");
         Ok(Self {
             remote_addr: XkAddr::Partial(connection.remote_addr()),
             local_node: context.clone(),
             connection,
+            transcoder: NoiseTranscoder::with_xk_responder(ecdh),
             established: false,
         })
     }
@@ -236,11 +240,16 @@ where
         context: &Self::Context,
         proxy: &P,
     ) -> Result<Self, P::Error> {
+        let ecdh =
+            x25519::SecretKey::from_ed25519(context.as_inner()).expect("invalid local node key");
+        let remote_key = x25519::PublicKey::from_ed25519(peer_addr.id().as_inner())
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
         let socket = S::connect_blocking(peer_addr.addr().clone(), proxy)?;
         Ok(Self {
             remote_addr: XkAddr::Full(peer_addr),
             local_node: context.clone(),
             connection: socket,
+            transcoder: NoiseTranscoder::with_xk_initiator(ecdh, remote_key),
             established: false,
         })
     }
@@ -251,11 +260,16 @@ where
         context: &Self::Context,
         proxy: &P,
     ) -> Result<Self, P::Error> {
+        let ecdh =
+            x25519::SecretKey::from_ed25519(context.as_inner()).expect("invalid local node key");
+        let remote_key = x25519::PublicKey::from_ed25519(peer_addr.id().as_inner())
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
         let socket = S::connect_nonblocking(peer_addr.addr().clone(), proxy)?;
         Ok(Self {
             remote_addr: XkAddr::Full(peer_addr),
             local_node: context.clone(),
             connection: socket,
+            transcoder: NoiseTranscoder::with_xk_initiator(ecdh, remote_key),
             established: false,
         })
     }
