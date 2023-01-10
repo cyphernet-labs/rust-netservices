@@ -6,7 +6,7 @@ extern crate log_crate as log;
 pub mod actors;
 
 #[cfg(feature = "io-reactor")]
-pub mod wire;
+pub mod resources;
 
 mod connection;
 mod frame;
@@ -16,9 +16,9 @@ mod session;
 pub mod socks5;
 pub mod tunnel;
 
-pub use connection::{NetConnection, ResAddr, StreamNonblocking};
+pub use connection::{NetConnection, ResAddr};
 pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
-pub use session::NetSession;
 #[cfg(feature = "io-reactor")]
-pub use wire::{ListenerEvent, NetAccept, NetTransport, SessionEvent};
+pub use resources::{ListenerEvent, NetAccept, NetResource, SessionEvent};
+pub use session::NetSession;

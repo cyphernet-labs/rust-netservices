@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::os::fd::RawFd;
 use std::time::Instant;
 use std::{io, net};
@@ -20,6 +20,7 @@ pub trait Delegate: Default + Send {
 }
 
 pub struct Server<D: Delegate> {
+    outbox: HashMap<RawFd, VecDeque<Vec<u8>>>,
     action_queue: VecDeque<Action>,
     delegate: D,
     ecdh: PrivateKey,
@@ -31,6 +32,7 @@ impl<D: Delegate> Server<D> {
         let listener = Accept::bind(listen, ecdh.clone())?;
         action_queue.push_back(Action::RegisterListener(listener));
         Ok(Self {
+            outbox: empty!(),
             action_queue,
             delegate: D::default(),
             ecdh,
@@ -62,7 +64,7 @@ impl<D: Delegate> reactor::Handler for Server<D> {
         match event {
             ListenerEvent::Accepted(session) => {
                 log::info!(target: "server", "Incoming connection from {} on {}", session.transient_addr(), session.local_addr());
-                match Transport::accept(session) {
+                match Transport::new(session) {
                     Ok(transport) => {
                         log::info!(target: "server", "Connection accepted, registering {} with reactor", transport.transient_addr());
                         self.action_queue
@@ -88,8 +90,11 @@ impl<D: Delegate> reactor::Handler for Server<D> {
         log::trace!(target: "server", "I/O on {id} at {time:?}");
         match event {
             SessionEvent::Established(key) => {
-                log::debug!(target: "server", "Connection with remote peer {key}@{id} successfully established");
+                let queue = self.outbox.remove(&id).unwrap_or_default();
+                log::debug!(target: "server", "Connection with remote peer {key}@{id} successfully established; processing {} items from outbox", queue.len());
                 self.action_queue.extend(self.delegate.new_client(id, key));
+                self.action_queue
+                    .extend(queue.into_iter().map(|msg| Action::Send(id, msg)))
             }
             SessionEvent::Data(data) => {
                 log::trace!(target: "server", "Incoming data {data:?}");
@@ -97,7 +102,8 @@ impl<D: Delegate> reactor::Handler for Server<D> {
                     .extend(self.delegate.input(id, data, &self.ecdh));
             }
             SessionEvent::Terminated(err) => {
-                log::error!(target: "server", "Connection with {id} is terminated due to an error {err}");
+                log::error!(target: "server", "Connection with {id} is terminated due to an error: {err}");
+                self.action_queue.push_back(Action::UnregisterTransport(id));
             }
         }
     }
@@ -106,11 +112,32 @@ impl<D: Delegate> reactor::Handler for Server<D> {
         log::debug!(target: "server", "Command {cmd:?} received");
     }
 
-    fn handle_error(
-        &mut self,
-        err: Error<<Self::Listener as Resource>::Id, <Self::Transport as Resource>::Id>,
-    ) {
-        log::error!(target: "server", "Error {err}");
+    fn handle_error(&mut self, err: Error<Self::Listener, Self::Transport>) {
+        match err {
+            Error::TransportDisconnect(_id, transport, _) => {
+                log::warn!(target: "server", "Remote peer {transport} disconnected");
+                return;
+            }
+            Error::WriteLogicError(id, msg) => {
+                log::debug!(target: "server", "Remote peer {id} is not ready, putting message to outbox");
+                self.outbox.entry(id).or_default().push_back(msg)
+            }
+            // All others are errors:
+            ref err @ Error::ListenerUnknown(_)
+            | ref err @ Error::TransportUnknown(_)
+            | ref err @ Error::Poll(_) => {
+                log::error!(target: "server", "Error: {err}");
+            }
+            ref err @ Error::ListenerDisconnect(id, _, _)
+            | ref err @ Error::ListenerPollError(id, _) => {
+                log::error!(target: "server", "Error: {err}");
+                self.action_queue.push_back(Action::UnregisterListener(id));
+            }
+            ref err @ Error::WriteFailure(id, _) | ref err @ Error::TransportPollError(id, _) => {
+                log::error!(target: "server", "Error: {err}");
+                self.action_queue.push_back(Action::UnregisterTransport(id));
+            }
+        }
     }
 
     fn handover_listener(&mut self, listener: Self::Listener) {

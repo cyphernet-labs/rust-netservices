@@ -3,7 +3,6 @@ extern crate amplify;
 
 use std::any::Any;
 use std::io::Write;
-use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -18,7 +17,7 @@ use netservices::NetSession;
 use nsh::client::Client;
 use nsh::command::Command;
 use nsh::processor::Processor;
-use nsh::server::{NodeKeys, Server};
+use nsh::server::{Accept, NodeKeys, Server};
 use nsh::shell::LogLevel;
 use nsh::{RemoteAddr, Transport};
 use reactor::poller::popol;
@@ -106,7 +105,7 @@ pub enum AppError {
     Curve25519(ed25519_compact::Error),
 
     #[from]
-    Reactor(reactor::Error<net::SocketAddr, RawFd>),
+    Reactor(reactor::Error<Accept, Transport>),
 
     #[from]
     Socks5(Socks5Error),
