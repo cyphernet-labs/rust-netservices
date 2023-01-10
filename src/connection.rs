@@ -1,23 +1,38 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::mem::MaybeUninit;
-use std::net::{Shutdown, TcpStream};
+use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
-use cyphernet::addr::Addr;
+use cyphernet::addr::{Addr, MixName, NetAddr};
 
 use crate::resources::{SplitIo, SplitIoError};
+use crate::socks5::ToSocks5Dst;
 
-pub trait ResAddr: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
-impl<T> ResAddr for T where T: Addr + Copy + Ord + Eq + Hash + Debug + Display {}
+pub trait Address: Addr + Clone + Eq + Hash + Debug + Display {}
+impl<T> Address for T where T: Addr + Clone + Eq + Hash + Debug + Display {}
+
+pub trait Proxy: ToSocketAddrs {
+    type Error: std::error::Error + From<io::Error>;
+
+    fn connect_blocking<A: ToSocks5Dst>(&self, addr: A) -> Result<TcpStream, Self::Error>;
+
+    #[cfg(feature = "socket2")]
+    fn connect_nonblocking<A: ToSocks5Dst>(&self, addr: A) -> Result<TcpStream, Self::Error>;
+}
 
 /// Network stream is an abstraction of TCP stream object.
 pub trait NetConnection: Send + SplitIo + io::Read + io::Write + AsRawFd {
-    type Addr: ResAddr + Send;
+    type Addr: Address + Send;
 
-    fn connect(addr: Self::Addr, nonblocking: bool) -> io::Result<Self>
+    fn connect_blocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error>
+    where
+        Self: Sized;
+
+    #[cfg(feature = "socket2")]
+    fn connect_nonblocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error>
     where
         Self: Sized;
 
@@ -69,19 +84,18 @@ impl SplitIo for TcpStream {
 }
 
 impl NetConnection for TcpStream {
-    type Addr = net::SocketAddr;
+    type Addr = NetAddr<MixName>;
 
-    #[cfg(not(feature = "socket2"))]
-    fn connect(addr: Self::Addr, nonblocking: bool) -> io::Result<Self> {
-        if nonblocking {
-            panic!("non-blocking TcpStream::connect requires socket2 feature")
-        } else {
-            TcpStream::connect(addr)
+    fn connect_blocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
+        match addr.host {
+            MixName::Ip(ip) => TcpStream::connect((ip, addr.port)).map_err(P::Error::from),
+            _ => proxy.connect_blocking(addr),
         }
     }
+
     #[cfg(feature = "socket2")]
-    fn connect(addr: Self::Addr, nonblocking: bool) -> io::Result<Self> {
-        <socket2::Socket as NetConnection>::connect(addr, nonblocking).map(Self::from)
+    fn connect_nonblocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
+        Ok(socket2::Socket::connect_nonblocking(addr, proxy)?.into())
     }
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
@@ -89,11 +103,15 @@ impl NetConnection for TcpStream {
     }
 
     fn remote_addr(&self) -> Self::Addr {
-        TcpStream::peer_addr(self).expect("TCP stream doesn't know remote peer address")
+        TcpStream::peer_addr(self)
+            .expect("TCP stream doesn't know remote peer address")
+            .into()
     }
 
     fn local_addr(&self) -> Self::Addr {
-        TcpStream::local_addr(self).expect("TCP stream doesn't has local address")
+        TcpStream::local_addr(self)
+            .expect("TCP stream doesn't has local address")
+            .into()
     }
 
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
@@ -139,41 +157,54 @@ impl NetConnection for TcpStream {
 
 #[cfg(feature = "socket2")]
 impl NetConnection for socket2::Socket {
-    type Addr = net::SocketAddr;
+    type Addr = NetAddr<MixName>;
 
-    fn connect(addr: Self::Addr, nonblocking: bool) -> io::Result<Self> {
-        let addr = addr.into();
-        let socket = socket2::Socket::new(
-            socket2::Domain::for_address(addr),
-            socket2::Type::STREAM,
-            None,
-        )?;
-        socket.set_nonblocking(nonblocking)?;
-        match socket2::Socket::connect(&socket, &addr.into()) {
-            Ok(()) => {
-                #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Connected to {}", addr);
-            }
-            Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {
-                #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Connecting to {} in a non-blocking way", addr);
-            }
-            Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
-                #[cfg(feature = "log")]
-                log::error!(target: "netservices", "Can't connect to {}: address already in use", addr);
-                return Err(io::Error::from(io::ErrorKind::AlreadyExists));
-            }
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                #[cfg(feature = "log")]
-                log::error!(target: "netservices", "Can't connect to {} in a non-blocking way", addr);
-            }
-            Err(e) => {
-                #[cfg(feature = "log")]
-                log::debug!(target: "netservices", "Error connecting to {}: {}", addr, e);
-                return Err(e);
-            }
+    fn connect_blocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
+        Ok(match addr.host {
+            MixName::Ip(ip) => TcpStream::connect((ip, addr.port))?,
+            _ => proxy.connect_blocking(addr)?,
         }
-        Ok(socket)
+        .into())
+    }
+
+    fn connect_nonblocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
+        match addr.host {
+            MixName::Ip(ip) => {
+                let addr = net::SocketAddr::new(ip, addr.port);
+                let socket = socket2::Socket::new(
+                    socket2::Domain::for_address(addr),
+                    socket2::Type::STREAM,
+                    None,
+                )?;
+                socket.set_nonblocking(true)?;
+                match socket2::Socket::connect(&socket, &addr.into()) {
+                    Ok(()) => {
+                        #[cfg(feature = "log")]
+                        log::debug!(target: "netservices", "Connected to {}", addr);
+                    }
+                    Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {
+                        #[cfg(feature = "log")]
+                        log::debug!(target: "netservices", "Connecting to {} in a non-blocking way", addr);
+                    }
+                    Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
+                        #[cfg(feature = "log")]
+                        log::error!(target: "netservices", "Can't connect to {}: address already in use", addr);
+                        return Err(io::Error::from(io::ErrorKind::AlreadyExists).into());
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        #[cfg(feature = "log")]
+                        log::error!(target: "netservices", "Can't connect to {} in a non-blocking way", addr);
+                    }
+                    Err(e) => {
+                        #[cfg(feature = "log")]
+                        log::debug!(target: "netservices", "Error connecting to {}: {}", addr, e);
+                        return Err(e.into());
+                    }
+                }
+                Ok(socket)
+            }
+            _ => Ok(proxy.connect_blocking(addr)?.into()),
+        }
     }
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
@@ -185,6 +216,7 @@ impl NetConnection for socket2::Socket {
             .expect("net stream must use only connections")
             .as_socket()
             .expect("net stream must use only connections")
+            .into()
     }
 
     fn local_addr(&self) -> Self::Addr {
@@ -192,6 +224,7 @@ impl NetConnection for socket2::Socket {
             .expect("net stream doesn't has local socket")
             .as_socket()
             .expect("net stream doesn't has local socket")
+            .into()
     }
 
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
