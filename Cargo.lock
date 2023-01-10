@@ -380,7 +380,7 @@ dependencies = [
 [[package]]
 name = "cyphernet"
 version = "0.1.0"
-source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=master#ae7e5f992907ed0ef97b469967238af59cdf8d81"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=master#352d1e1966617672e2ea01dd075e3b1c9e1d73db"
 dependencies = [
  "amplify 4.0.0-beta.7",
  "base32",

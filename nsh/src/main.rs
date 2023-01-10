@@ -9,7 +9,7 @@ use std::time::Duration;
 use std::{fs, io};
 
 use clap::Parser;
-use cyphernet::addr::{HostName, Localhost, MixName, NetAddr, PartialAddr, PeerAddr};
+use cyphernet::addr::{HostName, InetHost, Localhost, NetAddr, PartialAddr, PeerAddr};
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
 use netservices::socks5::{Socks5, Socks5Error};
 use netservices::tunnel::Tunnel;
@@ -42,7 +42,7 @@ struct Args {
     ///
     /// If the socket address is not given, defaults to 127.0.0.1:3232
     #[arg(short, long)]
-    pub listen: Option<Option<AddrArg>>,
+    pub listen: Option<Option<PartialAddr<InetHost, DEFAULT_PORT>>>,
 
     /// Path to an identity (key) file.
     #[arg(short, long)]
@@ -51,14 +51,14 @@ struct Args {
     /// SOCKS5 proxy, as IPv4 or IPv6 socket. If port is not given, it defaults
     /// to 9050.
     #[arg(short = 'p', long, conflicts_with = "listen")]
-    pub proxy: Option<AddrArg>,
+    pub proxy: Option<PartialAddr<InetHost, DEFAULT_SOCKS5_PORT>>,
 
     /// Tunneling mode: listens on a provided address and tunnels all incoming
     /// connections to the `REMOTE_HOST`.
     ///
-    /// If the socket address is not given, defaults to 127.0.0.1.
+    /// If the socket address is not given, defaults to 127.0.0.1:3232
     #[arg(short, long, conflicts_with = "listen")]
-    pub tunnel: Option<Option<AddrArg>>,
+    pub tunnel: Option<Option<PartialAddr<InetHost, DEFAULT_SOCKS5_PORT>>>,
 
     /// Address of the remote host to connect.
     ///
@@ -70,7 +70,7 @@ struct Args {
     ///
     /// If the address is provided without a port, a default port 3232 is used.
     #[arg(conflicts_with = "listen", required_unless_present = "listen")]
-    pub remote_host: Option<PeerAddr<PublicKey, PartialAddr<MixName, DEFAULT_PORT>>>,
+    pub remote_host: Option<PeerAddr<PublicKey, AddrArg>>,
 
     /// Command to execute on the remote host
     #[arg(conflicts_with_all = ["listen", "tunnel"], required_unless_present_any = ["listen", "tunnel"])]
@@ -78,9 +78,9 @@ struct Args {
 }
 
 enum Mode {
-    Listen(NetAddr<HostName>),
+    Listen(NetAddr<InetHost>),
     Tunnel {
-        local: NetAddr<HostName>,
+        local: NetAddr<InetHost>,
         remote: RemoteAddr,
     },
     Connect {
@@ -92,7 +92,7 @@ enum Mode {
 struct Config {
     pub node_keys: NodeKeys,
     pub mode: Mode,
-    pub proxy_addr: NetAddr<HostName>,
+    pub proxy_addr: NetAddr<InetHost>,
 }
 
 #[derive(Debug, Display, Error, From)]
