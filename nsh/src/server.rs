@@ -147,7 +147,7 @@ impl<D: Delegate> reactor::Handler for Server<D> {
     }
 
     fn handover_transport(&mut self, transport: Self::Transport) {
-        log::warn!(target: "server", "Remote peer {}@{:?} disconnected", transport.transient_addr(), Resource::id(&transport));
+        log::warn!(target: "server", "Remote peer {transport} disconnected");
     }
 }
 

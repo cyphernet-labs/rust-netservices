@@ -165,17 +165,20 @@ impl<E: Ecdh, S: NetConnection> Read for NoiseXk<E, S> {
         if !self.transcoder.is_handshake_complete() {
             let mut input = vec![0u8; self.transcoder.next_handshake_len()];
             self.connection.read_exact(&mut input)?;
+            log::trace!(target: "handshake", "Received {input:02x?}");
             let act = self
                 .transcoder
                 .advance_handshake(&input)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+                .map_err(|err| io::Error::new(io::ErrorKind::ConnectionAborted, err))?;
             match act {
                 None => {
                     self.remote_addr.upgrade(E::Pk::generator());
                     return Ok(0);
                 }
                 Some(act) => {
-                    self.write_all(&act)?;
+                    log::trace!(target: "handshake", "Sent {act:02x?}");
+                    self.connection.write_all(&act)?;
+                    return Ok(0);
                 }
             }
         }
@@ -185,6 +188,16 @@ impl<E: Ecdh, S: NetConnection> Read for NoiseXk<E, S> {
 
 impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if !self.transcoder.is_handshake_complete() {
+            let act = self
+                .transcoder
+                .advance_handshake(&[])
+                .map_err(|err| io::Error::new(io::ErrorKind::ConnectionAborted, err))?;
+            if let Some(next_act) = act {
+                self.connection.write_all(&next_act)?
+            }
+            return Err(io::ErrorKind::Interrupted.into());
+        }
         self.connection.write(buf)
     }
 
@@ -281,11 +294,30 @@ impl<S: NetConnection> NetSession for NoiseXk<ed25519::PrivateKey, S> {
             x25519::SecretKey::from_ed25519(context.as_inner()).expect("invalid local node key");
         let remote_key = x25519::PublicKey::from_ed25519(peer_addr.id().as_inner())
             .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-        let socket = S::connect_blocking(peer_addr.addr().clone(), proxy)?;
+        let mut connection = S::connect_blocking(peer_addr.addr().clone(), proxy)?;
+        let mut transcoder = NoiseTranscoder::with_xk_initiator(ecdh, remote_key);
+
+        // Handshake
+        let mut input = vec![];
+        while !transcoder.is_handshake_complete() {
+            let act = transcoder
+                .advance_handshake(&input)
+                .map_err(|err| io::Error::new(io::ErrorKind::ConnectionAborted, err))?;
+            if let Some(act) = act {
+                log::trace!(target: "handshake", "Sent {act:02x?}");
+                connection.write_all(&act)?;
+            }
+            if !transcoder.is_handshake_complete() {
+                input = vec![0u8; transcoder.next_handshake_len()];
+                connection.read_exact(&mut input)?;
+                log::trace!(target: "handshake", "Received {input:02x?}");
+            }
+        }
+
         Ok(Self {
             remote_addr: XkAddr::Full(peer_addr),
-            connection: socket,
-            transcoder: NoiseTranscoder::with_xk_initiator(ecdh, remote_key),
+            connection,
+            transcoder,
         })
     }
 

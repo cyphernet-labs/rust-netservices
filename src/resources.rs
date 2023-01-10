@@ -317,6 +317,7 @@ impl<S: NetSession> NetResource<S> {
             .session
             .read(&mut self.read_buffer[self.read_buffer_len..])
         {
+            Ok(0) if !self.session.handshake_completed() => None,
             Ok(0) => Some(SessionEvent::Terminated(
                 io::ErrorKind::ConnectionReset.into(),
             )),
