@@ -205,10 +205,10 @@ fn run() -> Result<(), AppError> {
                 &socket_addr,
                 processor,
             )?;
-            let reactor = Reactor::new(
+            let reactor = Reactor::with(
                 service,
                 popol::Poller::new(),
-                Some(thread::Builder::new().name(s!("reactor"))),
+                thread::Builder::new().name(s!("reactor")),
             )?;
 
             reactor.join()?;
