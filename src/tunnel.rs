@@ -40,9 +40,11 @@ impl<S: NetSession> Tunnel<S> {
             .listener
             .local_addr()
             .expect("listener always has local addr");
+        #[cfg(feature = "log")]
         log::info!(target: "tunnel", "Tunnel accepting a single connection will run on {listener_addr}");
 
         let (mut stream, socket_addr) = self.listener.accept()?;
+        #[cfg(feature = "log")]
         log::debug!(target: "tunnel", "Incoming connection from {socket_addr} for tunnel {listener_addr}");
 
         stream.set_nonblocking(true)?;
@@ -70,6 +72,7 @@ impl<S: NetSession> Tunnel<S> {
             ($call:expr, |$var:ident| $expr:expr) => {
                 match $call {
                     Ok(0) => {
+                        #[cfg(feature = "log")]
                         log::info!(target: "tunnel",
                             "Tunnel {socket_addr} has completed its work. Total {in_count} bytes are received and {out_count} sent"
                         );
@@ -77,8 +80,9 @@ impl<S: NetSession> Tunnel<S> {
                     },
                     Ok($var) => $expr,
                     Err(err) => {
+                        #[cfg(feature = "log")]
                         log::error!(target: "tunnel",
-                            "Tunnel {socket_addr} has terminated with {err}"
+                            "Tunnel {socket_addr} has terminated with '{err}'"
                         );
                         return Err(err)
                     },
@@ -86,11 +90,13 @@ impl<S: NetSession> Tunnel<S> {
             };
         }
 
+        #[cfg(feature = "log")]
         log::info!(target: "tunnel", "Tunnel on {listener_addr} is operational for a client {socket_addr}");
         loop {
             // Blocking
             let count = poller.poll(Some(timeout))?;
             if count == 0 {
+                #[cfg(feature = "log")]
                 log::warn!(target: "tunnel", "Tunnel {listener_addr} timed out with client {socket_addr}");
                 return Err(io::ErrorKind::TimedOut.into());
             }
@@ -98,41 +104,53 @@ impl<S: NetSession> Tunnel<S> {
                 let ev = match res {
                     Ok(ev) => ev,
                     Err(IoFail::Connectivity(code)) => {
+                        #[cfg(feature = "log")]
                         log::info!(target: "tunnel", "Tunnel {socket_addr} has completed its work with the code {code:#b}");
                         return Ok((in_count, out_count));
                     }
                     Err(IoFail::Os(code)) => {
+                        #[cfg(feature = "log")]
                         log::error!(target: "tunnel", "Tunnel {socket_addr} was terminated with the code {code:#b}");
                         return Err(io::ErrorKind::BrokenPipe.into());
                     }
                 };
                 if fd == int_fd {
                     if ev.write {
+                        log::trace!(target: "tunnel", "attempting to write {} bytes received from the remote {socket_addr}", in_buf.len());
                         handle!(stream.write(in_buf.make_contiguous()), |written| {
                             stream.flush()?;
                             in_buf.drain(..written);
                             in_count += written;
+                            #[cfg(feature = "log")]
                             log::trace!(target: "tunnel", "{socket_addr} received {written} bytes from local out of {} buffered", in_buf.len());
                         });
                     }
                     if ev.read {
+                        log::trace!(target: "tunnel", "attempting to read from the {socket_addr}");
                         handle!(stream.read(&mut buf), |read| {
                             out_buf.extend(&buf[..read]);
+                            poller.set_interest(&ext_fd, IoType::read_write());
+                            #[cfg(feature = "log")]
                             log::trace!(target: "tunnel", "{socket_addr} read {read} bytes from local ({} total in the buffer)", out_buf.len());
                         });
                     }
                 } else if fd == ext_fd {
                     if ev.write {
+                        log::trace!(target: "tunnel", "attempting to write {} bytes received from {socket_addr} to remote", out_buf.len());
                         handle!(self.session.write(out_buf.make_contiguous()), |written| {
                             self.session.flush()?;
                             out_buf.drain(..written);
                             out_count += written;
+                            #[cfg(feature = "log")]
                             log::trace!(target: "tunnel", "{socket_addr} sent {written} bytes to remote out of {} buffered", out_buf.len());
                         });
                     }
                     if ev.read {
+                        log::trace!(target: "tunnel", "attempting to read from the remote");
                         handle!(self.session.read(&mut buf), |read| {
                             in_buf.extend(&buf[..read]);
+                            poller.set_interest(&int_fd, IoType::read_write());
+                            #[cfg(feature = "log")]
                             log::trace!(target: "tunnel", "{socket_addr} read {read} bytes from remote ({} total in the buffer)", in_buf.len());
                         });
                     }
