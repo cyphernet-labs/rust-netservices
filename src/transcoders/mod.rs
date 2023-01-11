@@ -1,6 +1,6 @@
 mod noise;
 
-use crate::resources::SplitIo;
+use crate::SplitIo;
 
 pub trait Encrypt {
     fn encrypt(&mut self, data: &[u8]) -> Vec<u8>;

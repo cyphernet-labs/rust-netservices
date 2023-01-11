@@ -4,7 +4,7 @@ use std::process::Stdio;
 use std::str::FromStr;
 
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
-use netservices::{Authenticator, NetSession, Proxy};
+use netservices::{Authenticator, Proxy};
 use reactor::Resource;
 
 use crate::command::Command;
@@ -69,7 +69,7 @@ impl<P: Proxy + Send> Delegate for Processor<P> {
                 }
             }
             Command::Forward { hop, command } => {
-                match Transport::connect_nonblocking(hop, &(ecdh.clone(), self.auth), &self.proxy) {
+                match Transport::connect(hop, &(ecdh.clone(), self.auth), &self.proxy) {
                     Ok(transport) => {
                         let id = transport.id();
                         action_queue.push(Action::RegisterTransport(transport));

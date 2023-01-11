@@ -11,7 +11,6 @@ use std::{fs, io, thread};
 use clap::Parser;
 use cyphernet::addr::{HostName, InetHost, Localhost, NetAddr, PartialAddr, PeerAddr};
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey, Sign};
-use netservices::noise::NoiseXk;
 use netservices::socks5::{Socks5, Socks5Error};
 use netservices::tunnel::Tunnel;
 use netservices::{Authenticator, NetSession};
@@ -20,7 +19,7 @@ use nsh::command::Command;
 use nsh::processor::Processor;
 use nsh::server::{Accept, NodeKeys, Server};
 use nsh::shell::LogLevel;
-use nsh::{RemoteAddr, Transport};
+use nsh::{RemoteAddr, Session, Transport};
 use reactor::poller::popol;
 use reactor::Reactor;
 
@@ -217,12 +216,11 @@ fn run() -> Result<(), AppError> {
         Mode::Tunnel { remote, local } => {
             eprintln!("Tunneling to {remote} from {local}...");
 
-            let session = Transport::connect_blocking(
+            let session = Session::connect_blocking(
                 remote.clone(),
                 &(config.node_keys.ecdh().clone(), auth),
                 &proxy,
-            )?
-            .into_session();
+            )?;
             let mut tunnel = match Tunnel::with(session, local) {
                 Ok(tunnel) => tunnel,
                 Err((session, err)) => {

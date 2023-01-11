@@ -15,8 +15,7 @@ use ed25519_compact::x25519;
 
 use crate::auth::Authenticator;
 use crate::connection::Proxy;
-use crate::resources::{SplitIo, SplitIoError};
-use crate::{Address, NetConnection, NetSession};
+use crate::{Address, NetConnection, NetSession, SplitIo, SplitIoError};
 
 pub trait PeerId: EcPk {}
 impl<T> PeerId for T where T: EcPk {}
@@ -413,7 +412,7 @@ impl<S: NetConnection> NetSession for NoiseXk<ed25519::PrivateKey, S> {
         }
     }
 
-    fn is_session_established(&self) -> bool {
+    fn is_established(&self) -> bool {
         self.transcoder.is_handshake_complete() && self.authenticator.is_auth_complete()
     }
 
