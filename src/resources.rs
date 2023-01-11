@@ -21,11 +21,12 @@ use std::{io, net};
 use reactor::poller::IoType;
 use reactor::{Io, Resource, WriteAtomic, WriteError};
 
+use crate::tunnel::READ_BUFFER_SIZE;
 use crate::{NetConnection, NetListener, NetSession, Proxy};
 
 // TODO: Make these parameters configurable
 /// Socket read buffer size.
-const READ_BUFFER_SIZE: usize = u16::MAX as usize;
+const HEAP_BUFFER_SIZE: usize = u16::MAX as usize;
 /// Maximum time to wait when reading from a socket.
 const READ_TIMEOUT: Duration = Duration::from_secs(6);
 /// Maximum time to wait when writing to a socket.
@@ -199,8 +200,7 @@ pub struct NetResource<S: NetSession> {
     session: S,
     link_direction: LinkDirection,
     write_intent: bool,
-    read_buffer: Vec<u8>,
-    read_buffer_len: usize,
+    read_buffer: Box<[u8; HEAP_BUFFER_SIZE]>,
     write_buffer: VecDeque<u8>,
 }
 
@@ -269,8 +269,7 @@ impl<S: NetSession> NetResource<S> {
             session,
             link_direction,
             write_intent: false,
-            read_buffer: vec![],
-            read_buffer_len: 0,
+            read_buffer: Box::new([0u8; READ_BUFFER_SIZE]),
             write_buffer: empty!(),
         })
     }
@@ -285,16 +284,12 @@ impl<S: NetSession> NetResource<S> {
     ///
     /// Returns the consumed `self` as a part of an error.
     ///
-    /// If the read buffer is not empty or the write buffer can't be emptied in
-    /// a non-blocking way errors with [`io::ErrorKind::WouldBlock`] kind of
-    /// [`io::Error`].
+    /// If the write buffer can't be emptied in a non-blocking way errors with
+    /// [`io::ErrorKind::WouldBlock`] kind of [`io::Error`].
     ///
     /// If the connection is failed and the write buffer has some data, errors
     /// with the connection failure code.
     pub fn into_session(mut self) -> Result<S, (Self, io::Error)> {
-        if self.read_buffer_len > 0 {
-            return Err((self, io::ErrorKind::WouldBlock.into()));
-        }
         if let Err(err) = self.empty_write_buf() {
             return Err((self, err));
         }
@@ -313,9 +308,8 @@ impl<S: NetSession> NetResource<S> {
             session,
             link_direction,
             write_intent: false,
-            read_buffer: vec![0; READ_BUFFER_SIZE],
-            read_buffer_len: 0,
-            write_buffer: VecDeque::new(),
+            read_buffer: Box::new([0u8; READ_BUFFER_SIZE]),
+            write_buffer: empty!(),
         })
     }
 
@@ -356,18 +350,8 @@ impl<S: NetSession> NetResource<S> {
         self.session.expect_id()
     }
 
-    pub fn read_buf_len(&self) -> usize {
-        self.read_buffer_len
-    }
-
     pub fn write_buf_len(&self) -> usize {
         self.write_buffer.len()
-    }
-
-    pub fn drain_read_buf(&mut self) -> Vec<u8> {
-        let len = self.read_buffer_len;
-        self.read_buffer_len = 0;
-        self.read_buffer[..len].to_vec()
     }
 
     fn terminate(&mut self, reason: io::Error) -> SessionEvent<S> {
@@ -406,18 +390,12 @@ impl<S: NetSession> NetResource<S> {
         // we will be notified again if there is still data to be read on the socket.
         // Hence, there is no use in putting this socket read in a loop, as the second
         // invocation would likely block.
-        match self
-            .session
-            .read(&mut self.read_buffer[self.read_buffer_len..])
-        {
+        match self.session.read(self.read_buffer.as_mut()) {
             Ok(0) if !self.session.is_established() => None,
             Ok(0) => Some(SessionEvent::Terminated(
                 io::ErrorKind::ConnectionReset.into(),
             )),
-            Ok(len) => {
-                self.read_buffer_len += len;
-                Some(SessionEvent::Data(self.drain_read_buf()))
-            }
+            Ok(len) => Some(SessionEvent::Data(self.read_buffer[..len].to_vec())),
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
                 // This shouldn't normally happen, since this function is only called
                 // when there's data on the socket. We leave it here in case external
@@ -467,7 +445,6 @@ impl<S: NetSession> Resource for NetResource<S> {
             force_write_intent = true;
             self.state = TransportState::Handshake;
         } else if self.state == TransportState::Handshake {
-            debug_assert_eq!(self.read_buffer_len, 0);
             debug_assert!(!self.session.is_established());
             #[cfg(feature = "log")]
             log::trace!(target: "transport", "Transport {self} got I/O while in handshake mode");
