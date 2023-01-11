@@ -23,8 +23,9 @@ log_crate = { package = "log", version = "0.4.17" }
 
 [features]
 default = ["io-reactor", "socket2"]
-all = ["io-reactor", "re-actor", "mio", "socket2", "log"]
+all = ["io-reactor", "re-actor", "connect_nonblocking", "mio", "log"]
 log = ["log_crate", "io-reactor/log"]
+connect_nonblocking = ["socket2"]
 
 [patch.crates-io]
 cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet", branch = "master" }

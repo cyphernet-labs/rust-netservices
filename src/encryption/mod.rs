@@ -1,4 +1,5 @@
-mod noise;
+pub mod noise;
+pub mod old;
 
 use crate::SplitIo;
 

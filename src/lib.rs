@@ -2,46 +2,94 @@
 extern crate amplify;
 extern crate log_crate as log;
 
-#[cfg(feature = "re-actor")]
-pub mod actors;
-
-#[cfg(feature = "io-reactor")]
-pub mod resources;
-
 mod auth;
 mod connection;
-mod frame;
-mod listener;
-pub mod noise;
-mod session;
-pub mod socks5;
-mod transcoders;
+mod encryption;
+mod proxy;
+
+mod base;
+pub mod frame;
 pub mod tunnel;
 
-pub use auth::Authenticator;
-pub use connection::{Address, NetConnection, Proxy};
-pub use frame::{Frame, Marshaller};
-pub use listener::NetListener;
+#[cfg(feature = "re-actor")]
+pub mod actors;
 #[cfg(feature = "io-reactor")]
-pub use resources::{ListenerEvent, NetAccept, NetTransport, SessionEvent};
-pub use session::NetSession;
+pub mod reactor;
 
-#[derive(Debug, Display)]
-#[display("{error}")]
-pub struct SplitIoError<T: SplitIo> {
-    pub original: T,
-    pub error: std::io::Error,
+pub use auth::Authenticator;
+pub use base::{NetReader, NetWriter, SplitIo, SplitIoError};
+pub use connection::{Address, NetConnection, NetListener, Proxy};
+pub use frame::{Frame, Marshaller};
+
+#[cfg(feature = "io-reactor")]
+pub use reactor::{ListenerEvent, NetAccept, NetTransport, SessionEvent};
+
+pub trait NetStream: std::io::Read + std::io::Write {}
+
+pub trait NetSession: NetStream {
+    /// Inner session type
+    type Inner: NetSession;
+    /// Underlying connection
+    type Connection: NetConnection;
+    type Artifact;
+
+    fn is_established(&self) -> bool {
+        self.artifact().is_some()
+    }
+    fn artifact(&self) -> Option<Self::Artifact>;
+    fn as_connection(&self) -> &Self::Connection;
+    fn disconnect(self) -> std::io::Result<()>;
 }
 
-impl<T: SplitIo + std::fmt::Debug> std::error::Error for SplitIoError<T> {}
+mod imp_std {
+    use std::net::{Shutdown, SocketAddr, TcpStream};
 
-pub trait SplitIo: Sized {
-    type Read: std::io::Read + Sized;
-    type Write: std::io::Write + Sized;
+    use super::*;
 
-    /// # Panics
-    ///
-    /// If the split operation is not possible
-    fn split_io(self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>>;
-    fn from_split_io(read: Self::Read, write: Self::Write) -> Self;
+    impl NetStream for TcpStream {}
+    impl NetSession for TcpStream {
+        type Inner = ();
+        type Connection = Self;
+        type Artifact = SocketAddr;
+
+        fn artifact(&self) -> Option<Self::Artifact> {
+            self.peer_addr().ok()
+        }
+
+        fn as_connection(&self) -> &Self::Connection {
+            self
+        }
+
+        fn disconnect(self) -> std::io::Result<()> {
+            self.shutdown(Shutdown::Both)
+        }
+    }
+}
+
+#[cfg(feature = "socket2")]
+mod imp_socket2 {
+    use std::net::{Shutdown, SocketAddr};
+
+    use socket2::Socket;
+
+    use super::*;
+
+    impl NetStream for Socket {}
+    impl NetSession for Socket {
+        type Inner = ();
+        type Connection = Self;
+        type Artifact = SocketAddr;
+
+        fn artifact(&self) -> Option<Self::Artifact> {
+            self.peer_addr().ok()?.as_socket()
+        }
+
+        fn as_connection(&self) -> &Self::Connection {
+            self
+        }
+
+        fn disconnect(self) -> std::io::Result<()> {
+            self.shutdown(Shutdown::Both)
+        }
+    }
 }

@@ -249,76 +249,11 @@ impl<E: Ecdh, S: NetSession> Write for NoiseXk<E, S> {
     }
 }
 
-impl<E: Ecdh, S: NetSession> SplitIo for NoiseXk<E, S> {
-    type Read = NoiseXkReader<E, S>;
-    type Write = NoiseXkWriter<E, S>;
-
-    fn split_io(mut self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
-        if !self.transcoder.is_handshake_complete() {
-            return Err(SplitIoError {
-                original: self,
-                error: io::ErrorKind::NotConnected.into(),
-            });
-        }
-        let peer_addr = self.remote_addr.expect_peer_addr().clone();
-
-        let (reader, writer) = match self.connection.split_io() {
-            Ok((reader, writer)) => (reader, writer),
-            Err(SplitIoError { original, error }) => {
-                self.connection = original;
-                return Err(SplitIoError {
-                    original: self,
-                    error,
-                });
-            }
-        };
-
-        let (encryptor, decryptor) = match self.transcoder.try_into_split() {
-            Ok((encryptor, decryptor)) => (encryptor, decryptor),
-            Err((transcoder, _)) => {
-                self.transcoder = transcoder;
-                self.connection = S::from_split_io(reader, writer);
-                return Err(SplitIoError {
-                    original: self,
-                    error: io::ErrorKind::NotConnected.into(),
-                });
-            }
-        };
-
-        Ok((
-            NoiseXkReader {
-                remote_addr: peer_addr.clone(),
-                reader,
-                decryptor,
-            },
-            NoiseXkWriter {
-                remote_addr: peer_addr,
-                writer,
-                encryptor,
-                authenticator: self.authenticator,
-            },
-        ))
-    }
-
-    fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
-        if read.remote_addr != write.remote_addr {
-            panic!("merging unrelated objects");
-        }
-        Self {
-            remote_addr: XkAddr::Full(write.remote_addr),
-            transcoder: NoiseTranscoder::with_split(write.encryptor, read.decryptor),
-            connection: S::from_split_io(read.reader, write.writer),
-            authenticator: write.authenticator,
-        }
-    }
-}
-
 impl<S: NetSession<Context = ()>> NetSession for NoiseXk<PrivateKey, S>
 where
     S::PeerAddr: From<PeerAddr<PublicKey, <S::Connection as NetConnection>::Addr>>,
 {
     type Context = (PrivateKey, Authenticator);
-    type Connection = S::Connection;
     type Id = PublicKey;
     type PeerAddr = PeerAddr<PublicKey, <S::Connection as NetConnection>::Addr>;
     type TransientAddr = XkAddr<PublicKey, <S::Connection as NetConnection>::Addr>;
@@ -393,7 +328,7 @@ where
         })
     }
 
-    #[cfg(feature = "socket2")]
+    #[cfg(feature = "connect_nonblocking")]
     fn connect_nonblocking<P: Proxy>(
         peer_addr: Self::PeerAddr,
         context: Self::Context,
