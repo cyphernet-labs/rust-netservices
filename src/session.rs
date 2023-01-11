@@ -42,7 +42,7 @@ pub trait NetSession: io::Read + io::Write + SplitIo + AsRawFd + Send + Sized {
             .expect("net session id is not present when expected")
     }
 
-    fn handshake_completed(&self) -> bool;
+    fn is_session_established(&self) -> bool;
 
     fn transient_addr(&self) -> Self::TransientAddr;
     fn peer_addr(&self) -> Option<Self::PeerAddr>;
@@ -91,7 +91,7 @@ impl NetSession for net::TcpStream {
         Some(self.as_raw_fd())
     }
 
-    fn handshake_completed(&self) -> bool {
+    fn is_session_established(&self) -> bool {
         true
     }
 
@@ -164,7 +164,7 @@ impl NetSession for socket2::Socket {
         Some(self.as_raw_fd())
     }
 
-    fn handshake_completed(&self) -> bool {
+    fn is_session_established(&self) -> bool {
         true
     }
 
