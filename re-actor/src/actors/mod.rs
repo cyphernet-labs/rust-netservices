@@ -16,7 +16,7 @@
 
 #[cfg(feature = "mio")]
 pub mod mio;
-#[cfg(feature = "socket2")]
+#[cfg(feature = "connect_nonblocking")]
 pub mod socket2;
 pub mod stdfd;
 pub mod stdtcp;
@@ -92,7 +92,7 @@ pub trait Actor {
     /// For instance, flushes write queue or reads the data and executes
     /// certain business logic on the data read.
     ///
-    /// Advances the state of the resources basing on the results of the I/O.
+    /// Advances the state of the reactor basing on the results of the I/O.
     ///
     /// The errors returned by this method are forwarded to [`Self::handle_err`].
     fn io_ready(&mut self, io: IoEv) -> Result<(), Self::Error>;

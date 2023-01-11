@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::actors::{IoEv, IoSrc};
 use crate::{Actor, Scheduler};
 
-/// Manager for a set of resources which are polled for an event loop by the
+/// Manager for a set of reactor which are polled for an event loop by the
 /// re-actor by using [`polling`] library.
 pub struct PollingScheduler<R>
 where

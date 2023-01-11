@@ -225,7 +225,7 @@ impl<S: NetSession> NetTransport<S> {
         Self::with_state(session, TransportState::Handshake, LinkDirection::Inbound)
     }
 
-    #[cfg(feature = "socket2")]
+    #[cfg(feature = "connect_nonblocking")]
     pub fn connect<P: Proxy>(
         addr: S::PeerAddr,
         context: S::Context,

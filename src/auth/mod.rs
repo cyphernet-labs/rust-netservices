@@ -1,5 +1,7 @@
 use std::io;
+use std::time::Duration;
 
+use crate::{NetConnection, NetSession, Proxy};
 use cyphernet::crypto::ed25519::{PublicKey, Signature};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -61,3 +63,10 @@ impl Authenticator {
         self.remote_id.is_some()
     }
 }
+
+pub struct AuthSession<S: NetSession> {
+    inner: S,
+    auth: Authenticator,
+}
+
+impl<S: NetSession> AuthSession<S> {}

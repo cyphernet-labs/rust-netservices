@@ -140,7 +140,7 @@ impl<L: Layout> PoolRuntime<L> {
                 // Nothing to do here
             }
             Ok(()) => {
-                // TODO: Disconnect all resources
+                // TODO: Disconnect all reactor
             }
             Err(chan::TryRecvError::Disconnected) => {
                 panic!("re-actor shutdown channel was dropper")
