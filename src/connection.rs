@@ -74,12 +74,8 @@ impl SplitIo for TcpStream {
         }
     }
 
-    fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
-        // TODO: Do a better detection of unrelated join
-        if read.as_raw_fd() != write.as_raw_fd() {
-            panic!("attempt to join unrelated streams")
-        }
-        read
+    fn from_split_io(_read: Self::Read, write: Self::Write) -> Self {
+        write
     }
 }
 
@@ -296,11 +292,7 @@ impl SplitIo for socket2::Socket {
         }
     }
 
-    fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
-        // TODO: Do a better detection of unrelated join
-        if read.as_raw_fd() != write.as_raw_fd() {
-            panic!("attempt to join unrelated streams")
-        }
-        read
+    fn from_split_io(_read: Self::Read, write: Self::Write) -> Self {
+        write
     }
 }
