@@ -120,7 +120,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
         stream.set_read_timeout(Some(READ_TIMEOUT))?;
         stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
         stream.set_nonblocking(true)?;
-        S::accept(stream, &self.session_context)
+        S::accept(stream, self.session_context.clone())
     }
 }
 
@@ -228,7 +228,7 @@ impl<S: NetSession> NetTransport<S> {
     #[cfg(feature = "socket2")]
     pub fn connect<P: Proxy>(
         addr: S::PeerAddr,
-        context: &S::Context,
+        context: S::Context,
         proxy: &P,
     ) -> Result<Self, P::Error> {
         let session = S::connect_nonblocking(addr, context, proxy)?;
