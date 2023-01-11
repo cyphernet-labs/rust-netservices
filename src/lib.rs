@@ -23,7 +23,7 @@ pub use connection::{Address, NetConnection, Proxy};
 pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
 #[cfg(feature = "io-reactor")]
-pub use resources::{ListenerEvent, NetAccept, NetResource, SessionEvent};
+pub use resources::{ListenerEvent, NetAccept, NetTransport, SessionEvent};
 pub use session::NetSession;
 
 #[derive(Debug, Display)]

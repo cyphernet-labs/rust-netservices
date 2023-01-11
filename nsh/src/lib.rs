@@ -15,4 +15,4 @@ pub mod shell;
 
 pub type RemoteAddr = PeerAddr<PublicKey, NetAddr<HostName>>;
 pub type Session = NoiseXk<PrivateKey>;
-pub type Transport = netservices::NetResource<Session>;
+pub type Transport = netservices::NetTransport<Session>;
