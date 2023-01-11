@@ -200,9 +200,8 @@ where
                 }
             };
         } else if !self.authenticator.is_auth_complete() {
-            let mut auth = self.authenticator;
             return match (
-                auth.verify(&mut self.connection)?,
+                self.authenticator.verify(&mut self.connection)?,
                 self.remote_addr.peer_id(),
             ) {
                 (Some(remote_id), Some(peer_id))
@@ -215,7 +214,6 @@ where
                 }
                 (None, _) => Err(io::ErrorKind::InvalidInput.into()),
                 (Some(remote_id), _) => {
-                    self.authenticator = auth;
                     self.remote_addr.upgrade(remote_id.into_inner().into());
                     Ok(0)
                 }
@@ -237,9 +235,8 @@ impl<E: Ecdh, S: NetConnection> Write for NoiseXk<E, S> {
                 self.connection.write_all(&next_act)?
             }
             return Err(io::ErrorKind::Interrupted.into());
-        } else if !self.authenticator.is_auth_complete() {
-            let auth = self.authenticator;
-            auth.certify(&mut self.connection)?;
+        } else if !self.authenticator.is_auth_sent() {
+            self.authenticator.certify(&mut self.connection)?;
             return Err(io::ErrorKind::Interrupted.into());
         }
         self.connection.write(buf)

@@ -4,6 +4,7 @@ use cyphernet::crypto::ed25519::{PublicKey, Signature};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Authenticator {
+    sent: bool,
     pubkey: PublicKey,
     signature: Signature,
     remote_id: Option<PublicKey>,
@@ -12,16 +13,19 @@ pub struct Authenticator {
 impl Authenticator {
     pub fn new(pubkey: PublicKey, signature: Signature) -> Self {
         Self {
+            sent: false,
             pubkey,
             signature,
             remote_id: None,
         }
     }
 
-    pub fn certify(&self, writer: &mut impl io::Write) -> io::Result<()> {
+    pub fn certify(&mut self, writer: &mut impl io::Write) -> io::Result<()> {
         log::debug!(target: "authentication", "Sending auth credentials: {}, {}", self.pubkey, self.signature);
         writer.write_all(self.pubkey.as_slice())?;
-        writer.write_all(self.signature.as_slice())
+        writer.write_all(self.signature.as_slice())?;
+        self.sent = true;
+        Ok(())
     }
 
     // TODO: Do the real authentication with challenge
@@ -47,6 +51,10 @@ impl Authenticator {
 
     pub fn remote_id(&self) -> Option<PublicKey> {
         self.remote_id
+    }
+
+    pub fn is_auth_sent(&self) -> bool {
+        self.sent
     }
 
     pub fn is_auth_complete(&self) -> bool {
