@@ -168,7 +168,7 @@ impl<S: NetSession> NetSession for NetResource<S> {
         proxy: &P,
     ) -> Result<Self, P::Error> {
         let session = S::connect_blocking(addr, context, proxy)?;
-        Self::with(session, false, TransportState::Handshake).map_err(P::Error::from)
+        Self::with_state(session, false, TransportState::Handshake).map_err(P::Error::from)
     }
 
     #[cfg(feature = "socket2")]
@@ -178,7 +178,7 @@ impl<S: NetSession> NetSession for NetResource<S> {
         proxy: &P,
     ) -> Result<Self, P::Error> {
         let session = S::connect_nonblocking(addr, context, proxy)?;
-        Self::with(session, false, TransportState::Init).map_err(P::Error::from)
+        Self::with_state(session, false, TransportState::Init).map_err(P::Error::from)
     }
 
     fn session_id(&self) -> Option<Self::Id> {
@@ -228,10 +228,28 @@ impl<S: NetSession> NetSession for NetResource<S> {
 
 impl<S: NetSession> NetResource<S> {
     pub fn new(session: S) -> io::Result<Self> {
-        Self::with(session, true, TransportState::Handshake)
+        Self::with_state(session, true, TransportState::Handshake)
     }
 
-    fn with(mut session: S, inbound: bool, state: TransportState) -> io::Result<Self> {
+    pub fn with_session(session: S, inbound: bool) -> Self {
+        Self {
+            state: TransportState::Active,
+            session,
+            inbound,
+            write_intent: false,
+            read_buffer: vec![],
+            read_buffer_len: 0,
+            write_buffer: empty!(),
+        }
+    }
+
+    pub fn into_session(self) -> S {
+        debug_assert_eq!(self.read_buffer_len, 0);
+        debug_assert!(self.write_buffer.is_empty());
+        self.session
+    }
+
+    fn with_state(mut session: S, inbound: bool, state: TransportState) -> io::Result<Self> {
         session.set_read_timeout(Some(READ_TIMEOUT))?;
         session.set_write_timeout(Some(WRITE_TIMEOUT))?;
         Ok(Self {
