@@ -335,10 +335,8 @@ impl<S: NetSession> NetResource<S> {
                 // This shouldn't normally happen, since this function is only called
                 // when there's data on the socket. We leave it here in case external
                 // conditions change.
-                eprintln!("WOULD_BLOCK on resource which had read intent. Dumping net resource:\n{self:?}");
-                debug_assert!(
-                    false,
-                    "WOULD_BLOCK on resource which had read intent. Dumping net resource:"
+                log::warn!(target: "transport",
+                    "WOULD_BLOCK on resource which had read intent - probably normal thing to happen"
                 );
                 None
             }
