@@ -4,11 +4,10 @@ use std::net;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
 
-use crate::connection::Proxy;
 use cyphernet::addr::{Addr, HostName, NetAddr};
 
-use crate::resources::SplitIo;
-use crate::NetConnection;
+use crate::connection::Proxy;
+use crate::{NetConnection, SplitIo};
 
 pub trait NetSession: io::Read + io::Write + SplitIo + AsRawFd + Send + Sized + Debug {
     type Context: Send;
@@ -42,7 +41,7 @@ pub trait NetSession: io::Read + io::Write + SplitIo + AsRawFd + Send + Sized + 
             .expect("net session id is not present when expected")
     }
 
-    fn is_session_established(&self) -> bool;
+    fn is_established(&self) -> bool;
 
     fn transient_addr(&self) -> Self::TransientAddr;
     fn peer_addr(&self) -> Option<Self::PeerAddr>;
@@ -56,6 +55,30 @@ pub trait NetSession: io::Read + io::Write + SplitIo + AsRawFd + Send + Sized + 
     fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()>;
 
     fn disconnect(self) -> io::Result<()>;
+}
+
+pub struct NetReader<S: NetSession> {
+    session: <S as SplitIo>::Read,
+}
+
+impl<S: NetSession> io::Read for NetReader<S> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.session.read(buf)
+    }
+}
+
+pub struct NetWriter<S: NetSession> {
+    session: <S as SplitIo>::Write,
+}
+
+impl<S: NetSession> io::Write for NetWriter<S> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.session.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.session.flush()
+    }
 }
 
 #[cfg(feature = "socket2")]
@@ -91,7 +114,7 @@ impl NetSession for net::TcpStream {
         Some(self.as_raw_fd())
     }
 
-    fn is_session_established(&self) -> bool {
+    fn is_established(&self) -> bool {
         true
     }
 
@@ -164,7 +187,7 @@ impl NetSession for socket2::Socket {
         Some(self.as_raw_fd())
     }
 
-    fn is_session_established(&self) -> bool {
+    fn is_established(&self) -> bool {
         true
     }
 

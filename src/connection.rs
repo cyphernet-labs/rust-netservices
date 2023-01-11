@@ -8,8 +8,8 @@ use std::{io, net};
 
 use cyphernet::addr::{Addr, HostName, NetAddr};
 
-use crate::resources::{SplitIo, SplitIoError};
 use crate::socks5::ToSocks5Dst;
+use crate::{SplitIo, SplitIoError};
 
 pub trait Address: Addr + Clone + Eq + Hash + Debug + Display {}
 impl<T> Address for T where T: Addr + Clone + Eq + Hash + Debug + Display {}
@@ -58,25 +58,6 @@ pub trait NetConnection: Send + SplitIo + io::Read + io::Write + AsRawFd + Debug
     where
         Self: Sized;
     fn take_error(&self) -> io::Result<Option<io::Error>>;
-}
-
-impl SplitIo for TcpStream {
-    type Read = Self;
-    type Write = Self;
-
-    fn split_io(self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
-        match self.try_clone() {
-            Ok(clone) => Ok((clone, self)),
-            Err(error) => Err(SplitIoError {
-                original: self,
-                error,
-            }),
-        }
-    }
-
-    fn from_split_io(_read: Self::Read, write: Self::Write) -> Self {
-        write
-    }
 }
 
 impl NetConnection for TcpStream {
@@ -277,8 +258,7 @@ impl NetConnection for socket2::Socket {
     }
 }
 
-#[cfg(feature = "socket2")]
-impl SplitIo for socket2::Socket {
+impl SplitIo for TcpStream {
     type Read = Self;
     type Write = Self;
 
@@ -294,5 +274,29 @@ impl SplitIo for socket2::Socket {
 
     fn from_split_io(_read: Self::Read, write: Self::Write) -> Self {
         write
+    }
+}
+
+#[cfg(feature = "socket2")]
+impl SplitIo for socket2::Socket {
+    type Read = Self;
+    type Write = Self;
+
+    fn split_io(self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
+        match self.try_clone() {
+            Ok(clone) => Ok((clone, self)),
+            Err(error) => Err(SplitIoError {
+                original: self,
+                error,
+            }),
+        }
+    }
+
+    fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
+        // TODO: Do a better detection of unrelated join
+        if read.as_raw_fd() != write.as_raw_fd() {
+            panic!("attempt to join unrelated streams")
+        }
+        read
     }
 }
