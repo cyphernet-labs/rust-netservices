@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
-use std::{fs, io};
+use std::{fs, io, thread};
 
 use clap::Parser;
 use cyphernet::addr::{HostName, InetHost, Localhost, NetAddr, PartialAddr, PeerAddr};
@@ -205,7 +205,11 @@ fn run() -> Result<(), AppError> {
                 &socket_addr,
                 processor,
             )?;
-            let reactor = Reactor::new(service, popol::Poller::new())?;
+            let reactor = Reactor::new(
+                service,
+                popol::Poller::new(),
+                Some(thread::Builder::new().name(s!("reactor"))),
+            )?;
 
             reactor.join()?;
         }
