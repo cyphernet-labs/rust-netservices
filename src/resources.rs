@@ -158,7 +158,7 @@ pub enum LinkDirection {
     Outbound,
 }
 
-/// An event happening for a [`NetResource`] network transport and delivered to
+/// An event happening for a [`NetTransport`] network transport and delivered to
 /// a [`reactor::Handler`].
 pub enum SessionEvent<S: NetSession> {
     Established(S::Id),
@@ -166,7 +166,7 @@ pub enum SessionEvent<S: NetSession> {
     Terminated(io::Error),
 }
 
-/// A state of [`NetResource`] network transport.
+/// A state of [`NetTransport`] network transport.
 #[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub enum TransportState {
     /// The transport is initiated, but the connection has not established yet.
@@ -195,7 +195,7 @@ pub enum TransportState {
 /// session management, including optional handshake, encoding etc) to be used
 /// as a transport resource in a [`reactor::Reactor`].
 #[derive(Debug)]
-pub struct NetResource<S: NetSession> {
+pub struct NetTransport<S: NetSession> {
     state: TransportState,
     session: S,
     link_direction: LinkDirection,
@@ -204,7 +204,7 @@ pub struct NetResource<S: NetSession> {
     write_buffer: VecDeque<u8>,
 }
 
-impl<S: NetSession> Display for NetResource<S> {
+impl<S: NetSession> Display for NetTransport<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(addr) = self.session.peer_addr() {
             Display::fmt(&addr, f)
@@ -214,13 +214,13 @@ impl<S: NetSession> Display for NetResource<S> {
     }
 }
 
-impl<S: NetSession> AsRawFd for NetResource<S> {
+impl<S: NetSession> AsRawFd for NetTransport<S> {
     fn as_raw_fd(&self) -> RawFd {
         self.session.as_raw_fd()
     }
 }
 
-impl<S: NetSession> NetResource<S> {
+impl<S: NetSession> NetTransport<S> {
     pub fn accept(session: S) -> io::Result<Self> {
         Self::with_state(session, TransportState::Handshake, LinkDirection::Inbound)
     }
@@ -410,7 +410,7 @@ impl<S: NetSession> NetResource<S> {
     }
 }
 
-impl<S: NetSession> Resource for NetResource<S> {
+impl<S: NetSession> Resource for NetTransport<S> {
     // TODO: Use S::SessionId instead
     type Id = RawFd;
     type Event = SessionEvent<S>;
@@ -486,7 +486,7 @@ impl<S: NetSession> Resource for NetResource<S> {
     }
 }
 
-impl<S: NetSession> Write for NetResource<S> {
+impl<S: NetSession> Write for NetTransport<S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self.write_atomic(buf) {
             Ok(_) => Ok(buf.len()),
@@ -500,7 +500,7 @@ impl<S: NetSession> Write for NetResource<S> {
     }
 }
 
-impl<S: NetSession> WriteAtomic for NetResource<S> {
+impl<S: NetSession> WriteAtomic for NetTransport<S> {
     fn is_ready_to_write(&self) -> bool {
         self.state == TransportState::Active
     }
