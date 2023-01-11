@@ -4,7 +4,7 @@ use amplify::hex::ToHex;
 use cyphernet::crypto::ed25519::PrivateKey;
 use netservices::noise::NoiseXk;
 use netservices::tunnel::READ_BUFFER_SIZE;
-use netservices::{NetSession, Proxy};
+use netservices::{Authenticator, NetSession, Proxy};
 
 use crate::command::Command;
 use crate::RemoteAddr;
@@ -36,11 +36,12 @@ pub struct Client {
 
 impl Client {
     pub fn connect<P: Proxy>(
-        ecdh: &PrivateKey,
+        ecdh: PrivateKey,
+        auth: Authenticator,
         remote_addr: RemoteAddr,
         proxy: &P,
     ) -> Result<Self, P::Error> {
-        let session = Session::connect_blocking(remote_addr, ecdh, proxy)?;
+        let session = Session::connect_blocking(remote_addr, &(ecdh, auth), proxy)?;
         Ok(Self {
             buf: vec![0u8; READ_BUFFER_SIZE],
             session,

@@ -10,10 +10,10 @@ use std::{fs, io};
 
 use clap::Parser;
 use cyphernet::addr::{HostName, InetHost, Localhost, NetAddr, PartialAddr, PeerAddr};
-use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
+use cyphernet::crypto::ed25519::{PrivateKey, PublicKey, Sign};
 use netservices::socks5::{Socks5, Socks5Error};
 use netservices::tunnel::Tunnel;
-use netservices::NetSession;
+use netservices::{Authenticator, NetSession};
 use nsh::client::Client;
 use nsh::command::Command;
 use nsh::processor::Processor;
@@ -187,12 +187,24 @@ fn run() -> Result<(), AppError> {
     let config = Config::try_from(args)?;
     let proxy = Socks5::new(config.proxy_addr)?;
 
+    let sig = config
+        .node_keys
+        .ecdh()
+        .sign(config.node_keys.pk().as_slice());
+
+    let auth = Authenticator::new(*config.node_keys.pk(), sig);
+
     match config.mode {
         Mode::Listen(socket_addr) => {
             println!("Listening on {socket_addr} ...");
 
-            let processor = Processor::new(proxy);
-            let service = Server::with(config.node_keys.ecdh().clone(), &socket_addr, processor)?;
+            let processor = Processor::new(auth, proxy);
+            let service = Server::with(
+                config.node_keys.ecdh().clone(),
+                auth,
+                &socket_addr,
+                processor,
+            )?;
             let reactor = Reactor::new(service, popol::Poller::new())?;
 
             reactor.join()?;
@@ -200,8 +212,11 @@ fn run() -> Result<(), AppError> {
         Mode::Tunnel { remote, local } => {
             eprintln!("Tunneling to {remote} from {local}...");
 
-            let session =
-                Transport::connect_blocking(remote.clone(), config.node_keys.ecdh(), &proxy)?;
+            let session = Transport::connect_blocking(
+                remote.clone(),
+                &(config.node_keys.ecdh().clone(), auth),
+                &proxy,
+            )?;
             let mut tunnel = match Tunnel::with(session, local) {
                 Ok(tunnel) => tunnel,
                 Err((session, err)) => {
@@ -219,7 +234,8 @@ fn run() -> Result<(), AppError> {
             eprintln!("Connecting to {remote_host} ...");
 
             let mut stdout = io::stdout();
-            let mut client = Client::connect(config.node_keys.ecdh(), remote_host, &proxy)?;
+            let mut client =
+                Client::connect(config.node_keys.ecdh().clone(), auth, remote_host, &proxy)?;
             let mut printout = client.exec(remote_command)?;
             eprintln!("Remote output >>>");
             for batch in &mut printout {

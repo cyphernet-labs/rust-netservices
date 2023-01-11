@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
 use netservices::noise::NoiseXk;
-use netservices::{ListenerEvent, NetSession, SessionEvent};
+use netservices::{Authenticator, ListenerEvent, NetSession, SessionEvent};
 use reactor::{Error, Resource};
 
 use crate::Transport;
@@ -28,9 +28,14 @@ pub struct Server<D: Delegate> {
 }
 
 impl<D: Delegate> Server<D> {
-    pub fn with(ecdh: PrivateKey, listen: &impl ToSocketAddrs, delegate: D) -> io::Result<Self> {
+    pub fn with(
+        ecdh: PrivateKey,
+        auth: Authenticator,
+        listen: &impl ToSocketAddrs,
+        delegate: D,
+    ) -> io::Result<Self> {
         let mut action_queue = VecDeque::new();
-        let listener = Accept::bind(listen, ecdh.clone())?;
+        let listener = Accept::bind(listen, (ecdh.clone(), auth))?;
         action_queue.push_back(Action::RegisterListener(listener));
         Ok(Self {
             outbox: empty!(),
