@@ -10,7 +10,7 @@ use crate::connection::Proxy;
 use crate::{NetConnection, SplitIo};
 
 pub trait NetSession: io::Read + io::Write + SplitIo + AsRawFd + Send + Sized + Debug {
-    type Context: Send;
+    type Context: Clone + Send;
     type Connection: NetConnection;
     /// A unique identifier of the session. Usually a part of a transition address.
     type Id: Send;
@@ -20,18 +20,18 @@ pub trait NetSession: io::Read + io::Write + SplitIo + AsRawFd + Send + Sized + 
     /// Address which combines what is known for both incoming and outgoing connections.
     type TransientAddr: Addr + Display;
 
-    fn accept(connection: Self::Connection, context: &Self::Context) -> io::Result<Self>;
+    fn accept(connection: Self::Connection, context: Self::Context) -> io::Result<Self>;
 
     fn connect_blocking<P: Proxy>(
         addr: Self::PeerAddr,
-        context: &Self::Context,
+        context: Self::Context,
         proxy: &P,
     ) -> Result<Self, P::Error>;
 
     #[cfg(feature = "socket2")]
     fn connect_nonblocking<P: Proxy>(
         addr: Self::PeerAddr,
-        context: &Self::Context,
+        context: Self::Context,
         proxy: &P,
     ) -> Result<Self, P::Error>;
 
@@ -89,13 +89,13 @@ impl NetSession for net::TcpStream {
     type PeerAddr = NetAddr<HostName>;
     type TransientAddr = NetAddr<HostName>;
 
-    fn accept(connection: Self::Connection, _context: &Self::Context) -> io::Result<Self> {
+    fn accept(connection: Self::Connection, _context: Self::Context) -> io::Result<Self> {
         Ok(connection)
     }
 
     fn connect_blocking<P: Proxy>(
         addr: Self::PeerAddr,
-        _context: &Self::Context,
+        _context: Self::Context,
         proxy: &P,
     ) -> Result<Self, P::Error> {
         NetConnection::connect_blocking(addr, proxy)
@@ -104,7 +104,7 @@ impl NetSession for net::TcpStream {
     #[cfg(feature = "socket2")]
     fn connect_nonblocking<P: Proxy>(
         addr: Self::PeerAddr,
-        _context: &Self::Context,
+        _context: Self::Context,
         proxy: &P,
     ) -> Result<Self, P::Error> {
         NetConnection::connect_nonblocking(addr, proxy)
@@ -163,13 +163,13 @@ impl NetSession for socket2::Socket {
     type PeerAddr = NetAddr<HostName>;
     type TransientAddr = NetAddr<HostName>;
 
-    fn accept(connection: Self::Connection, _context: &Self::Context) -> io::Result<Self> {
+    fn accept(connection: Self::Connection, _context: Self::Context) -> io::Result<Self> {
         Ok(connection)
     }
 
     fn connect_blocking<P: Proxy>(
         addr: Self::PeerAddr,
-        _context: &Self::Context,
+        _context: Self::Context,
         proxy: &P,
     ) -> Result<Self, P::Error> {
         NetConnection::connect_blocking(addr, proxy)
@@ -177,7 +177,7 @@ impl NetSession for socket2::Socket {
 
     fn connect_nonblocking<P: Proxy>(
         addr: Self::PeerAddr,
-        _context: &Self::Context,
+        _context: Self::Context,
         proxy: &P,
     ) -> Result<Self, P::Error> {
         NetConnection::connect_nonblocking(addr, proxy)

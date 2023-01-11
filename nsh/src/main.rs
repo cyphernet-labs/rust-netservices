@@ -218,7 +218,7 @@ fn run() -> Result<(), AppError> {
 
             let session = Session::connect_blocking(
                 remote.clone(),
-                &(config.node_keys.ecdh().clone(), auth),
+                (config.node_keys.ecdh().clone(), auth),
                 &proxy,
             )?;
             let mut tunnel = match Tunnel::with(session, local) {

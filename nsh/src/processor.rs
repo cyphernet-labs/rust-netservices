@@ -69,7 +69,7 @@ impl<P: Proxy + Send> Delegate for Processor<P> {
                 }
             }
             Command::Forward { hop, command } => {
-                match Transport::connect(hop, &(ecdh.clone(), self.auth), &self.proxy) {
+                match Transport::connect(hop, (ecdh.clone(), self.auth), &self.proxy) {
                     Ok(transport) => {
                         let id = transport.id();
                         action_queue.push(Action::RegisterTransport(transport));

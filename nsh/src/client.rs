@@ -41,7 +41,7 @@ impl Client {
         remote_addr: RemoteAddr,
         proxy: &P,
     ) -> Result<Self, P::Error> {
-        let session = Session::connect_blocking(remote_addr, &(ecdh, auth), proxy)?;
+        let session = Session::connect_blocking(remote_addr, (ecdh, auth), proxy)?;
         Ok(Self {
             buf: vec![0u8; READ_BUFFER_SIZE],
             session,
