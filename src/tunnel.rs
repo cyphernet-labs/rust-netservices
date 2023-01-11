@@ -36,7 +36,14 @@ impl<S: NetSession> Tunnel<S> {
         mut poller: P,
         timeout: Duration,
     ) -> io::Result<(usize, usize)> {
-        let (mut stream, _socket_addr) = self.listener.accept()?;
+        let listener_addr = self
+            .listener
+            .local_addr()
+            .expect("listener always has local addr");
+        log::info!(target: "tunnel", "Tunnel accepting a single connection will run on {listener_addr}");
+
+        let (mut stream, socket_addr) = self.listener.accept()?;
+        log::debug!(target: "tunnel", "Incoming connection from {socket_addr} for tunnel {listener_addr}");
 
         stream.set_nonblocking(true)?;
         stream.set_read_timeout(Some(timeout))?;
@@ -62,24 +69,42 @@ impl<S: NetSession> Tunnel<S> {
         macro_rules! handle {
             ($call:expr, |$var:ident| $expr:expr) => {
                 match $call {
-                    Ok(0) => return Ok((in_count, out_count)),
+                    Ok(0) => {
+                        log::info!(target: "tunnel",
+                            "Tunnel {socket_addr} has completed its work. Total {in_count} bytes are received and {out_count} sent"
+                        );
+                        return Ok((in_count, out_count))
+                    },
                     Ok($var) => $expr,
-                    Err(err) => return Err(err),
+                    Err(err) => {
+                        log::error!(target: "tunnel",
+                            "Tunnel {socket_addr} has terminated with {err}"
+                        );
+                        return Err(err)
+                    },
                 }
             };
         }
 
+        log::info!(target: "tunnel", "Tunnel on {listener_addr} is operational for a client {socket_addr}");
         loop {
             // Blocking
             let count = poller.poll(Some(timeout))?;
             if count > 0 {
+                log::warn!(target: "tunnel", "Tunnel {listener_addr} timed out with client {socket_addr}");
                 return Err(io::ErrorKind::TimedOut.into());
             }
             while let Some((fd, res)) = poller.next() {
                 let ev = match res {
                     Ok(ev) => ev,
-                    Err(IoFail::Connectivity(_)) => return Ok((in_count, out_count)),
-                    Err(IoFail::Os(_)) => return Err(io::ErrorKind::BrokenPipe.into()),
+                    Err(IoFail::Connectivity(code)) => {
+                        log::info!(target: "tunnel", "Tunnel {socket_addr} has completed its work with the code {code:#b}");
+                        return Ok((in_count, out_count));
+                    }
+                    Err(IoFail::Os(code)) => {
+                        log::error!(target: "tunnel", "Tunnel {socket_addr} was terminated with the code {code:#b}");
+                        return Err(io::ErrorKind::BrokenPipe.into());
+                    }
                 };
                 if fd == int_fd {
                     if ev.write {
@@ -87,11 +112,13 @@ impl<S: NetSession> Tunnel<S> {
                             stream.flush()?;
                             in_buf.drain(..written);
                             in_count += written;
+                            log::trace!(target: "tunnel", "{socket_addr} received {written} bytes from local out of {} buffered", in_buf.len());
                         });
                     }
                     if ev.read {
                         handle!(stream.read(&mut buf), |read| {
                             out_buf.extend(&buf[..read]);
+                            log::trace!(target: "tunnel", "{socket_addr} read {read} bytes from local ({} total in the buffer)", out_buf.len());
                         });
                     }
                 } else if fd == ext_fd {
@@ -100,11 +127,13 @@ impl<S: NetSession> Tunnel<S> {
                             self.session.flush()?;
                             out_buf.drain(..written);
                             out_count += written;
+                            log::trace!(target: "tunnel", "{socket_addr} sent {written} bytes to remote out of {} buffered", out_buf.len());
                         });
                     }
                     if ev.read {
                         handle!(self.session.read(&mut buf), |read| {
                             in_buf.extend(&buf[..read]);
+                            log::trace!(target: "tunnel", "{socket_addr} read {read} bytes from remote ({} total in the buffer)", in_buf.len());
                         });
                     }
                 }
