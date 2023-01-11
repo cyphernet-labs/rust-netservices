@@ -124,6 +124,7 @@ pub enum TransportState {
 /// Net transport is an adaptor around specific [`NetSession`] (implementing
 /// session management, including optional handshake, encoding etc) to be used
 /// as a transport resource in a [`reactor::Reactor`].
+#[derive(Debug)]
 pub struct NetResource<S: NetSession> {
     state: TransportState,
     session: S,
@@ -184,8 +185,8 @@ impl<S: NetSession> NetSession for NetResource<S> {
         self.session.session_id()
     }
 
-    fn handshake_completed(&self) -> bool {
-        self.session.handshake_completed()
+    fn is_session_established(&self) -> bool {
+        self.session.is_session_established()
     }
 
     fn transient_addr(&self) -> Self::TransientAddr {
@@ -291,7 +292,7 @@ impl<S: NetSession> NetResource<S> {
     }
 
     fn handle_writable(&mut self) -> Option<SessionEvent<S>> {
-        if !self.session.handshake_completed() {
+        if !self.session.is_session_established() {
             let _ = self.session.write(&[]);
             self.write_intent = true;
             return None;
@@ -322,7 +323,7 @@ impl<S: NetSession> NetResource<S> {
             .session
             .read(&mut self.read_buffer[self.read_buffer_len..])
         {
-            Ok(0) if !self.session.handshake_completed() => None,
+            Ok(0) if !self.session.is_session_established() => None,
             Ok(0) => Some(SessionEvent::Terminated(
                 io::ErrorKind::ConnectionReset.into(),
             )),
@@ -377,7 +378,7 @@ impl<S: NetSession> Resource for NetResource<S> {
             self.state = TransportState::Handshake;
         } else if self.state == TransportState::Handshake {
             debug_assert_eq!(self.read_buffer_len, 0);
-            debug_assert!(!self.session.handshake_completed());
+            debug_assert!(!self.session.is_session_established());
             #[cfg(feature = "log")]
             log::trace!(target: "transport", "Transport {self} got I/O while in handshake mode");
         }
@@ -400,7 +401,7 @@ impl<S: NetSession> Resource for NetResource<S> {
 
             self.state = TransportState::Terminated;
             resp
-        } else if self.session.handshake_completed() && self.state == TransportState::Handshake {
+        } else if self.session.is_session_established() && self.state == TransportState::Handshake {
             #[cfg(feature = "log")]
             log::debug!(target: "transport", "Handshake with {self} is complete");
 

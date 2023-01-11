@@ -136,12 +136,14 @@ impl<Id: PeerId, A: Address> XkAddr<Id, A> {
     }
 }
 
+#[derive(Debug)]
 pub struct NoiseXkReader<E: Ecdh, S: NetConnection = TcpStream> {
     remote_addr: PeerAddr<E::Pk, S::Addr>,
     reader: S::Read,
     decryptor: NoiseDecryptor,
 }
 
+#[derive(Debug)]
 pub struct NoiseXkWriter<E: Ecdh, S: NetConnection = TcpStream> {
     remote_addr: PeerAddr<E::Pk, S::Addr>,
     writer: S::Write,
@@ -165,6 +167,7 @@ impl<E: Ecdh, S: NetConnection> Write for NoiseXkWriter<E, S> {
     }
 }
 
+#[derive(Debug)]
 pub struct NoiseXk<E: Ecdh, S: NetConnection = TcpStream> {
     remote_addr: XkAddr<E::Pk, S::Addr>,
     connection: S,
@@ -410,7 +413,7 @@ impl<S: NetConnection> NetSession for NoiseXk<ed25519::PrivateKey, S> {
         }
     }
 
-    fn handshake_completed(&self) -> bool {
+    fn is_session_established(&self) -> bool {
         self.transcoder.is_handshake_complete() && self.authenticator.is_auth_complete()
     }
 
