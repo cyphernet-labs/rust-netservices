@@ -90,7 +90,7 @@ impl<S: NetSession> Tunnel<S> {
         loop {
             // Blocking
             let count = poller.poll(Some(timeout))?;
-            if count > 0 {
+            if count == 0 {
                 log::warn!(target: "tunnel", "Tunnel {listener_addr} timed out with client {socket_addr}");
                 return Err(io::ErrorKind::TimedOut.into());
             }
