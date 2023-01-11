@@ -332,10 +332,14 @@ impl<S: NetSession> NetResource<S> {
                 Some(SessionEvent::Data(self.drain_read_buffer()))
             }
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                debug_assert!(false, "WOULD_BLOCK on resource which had read intent");
                 // This shouldn't normally happen, since this function is only called
                 // when there's data on the socket. We leave it here in case external
                 // conditions change.
+                eprintln!("WOULD_BLOCK on resource which had read intent. Dumping net resource:\n{self:?}");
+                debug_assert!(
+                    false,
+                    "WOULD_BLOCK on resource which had read intent. Dumping net resource:"
+                );
                 None
             }
             Err(err) => Some(self.terminate(err)),

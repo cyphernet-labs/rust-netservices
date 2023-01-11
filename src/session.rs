@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::io;
 use std::net;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -10,7 +10,7 @@ use cyphernet::addr::{Addr, HostName, NetAddr};
 use crate::resources::SplitIo;
 use crate::NetConnection;
 
-pub trait NetSession: io::Read + io::Write + SplitIo + AsRawFd + Send + Sized {
+pub trait NetSession: io::Read + io::Write + SplitIo + AsRawFd + Send + Sized + Debug {
     type Context: Send;
     type Connection: NetConnection;
     /// A unique identifier of the session. Usually a part of a transition address.

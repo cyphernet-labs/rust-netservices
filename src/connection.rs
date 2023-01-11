@@ -24,7 +24,7 @@ pub trait Proxy: ToSocketAddrs {
 }
 
 /// Network stream is an abstraction of TCP stream object.
-pub trait NetConnection: Send + SplitIo + io::Read + io::Write + AsRawFd {
+pub trait NetConnection: Send + SplitIo + io::Read + io::Write + AsRawFd + Debug {
     type Addr: Address + Send;
 
     fn connect_blocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error>
