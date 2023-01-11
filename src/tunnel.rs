@@ -121,6 +121,9 @@ impl<S: NetSession> Tunnel<S> {
                             stream.flush()?;
                             in_buf.drain(..written);
                             in_count += written;
+                            if in_buf.is_empty() {
+                                poller.set_interest(&int_fd, IoType::read_only());
+                            }
                             #[cfg(feature = "log")]
                             log::trace!(target: "tunnel", "{socket_addr} received {written} bytes from local out of {} buffered", in_buf.len());
                         });
@@ -141,6 +144,9 @@ impl<S: NetSession> Tunnel<S> {
                             self.session.flush()?;
                             out_buf.drain(..written);
                             out_count += written;
+                            if out_buf.is_empty() {
+                                poller.set_interest(&ext_fd, IoType::read_only());
+                            }
                             #[cfg(feature = "log")]
                             log::trace!(target: "tunnel", "{socket_addr} sent {written} bytes to remote out of {} buffered", out_buf.len());
                         });

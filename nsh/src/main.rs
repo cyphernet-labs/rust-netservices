@@ -11,6 +11,7 @@ use std::{fs, io, thread};
 use clap::Parser;
 use cyphernet::addr::{HostName, InetHost, Localhost, NetAddr, PartialAddr, PeerAddr};
 use cyphernet::crypto::ed25519::{PrivateKey, PublicKey, Sign};
+use netservices::noise::NoiseXk;
 use netservices::socks5::{Socks5, Socks5Error};
 use netservices::tunnel::Tunnel;
 use netservices::{Authenticator, NetSession};
@@ -220,7 +221,8 @@ fn run() -> Result<(), AppError> {
                 remote.clone(),
                 &(config.node_keys.ecdh().clone(), auth),
                 &proxy,
-            )?;
+            )?
+            .into_session();
             let mut tunnel = match Tunnel::with(session, local) {
                 Ok(tunnel) => tunnel,
                 Err((session, err)) => {
