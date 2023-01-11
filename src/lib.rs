@@ -8,6 +8,7 @@ pub mod actors;
 #[cfg(feature = "io-reactor")]
 pub mod resources;
 
+mod auth;
 mod connection;
 mod frame;
 mod listener;
@@ -17,6 +18,7 @@ pub mod socks5;
 mod transcoders;
 pub mod tunnel;
 
+pub use auth::Authenticator;
 pub use connection::{Address, NetConnection, Proxy};
 pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
