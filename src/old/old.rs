@@ -20,21 +20,6 @@ use crate::{Address, NetConnection, NetSession, SplitIo, SplitIoError};
 pub trait PeerId: EcPk {}
 impl<T> PeerId for T where T: EcPk {}
 
-#[derive(Getters, Clone, Eq, PartialEq)]
-pub struct NodeKeys<E: Ecdh + Sign> {
-    pk: E::Pk,
-    ecdh: E,
-}
-
-impl<E: Ecdh + Sign> From<E> for NodeKeys<E> {
-    fn from(ecdh: E) -> Self {
-        NodeKeys {
-            pk: ecdh.to_pk(),
-            ecdh,
-        }
-    }
-}
-
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, From)]
 pub enum XkAddr<Id: PeerId, A: Address> {
     #[from]
