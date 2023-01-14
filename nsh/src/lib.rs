@@ -19,7 +19,7 @@ pub type Session =
     Eidolon<ed25519::PrivateKey, Noise<x25519::PrivateKey, Sha256, Socks5<TcpStream>>>;
 pub type Transport = netservices::NetTransport<Session>;
 
-trait SessionBuilder {
+pub trait SessionBuilder {
     fn build() -> Self;
 }
 

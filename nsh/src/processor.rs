@@ -13,14 +13,11 @@ use crate::server::{Action, Auth, Delegate};
 use crate::{Session, SessionBuilder, Transport};
 
 #[derive(Debug)]
-pub struct Processor {
-    proxy: SocketAddr,
-    auth: Auth,
-}
+pub struct Processor {}
 
 impl Processor {
-    pub fn new(auth: Auth, proxy: SocketAddr) -> Self {
-        Self { auth, proxy }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -30,7 +27,7 @@ impl Delegate for Processor {
         vec![]
     }
 
-    fn input(&mut self, fd: RawFd, data: Vec<u8>, ecdh: &x25519::PrivateKey) -> Vec<Action> {
+    fn input(&mut self, fd: RawFd, data: Vec<u8>) -> Vec<Action> {
         let mut action_queue = vec![];
 
         let cmd = match String::from_utf8(data) {

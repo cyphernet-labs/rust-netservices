@@ -10,16 +10,16 @@ use std::{fs, io, thread};
 
 use clap::Parser;
 use cyphernet::addr::{HostName, InetHost, Localhost, NetAddr, PartialAddr, PeerAddr};
-use cyphernet::ed25519;
-use netservices::socks5::{Socks5, Socks5Error};
+use cyphernet::proxy::socks5;
+use cyphernet::{ed25519, EcSign, EcSk};
 use netservices::tunnel::Tunnel;
-use netservices::{Authenticator, NetSession};
+use netservices::NetSession;
 use nsh::client::Client;
 use nsh::command::Command;
 use nsh::processor::Processor;
-use nsh::server::{Accept, NodeKeys, Server};
+use nsh::server::{Accept, Server};
 use nsh::shell::LogLevel;
-use nsh::{RemoteAddr, Session, Transport};
+use nsh::{RemoteAddr, Session, SessionBuilder, Transport};
 use reactor::poller::popol;
 use reactor::Reactor;
 
@@ -30,7 +30,6 @@ pub const DEFAULT_DIR: &'static str = "~/.nsh";
 pub const DEFAULT_ID_FILE: &'static str = "ssi_ed25519";
 
 type AddrArg = PartialAddr<HostName, DEFAULT_PORT>;
-type NodeKeys = netservices::noise::NodeKeys<ed25510::PrivateKey>;
 
 #[derive(Clone, Debug, Parser)]
 #[command(author, version, about)]
@@ -71,7 +70,7 @@ struct Args {
     ///
     /// If the address is provided without a port, a default port 3232 is used.
     #[arg(conflicts_with = "listen", required_unless_present = "listen")]
-    pub remote_host: Option<PeerAddr<PublicKey, AddrArg>>,
+    pub remote_host: Option<PeerAddr<ed25519::PublicKey, AddrArg>>,
 
     /// Command to execute on the remote host
     #[arg(conflicts_with_all = ["listen", "tunnel"], required_unless_present_any = ["listen", "tunnel"])]
@@ -88,6 +87,21 @@ enum Mode {
         remote_host: RemoteAddr,
         remote_command: Command,
     },
+}
+
+#[derive(Getters, Clone, Eq, PartialEq)]
+pub struct NodeKeys {
+    pk: ed25519::PublicKey,
+    sk: ed25519::PrivateKey,
+}
+
+impl From<ed25519::PrivateKey> for NodeKeys {
+    fn from(sk: ed25519::PrivateKey) -> Self {
+        NodeKeys {
+            pk: sk.to_pk().expect("invalid node private key"),
+            sk,
+        }
+    }
 }
 
 struct Config {
@@ -108,9 +122,8 @@ pub enum AppError {
     #[from]
     Reactor(reactor::Error<Accept, Transport>),
 
-    #[from]
-    Socks5(Socks5Error),
-
+    //    #[from]
+    //    Socks5(socks5::Error),
     #[from]
     #[display("error creating thread")]
     Thread(Box<dyn Any + Send>),
@@ -166,8 +179,8 @@ impl TryFrom<Args> for Config {
                 Err(err)
             }
         })?;
-        let id = PrivateKey::from_pem(&id_pem)?;
-        let node_keys = NodeKeys::from(id);
+        let id_priv = ed25519::PrivateKey::from_pem(&id_pem)?;
+        let node_keys = NodeKeys::from(id_priv);
         println!("Using identity {}", node_keys.pk());
 
         let proxy_addr = args.proxy.unwrap_or(Localhost::localhost()).into();
@@ -186,26 +199,15 @@ fn run() -> Result<(), AppError> {
     LogLevel::from_verbosity_flag_count(args.verbose).apply();
 
     let config = Config::try_from(args)?;
-    let proxy = Socks5::new(config.proxy_addr)?;
 
-    let sig = config
-        .node_keys
-        .ecdh()
-        .sign(config.node_keys.pk().as_slice());
-
-    let auth = Authenticator::new(*config.node_keys.pk(), sig);
+    // let sig = config.node_keys.sk().sign(config.node_keys.pk().as_slice());
 
     match config.mode {
         Mode::Listen(socket_addr) => {
             println!("Listening on {socket_addr} ...");
 
-            let processor = Processor::new(auth, proxy);
-            let service = Server::with(
-                config.node_keys.ecdh().clone(),
-                auth,
-                &socket_addr,
-                processor,
-            )?;
+            let processor = Processor::new();
+            let service = Server::with(&socket_addr, processor)?;
             let reactor = Reactor::with(
                 service,
                 popol::Poller::new(),
@@ -217,11 +219,7 @@ fn run() -> Result<(), AppError> {
         Mode::Tunnel { remote, local } => {
             eprintln!("Tunneling to {remote} from {local}...");
 
-            let session = Session::connect_blocking(
-                remote.clone(),
-                (config.node_keys.ecdh().clone(), auth),
-                &proxy,
-            )?;
+            let session = Session::build();
             let mut tunnel = match Tunnel::with(session, local) {
                 Ok(tunnel) => tunnel,
                 Err((session, err)) => {
@@ -239,8 +237,7 @@ fn run() -> Result<(), AppError> {
             eprintln!("Connecting to {remote_host} ...");
 
             let mut stdout = io::stdout();
-            let mut client =
-                Client::connect(config.node_keys.ecdh().clone(), auth, remote_host, &proxy)?;
+            let mut client = Client::connect(remote_host)?;
             let mut printout = client.exec(remote_command)?;
             eprintln!("Remote output >>>");
             for batch in &mut printout {

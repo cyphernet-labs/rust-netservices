@@ -18,24 +18,17 @@ pub type Auth = ed25519::PrivateKey;
 
 pub trait Delegate: Send {
     fn new_client(&mut self, id: RawFd, key: ed25519::PublicKey) -> Vec<Action>;
-    fn input(&mut self, id: RawFd, data: Vec<u8>, ecdh: &x25519::PrivateKey) -> Vec<Action>;
+    fn input(&mut self, id: RawFd, data: Vec<u8>) -> Vec<Action>;
 }
 
 pub struct Server<D: Delegate> {
     outbox: HashMap<RawFd, VecDeque<Vec<u8>>>,
     action_queue: VecDeque<Action>,
     delegate: D,
-    ecdh: Ecdh,
-    auth: Auth,
 }
 
 impl<D: Delegate> Server<D> {
-    pub fn with(
-        ecdh: Ecdh,
-        auth: Auth,
-        listen: &impl ToSocketAddrs,
-        delegate: D,
-    ) -> io::Result<Self> {
+    pub fn with(listen: &impl ToSocketAddrs, delegate: D) -> io::Result<Self> {
         let mut action_queue = VecDeque::new();
         let listener = Accept::bind(listen)?;
         action_queue.push_back(Action::RegisterListener(listener));
@@ -43,8 +36,6 @@ impl<D: Delegate> Server<D> {
             outbox: empty!(),
             action_queue,
             delegate,
-            auth,
-            ecdh,
         })
     }
 }
@@ -115,8 +106,7 @@ impl<D: Delegate> reactor::Handler for Server<D> {
             }
             SessionEvent::Data(data) => {
                 log::trace!(target: "server", "Incoming data {data:?}");
-                self.action_queue
-                    .extend(self.delegate.input(id, data, &self.ecdh));
+                self.action_queue.extend(self.delegate.input(id, data));
             }
             SessionEvent::Terminated(err) => {
                 log::error!(target: "server", "Connection with {id} is terminated due to an error: {err}");

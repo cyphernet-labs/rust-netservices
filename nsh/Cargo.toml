@@ -15,7 +15,7 @@ amplify = "4.0.0-beta.7"
 io-reactor = { path = "../io-reactor", features = ["log"] }
 netservices = { path = "..", features = ["reactor", "log"] }
 cyphernet = { version = "0.1.0", features = ["noise_x25519", "ed25519", "noise_sha2", "dns", "mixnets", "multibase"] }
-# ed25519-compact = { version = "2.0.2", features = ["ed25519", "x25519", "pem", "ct-codecs", "random"] }
+ed25519-compact = { version = "2.0.2", features = ["ed25519", "pem", "random"] }
 clap = { version = "4.0.11", features = ["derive"] }
 shellexpand = "2.1.2"
 crossbeam-channel = "0.5.6"
