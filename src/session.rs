@@ -1,10 +1,14 @@
 use cyphernet::auth::eidolon::EidolonState;
+use cyphernet::encrypt::noise::NoiseState;
+use cyphernet::proxy::socks5;
 use std::fmt::{Debug, Display};
 use std::io;
 
 use crate::{NetConnection, NetStream};
 
 pub type Eidolon<E, S> = NetProtocol<EidolonRuntime<E>, S>;
+pub type Noise<E, D, S> = NetProtocol<NoiseState<E, D>, S>;
+pub type Socks5<S> = NetProtocol<socks5::Socks5, S>;
 
 pub trait NetSession: NetStream {
     /// Inner session type
@@ -226,7 +230,7 @@ mod imp_eidolon {
         }
     }
 
-    impl<S: EcSign + Debug> NetStateMachine for EidolonRuntime<S> {
+    impl<S: EcSign> NetStateMachine for EidolonRuntime<S> {
         type Artifact = Cert<S::Sig>;
         type Error = eidolon::Error;
 
@@ -244,3 +248,52 @@ mod imp_eidolon {
     }
 }
 pub use imp_eidolon::EidolonRuntime;
+
+mod impl_noise {
+    use cyphernet::encrypt::noise::error::NoiseError;
+    use cyphernet::encrypt::noise::NoiseState;
+    use cyphernet::{Digest, Ecdh};
+
+    use super::*;
+
+    impl<E: Ecdh, D: Digest> NetStateMachine for NoiseState<E, D> {
+        type Artifact = D::Output;
+        type Error = NoiseError;
+
+        fn next_read_len(&self) -> usize {
+            self.next_read_len()
+        }
+
+        fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error> {
+            self.advance(input)
+        }
+
+        fn artifact(&self) -> Option<Self::Artifact> {
+            self.get_handshake_hash()
+        }
+    }
+}
+
+mod impl_socks5 {
+    use cyphernet::proxy::socks5;
+    use cyphernet::proxy::socks5::Socks5;
+
+    use super::*;
+
+    impl NetStateMachine for Socks5 {
+        type Artifact = ();
+        type Error = socks5::Error;
+
+        fn next_read_len(&self) -> usize {
+            self.next_read_len()
+        }
+
+        fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error> {
+            self.advance(input)
+        }
+
+        fn artifact(&self) -> Option<Self::Artifact> {
+            Some(())
+        }
+    }
+}
