@@ -6,7 +6,7 @@ use std::{io, net};
 
 use reactor::poller::{IoFail, IoType, Poll};
 
-use crate::NetSession;
+use crate::{NetConnection, NetSession};
 
 pub const READ_BUFFER_SIZE: usize = u16::MAX as usize;
 
@@ -51,12 +51,13 @@ impl<S: NetSession> Tunnel<S> {
         stream.set_read_timeout(Some(timeout))?;
         stream.set_write_timeout(Some(timeout))?;
 
-        self.session.set_nonblocking(true)?;
-        self.session.set_read_timeout(Some(timeout))?;
-        self.session.set_write_timeout(Some(timeout))?;
+        let conn = self.session.as_connection_mut();
+        conn.set_nonblocking(true)?;
+        conn.set_read_timeout(Some(timeout))?;
+        conn.set_write_timeout(Some(timeout))?;
 
         let int_fd = stream.as_raw_fd();
-        let ext_fd = self.session.as_raw_fd();
+        let ext_fd = self.session.as_connection().as_raw_fd();
         poller.register(&int_fd, IoType::read_only());
         poller.register(&ext_fd, IoType::read_only());
 

@@ -32,36 +32,14 @@ dependencies = [
 
 [[package]]
 name = "amplify"
-version = "3.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "116019a174e912931d5b19ca7ab6a22596d12cdb1320358fad3368f0aba135a9"
-dependencies = [
- "amplify_derive 2.11.3",
- "amplify_num",
-]
-
-[[package]]
-name = "amplify"
 version = "4.0.0-beta.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1cc8da6203c5311cc0d74155341a5577564b8360976988eeb5ce7ab6903757f1"
 dependencies = [
- "amplify_derive 4.0.0-alpha.2",
+ "amplify_derive",
  "amplify_num",
  "ascii",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "amplify_derive"
-version = "2.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c3de270e75f27a4468a7c344070109046656e85cb522141f7d40ab4b83803ac"
-dependencies = [
- "amplify_syn",
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -378,18 +356,37 @@ dependencies = [
 ]
 
 [[package]]
-name = "cyphernet"
+name = "cypheraddr"
 version = "0.1.0"
-source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=master#28b2fe2723125590ed91a72f6b2839a36232fb35"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#2d22478af8a5445206d5224fdfcc57fef3984b4c"
 dependencies = [
- "amplify 4.0.0-beta.7",
+ "amplify",
  "base32",
- "chacha20poly1305 0.10.1",
+ "cyphergraphy",
+ "sha3",
+]
+
+[[package]]
+name = "cyphergraphy"
+version = "0.1.0"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#2d22478af8a5445206d5224fdfcc57fef3984b4c"
+dependencies = [
+ "amplify",
  "ed25519-compact",
- "hmac",
  "multibase",
  "sha2",
- "sha3",
+]
+
+[[package]]
+name = "cyphernet"
+version = "0.1.0"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#2d22478af8a5445206d5224fdfcc57fef3984b4c"
+dependencies = [
+ "cypheraddr",
+ "cyphergraphy",
+ "eidolon",
+ "noise-framework",
+ "socks5-client",
 ]
 
 [[package]]
@@ -426,7 +423,6 @@ checksum = "8168378f4e5023e7218c89c891c0fd8ecdb5e5e4f18cb78f38cf245dd021e76f"
 dependencies = [
  "block-buffer",
  "crypto-common",
- "subtle",
 ]
 
 [[package]]
@@ -478,6 +474,15 @@ dependencies = [
  "ct-codecs",
  "ed25519",
  "getrandom",
+]
+
+[[package]]
+name = "eidolon"
+version = "0.1.0"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#2d22478af8a5445206d5224fdfcc57fef3984b4c"
+dependencies = [
+ "amplify",
+ "cyphergraphy",
 ]
 
 [[package]]
@@ -567,15 +572,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hmac"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
-dependencies = [
- "digest",
-]
-
-[[package]]
 name = "humantime"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -604,7 +600,7 @@ dependencies = [
 name = "io-reactor"
 version = "0.1.0"
 dependencies = [
- "amplify 4.0.0-beta.7",
+ "amplify",
  "crossbeam-channel",
  "epoll",
  "libc",
@@ -720,7 +716,7 @@ dependencies = [
 name = "netservices"
 version = "0.1.0"
 dependencies = [
- "amplify 4.0.0-beta.7",
+ "amplify",
  "bitcoin_hashes",
  "chacha20 0.9.0",
  "chacha20poly1305 0.9.1",
@@ -730,15 +726,24 @@ dependencies = [
  "libc",
  "log",
  "mio",
- "re-actor",
  "socket2",
+]
+
+[[package]]
+name = "noise-framework"
+version = "0.1.0"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#2d22478af8a5445206d5224fdfcc57fef3984b4c"
+dependencies = [
+ "amplify",
+ "chacha20poly1305 0.10.1",
+ "cyphergraphy",
 ]
 
 [[package]]
 name = "nsh"
 version = "0.1.0"
 dependencies = [
- "amplify 4.0.0-beta.7",
+ "amplify",
  "clap",
  "crossbeam-channel",
  "cyphernet",
@@ -902,21 +907,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "re-actor"
-version = "0.1.0"
-dependencies = [
- "amplify 3.13.0",
- "crossbeam-channel",
- "epoll",
- "libc",
- "mio",
- "polling",
- "popol",
- "socket2",
- "zmq",
-]
-
-[[package]]
 name = "redox_syscall"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1038,6 +1028,15 @@ checksum = "02e2d2db9033d13a1567121ddd7a095ee144db4e1ca1b1bda3419bc0da294ebd"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "socks5-client"
+version = "0.1.0"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#2d22478af8a5445206d5224fdfcc57fef3984b4c"
+dependencies = [
+ "amplify",
+ "cypheraddr",
 ]
 
 [[package]]
