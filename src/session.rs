@@ -1,14 +1,17 @@
-use std::fmt::Debug;
+use cyphernet::auth::eidolon::EidolonState;
+use std::fmt::{Debug, Display};
 use std::io;
 
 use crate::{NetConnection, NetStream};
 
-pub trait NetSession: NetStream + Debug {
+pub type Eidolon<E, S> = NetProtocol<EidolonRuntime<E>, S>;
+
+pub trait NetSession: NetStream {
     /// Inner session type
     type Inner: NetSession;
     /// Underlying connection
     type Connection: NetConnection;
-    type Artifact;
+    type Artifact: Display;
 
     fn is_established(&self) -> bool {
         self.artifact().is_some()
@@ -19,7 +22,7 @@ pub trait NetSession: NetStream + Debug {
     fn disconnect(self) -> io::Result<()>;
 }
 
-pub trait NetStateMachine: Debug {
+pub trait NetStateMachine {
     type Artifact;
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -31,7 +34,7 @@ pub trait NetStateMachine: Debug {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct NetProtocol<M: NetStateMachine, S: NetSession> {
     name: &'static str,
     state_machine: M,
@@ -107,15 +110,23 @@ impl<M: NetStateMachine, S: NetSession> io::Write for NetProtocol<M, S> {
 
 impl<M: NetStateMachine, S: NetSession> NetStream for NetProtocol<M, S> {}
 
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Display)]
+#[display("{session}")]
+pub struct ProtocolArtifact<M: NetStateMachine, S: NetSession> {
+    pub session: S::Artifact,
+    pub state: M::Artifact,
+}
+
 impl<M: NetStateMachine, S: NetSession> NetSession for NetProtocol<M, S> {
     type Inner = S;
     type Connection = S::Connection;
-    type Artifact = (S::Artifact, M::Artifact);
+    type Artifact = ProtocolArtifact<M, S>;
 
     fn artifact(&self) -> Option<Self::Artifact> {
-        self.session
-            .artifact()
-            .and_then(|a| self.state_machine.artifact().map(|b| (a, b)))
+        Some(ProtocolArtifact {
+            session: self.session.artifact()?,
+            state: self.state_machine.artifact()?,
+        })
     }
 
     fn as_connection(&self) -> &Self::Connection {
@@ -153,7 +164,7 @@ mod imp_std {
             self
         }
 
-        fn disconnect(self) -> std::io::Result<()> {
+        fn disconnect(self) -> io::Result<()> {
             self.shutdown(Shutdown::Both)
         }
     }
@@ -184,8 +195,52 @@ mod imp_socket2 {
             self
         }
 
-        fn disconnect(self) -> std::io::Result<()> {
+        fn disconnect(self) -> io::Result<()> {
             self.shutdown(Shutdown::Both)
         }
     }
 }
+
+mod imp_eidolon {
+    use std::fmt::{self, Display, Formatter};
+
+    use cyphernet::auth::eidolon;
+    use cyphernet::display::{Encoding, MultiDisplay};
+    use cyphernet::{Cert, CertFormat, EcSign};
+
+    use super::*;
+
+    pub struct EidolonRuntime<S: EcSign> {
+        state: EidolonState<S::Sig>,
+        signer: S,
+    }
+
+    impl<S: EcSign> Display for EidolonRuntime<S> {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            match self.state.remote_cert() {
+                Some(cert) => {
+                    f.write_str(&cert.display_fmt(&CertFormat::new(", ", Encoding::Base58)))
+                }
+                None => f.write_str("<unidentified>"),
+            }
+        }
+    }
+
+    impl<S: EcSign + Debug> NetStateMachine for EidolonRuntime<S> {
+        type Artifact = Cert<S::Sig>;
+        type Error = eidolon::Error;
+
+        fn next_read_len(&self) -> usize {
+            todo!()
+        }
+
+        fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error> {
+            self.state.advance(input, &self.signer)
+        }
+
+        fn artifact(&self) -> Option<Self::Artifact> {
+            self.state.remote_cert().cloned()
+        }
+    }
+}
+pub use imp_eidolon::EidolonRuntime;

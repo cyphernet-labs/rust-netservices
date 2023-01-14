@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::io;
 use std::mem::MaybeUninit;
-use std::net::{Shutdown, TcpStream};
+use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
@@ -131,44 +131,42 @@ impl NetConnection for socket2::Socket {
     }
 
     #[cfg(feature = "connect_nonblocking")]
-    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Sel> {
-        match addr.host {
-            HostName::Ip(ip) => {
-                let addr = net::SocketAddr::new(ip, addr.port);
-                let socket = socket2::Socket::new(
-                    socket2::Domain::for_address(addr),
-                    socket2::Type::STREAM,
-                    None,
-                )?;
-                socket.set_nonblocking(true)?;
-                match socket2::Socket::connect(&socket, &addr.into()) {
-                    Ok(()) => {
-                        #[cfg(feature = "log")]
-                        log::debug!(target: "netservices", "Connected to {}", addr);
-                    }
-                    Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {
-                        #[cfg(feature = "log")]
-                        log::debug!(target: "netservices", "Connecting to {} in a non-blocking way", addr);
-                    }
-                    Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
-                        #[cfg(feature = "log")]
-                        log::error!(target: "netservices", "Can't connect to {}: address already in use", addr);
-                        return Err(io::Error::from(io::ErrorKind::AlreadyExists).into());
-                    }
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        #[cfg(feature = "log")]
-                        log::error!(target: "netservices", "Can't connect to {} in a non-blocking way", addr);
-                    }
-                    Err(e) => {
-                        #[cfg(feature = "log")]
-                        log::debug!(target: "netservices", "Error connecting to {}: {}", addr, e);
-                        return Err(e.into());
-                    }
-                }
-                Ok(socket)
+    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
+        let addr = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or_else(|| io::ErrorKind::AddrNotAvailable)?;
+        let socket = socket2::Socket::new(
+            socket2::Domain::for_address(addr),
+            socket2::Type::STREAM,
+            None,
+        )?;
+        socket.set_nonblocking(true)?;
+        match socket2::Socket::connect(&socket, &addr.into()) {
+            Ok(()) => {
+                #[cfg(feature = "log")]
+                log::debug!(target: "netservices", "Connected to {}", addr);
             }
-            _ => Ok(proxy.connect_blocking(addr)?.into()),
+            Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {
+                #[cfg(feature = "log")]
+                log::debug!(target: "netservices", "Connecting to {} in a non-blocking way", addr);
+            }
+            Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
+                #[cfg(feature = "log")]
+                log::error!(target: "netservices", "Can't connect to {}: address already in use", addr);
+                return Err(io::Error::from(io::ErrorKind::AlreadyExists).into());
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                #[cfg(feature = "log")]
+                log::error!(target: "netservices", "Can't connect to {} in a non-blocking way", addr);
+            }
+            Err(e) => {
+                #[cfg(feature = "log")]
+                log::debug!(target: "netservices", "Error connecting to {}: {}", addr, e);
+                return Err(e.into());
+            }
         }
+        Ok(socket)
     }
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
