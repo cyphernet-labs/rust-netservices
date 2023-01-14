@@ -1,35 +1,36 @@
+use std::net::SocketAddr;
 use std::os::fd::RawFd;
 use std::process;
 use std::process::Stdio;
 use std::str::FromStr;
 
-use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
-use netservices::{Authenticator, Proxy};
+use cyphernet::{ed25519, x25519};
+use netservices::resource::LinkDirection;
 use reactor::Resource;
 
 use crate::command::Command;
-use crate::server::{Action, Delegate};
-use crate::Transport;
+use crate::server::{Action, Auth, Delegate};
+use crate::{Session, SessionBuilder, Transport};
 
 #[derive(Debug)]
-pub struct Processor<P: Proxy + Send> {
-    proxy: P,
-    auth: Authenticator,
+pub struct Processor {
+    proxy: SocketAddr,
+    auth: Auth,
 }
 
-impl<P: Proxy + Send> Processor<P> {
-    pub fn new(auth: Authenticator, proxy: P) -> Self {
+impl Processor {
+    pub fn new(auth: Auth, proxy: SocketAddr) -> Self {
         Self { auth, proxy }
     }
 }
 
-impl<P: Proxy + Send> Delegate for Processor<P> {
-    fn new_client(&mut self, _id: RawFd, key: PublicKey) -> Vec<Action> {
+impl Delegate for Processor {
+    fn new_client(&mut self, _id: RawFd, key: ed25519::PublicKey) -> Vec<Action> {
         log::debug!(target: "nsh", "Remote {key} is connected");
         vec![]
     }
 
-    fn input(&mut self, fd: RawFd, data: Vec<u8>, ecdh: &PrivateKey) -> Vec<Action> {
+    fn input(&mut self, fd: RawFd, data: Vec<u8>, ecdh: &x25519::PrivateKey) -> Vec<Action> {
         let mut action_queue = vec![];
 
         let cmd = match String::from_utf8(data) {
@@ -69,7 +70,8 @@ impl<P: Proxy + Send> Delegate for Processor<P> {
                 }
             }
             Command::Forward { hop, command } => {
-                match Transport::connect(hop, (ecdh.clone(), self.auth), &self.proxy) {
+                let session = Session::build();
+                match Transport::with_session(session, LinkDirection::Outbound) {
                     Ok(transport) => {
                         let id = transport.id();
                         action_queue.push(Action::RegisterTransport(transport));

@@ -747,7 +747,6 @@ dependencies = [
  "clap",
  "crossbeam-channel",
  "cyphernet",
- "ed25519-compact",
  "env_logger",
  "io-reactor",
  "log",

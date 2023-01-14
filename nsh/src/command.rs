@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use cyphernet::addr::PeerAddrParseError;
-use cyphernet::crypto::ed25519::PublicKey;
+use cyphernet::ed25519::PublicKey;
 
 use crate::RemoteAddr;
 

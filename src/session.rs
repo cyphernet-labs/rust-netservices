@@ -20,6 +20,12 @@ pub trait NetSession: NetStream {
     fn is_established(&self) -> bool {
         self.artifact().is_some()
     }
+    fn display(&self) -> String {
+        match self.artifact() {
+            Some(artifact) => artifact.to_string(),
+            None => s!("<no-id>"),
+        }
+    }
     fn artifact(&self) -> Option<Self::Artifact>;
     fn as_connection(&self) -> &Self::Connection;
     fn as_connection_mut(&mut self) -> &mut Self::Connection;

@@ -10,7 +10,7 @@ use std::{fs, io, thread};
 
 use clap::Parser;
 use cyphernet::addr::{HostName, InetHost, Localhost, NetAddr, PartialAddr, PeerAddr};
-use cyphernet::crypto::ed25519::{PrivateKey, PublicKey, Sign};
+use cyphernet::ed25519;
 use netservices::socks5::{Socks5, Socks5Error};
 use netservices::tunnel::Tunnel;
 use netservices::{Authenticator, NetSession};
@@ -30,6 +30,7 @@ pub const DEFAULT_DIR: &'static str = "~/.nsh";
 pub const DEFAULT_ID_FILE: &'static str = "ssi_ed25519";
 
 type AddrArg = PartialAddr<HostName, DEFAULT_PORT>;
+type NodeKeys = netservices::noise::NodeKeys<ed25510::PrivateKey>;
 
 #[derive(Clone, Debug, Parser)]
 #[command(author, version, about)]

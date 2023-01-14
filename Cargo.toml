@@ -23,7 +23,7 @@ log_crate = { package = "log", version = "0.4.17" }
 [features]
 default = ["reactor", "socket2"]
 all = ["reactor", "connect_nonblocking", "mio", "log"]
-reactor = ["io-reactor"]
+reactor = ["io-reactor", "connect_nonblocking"]
 log = ["log_crate", "io-reactor/log"]
 connect_nonblocking = ["socket2"]
 

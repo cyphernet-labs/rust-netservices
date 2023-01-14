@@ -1,46 +1,49 @@
+use cyphernet::{ed25519, x25519};
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::net::ToSocketAddrs;
 use std::os::fd::RawFd;
 use std::time::Duration;
 
-use cyphernet::crypto::ed25519::{PrivateKey, PublicKey};
-use netservices::noise::NoiseXk;
-use netservices::{Authenticator, ListenerEvent, NetSession, SessionEvent};
+use netservices::{ListenerEvent, SessionEvent};
 use reactor::{Error, Resource};
 
-use crate::Transport;
+use crate::{Session, SessionBuilder, Transport};
 
-pub type Accept = netservices::NetAccept<NoiseXk<PrivateKey>>;
+pub type Accept = netservices::NetAccept<Session>;
 pub type Action = reactor::Action<Accept, Transport>;
-pub type NodeKeys = netservices::noise::NodeKeys<PrivateKey>;
+
+pub type Ecdh = x25519::PrivateKey;
+pub type Auth = ed25519::PrivateKey;
 
 pub trait Delegate: Send {
-    fn new_client(&mut self, id: RawFd, key: PublicKey) -> Vec<Action>;
-    fn input(&mut self, id: RawFd, data: Vec<u8>, ecdh: &PrivateKey) -> Vec<Action>;
+    fn new_client(&mut self, id: RawFd, key: ed25519::PublicKey) -> Vec<Action>;
+    fn input(&mut self, id: RawFd, data: Vec<u8>, ecdh: &x25519::PrivateKey) -> Vec<Action>;
 }
 
 pub struct Server<D: Delegate> {
     outbox: HashMap<RawFd, VecDeque<Vec<u8>>>,
     action_queue: VecDeque<Action>,
     delegate: D,
-    ecdh: PrivateKey,
+    ecdh: Ecdh,
+    auth: Auth,
 }
 
 impl<D: Delegate> Server<D> {
     pub fn with(
-        ecdh: PrivateKey,
-        auth: Authenticator,
+        ecdh: Ecdh,
+        auth: Auth,
         listen: &impl ToSocketAddrs,
         delegate: D,
     ) -> io::Result<Self> {
         let mut action_queue = VecDeque::new();
-        let listener = Accept::bind(listen, (ecdh.clone(), auth))?;
+        let listener = Accept::bind(listen)?;
         action_queue.push_back(Action::RegisterListener(listener));
         Ok(Self {
             outbox: empty!(),
             action_queue,
             delegate,
+            auth,
             ecdh,
         })
     }
@@ -67,11 +70,19 @@ impl<D: Delegate> reactor::Handler for Server<D> {
     ) {
         log::trace!(target: "server", "Listener event on {id} at {time:?}");
         match event {
-            ListenerEvent::Accepted(session) => {
-                log::info!(target: "server", "Incoming connection from {} on {}", session.transient_addr(), session.local_addr());
+            ListenerEvent::Accepted(connection) => {
+                let peer_addr = connection
+                    .peer_addr()
+                    .expect("unknown peer address on accepted connection");
+                let local_addr = connection
+                    .local_addr()
+                    .expect("unknown local address on accepted connection");
+                log::info!(target: "server", "Incoming connection from {peer_addr} on {local_addr}");
+                // TODO: Build session
+                let session = Session::build();
                 match Transport::accept(session) {
                     Ok(transport) => {
-                        log::info!(target: "server", "Connection accepted, registering {} with reactor", transport.transient_addr());
+                        log::info!(target: "server", "Connection accepted, registering transport with reactor");
                         self.action_queue
                             .push_back(Action::RegisterTransport(transport));
                     }
@@ -94,7 +105,8 @@ impl<D: Delegate> reactor::Handler for Server<D> {
     ) {
         log::trace!(target: "server", "I/O on {id} at {time:?}");
         match event {
-            SessionEvent::Established(key) => {
+            SessionEvent::Established(artifact) => {
+                let key = artifact.state.pk;
                 let queue = self.outbox.remove(&id).unwrap_or_default();
                 log::debug!(target: "server", "Connection with remote peer {key}@{id} successfully established; processing {} items from outbox", queue.len());
                 self.action_queue.extend(self.delegate.new_client(id, key));
