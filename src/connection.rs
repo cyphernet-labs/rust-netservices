@@ -1,30 +1,28 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
+use std::io;
 use std::mem::MaybeUninit;
-use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::net::{Shutdown, TcpStream};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
-use std::{io, net};
 
-use cyphernet::addr::{Addr, HostName, NetAddr};
-
-use crate::{NetStream, SplitIo, SplitIoError};
-
-pub mod listener;
+use cyphernet::addr::{Addr, InetHost, NetAddr};
 
 pub trait Address: Addr + Send + Clone + Eq + Hash + Debug + Display {}
 impl<T> Address for T where T: Addr + Send + Clone + Eq + Hash + Debug + Display {}
+
+pub trait NetStream: io::Read + io::Write {}
 
 /// Network stream is an abstraction of TCP stream object.
 pub trait NetConnection: Send + NetStream + AsRawFd + Debug {
     type Addr: Address;
 
-    fn connect_blocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error>
+    fn connect_blocking(addr: Self::Addr) -> io::Result<Self>
     where
         Self: Sized;
 
     #[cfg(feature = "connect_nonblocking")]
-    fn connect_nonblocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error>
+    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self>
     where
         Self: Sized;
 
@@ -52,19 +50,17 @@ pub trait NetConnection: Send + NetStream + AsRawFd + Debug {
     fn take_error(&self) -> io::Result<Option<io::Error>>;
 }
 
+impl NetStream for TcpStream {}
 impl NetConnection for TcpStream {
-    type Addr = NetAddr<HostName>;
+    type Addr = NetAddr<InetHost>;
 
-    fn connect_blocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
-        match addr.host {
-            HostName::Ip(ip) => TcpStream::connect((ip, addr.port)).map_err(P::Error::from),
-            _ => proxy.connect_blocking(addr),
-        }
+    fn connect_blocking(addr: Self::Addr) -> io::Result<Self> {
+        TcpStream::connect(addr)
     }
 
     #[cfg(feature = "connect_nonblocking")]
-    fn connect_nonblocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
-        Ok(socket2::Socket::connect_nonblocking(addr, proxy)?.into())
+    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
+        Ok(socket2::Socket::connect_nonblocking(addr)?.into())
     }
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
@@ -124,19 +120,18 @@ impl NetConnection for TcpStream {
     }
 }
 
-#[cfg(feature = "connect_nonblocking")]
+#[cfg(feature = "socket2")]
+impl NetStream for socket2::Socket {}
+#[cfg(feature = "socket2")]
 impl NetConnection for socket2::Socket {
-    type Addr = NetAddr<HostName>;
+    type Addr = NetAddr<InetHost>;
 
-    fn connect_blocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
-        Ok(match addr.host {
-            HostName::Ip(ip) => TcpStream::connect((ip, addr.port))?,
-            _ => proxy.connect_blocking(addr)?,
-        }
-        .into())
+    fn connect_blocking(addr: Self::Addr) -> io::Result<Self> {
+        TcpStream::connect(addr).map(socket2::Socket::from)
     }
 
-    fn connect_nonblocking<P: Proxy>(addr: Self::Addr, proxy: &P) -> Result<Self, P::Error> {
+    #[cfg(feature = "connect_nonblocking")]
+    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Sel> {
         match addr.host {
             HostName::Ip(ip) => {
                 let addr = net::SocketAddr::new(ip, addr.port);

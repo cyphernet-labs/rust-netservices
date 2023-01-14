@@ -1,3 +1,5 @@
+use crate::NetSession;
+
 #[derive(Debug, Display)]
 #[display("{error}")]
 pub struct SplitIoError<T: SplitIo> {

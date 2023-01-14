@@ -5,10 +5,9 @@ edition = "2021"
 
 [dependencies]
 amplify = "4.0.0-beta.1"
-re-actor = { path = "re-actor", optional = true }
 io-reactor = { path = "io-reactor", optional = true }
 ed25519-compact = "2.0.4"
-cyphernet = { version = "0.1.0", features = ["ed25519", "pem", "noise"] }
+cyphernet = { version = "0.1.0", features = ["ed25519", "pem", "multibase", "noise_sha2", "noise_x25519", "noise-framework", "mixnets"] }
 mio = { version = "0.8.5", optional = true }
 socket2 = { version = "0.4.7", optional = true }
 chacha20 = "0.9"
@@ -22,15 +21,15 @@ bitcoin_hashes = "0.11.0"
 log_crate = { package = "log", version = "0.4.17" }
 
 [features]
-default = ["io-reactor", "socket2"]
-all = ["io-reactor", "re-actor", "connect_nonblocking", "mio", "log"]
+default = ["reactor", "socket2"]
+all = ["reactor", "connect_nonblocking", "mio", "log"]
+reactor = ["io-reactor"]
 log = ["log_crate", "io-reactor/log"]
 connect_nonblocking = ["socket2"]
 
 [patch.crates-io]
-cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet", branch = "master" }
+cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet", branch = "noise-refactor" }
 
 [workspace]
-members = ["re-actor", "io-reactor", "nsh"]
-default-members = ["io-reactor"]
-exclude = ["node"]
+members = ["io-reactor", "nsh"]
+default-members = ["."]
