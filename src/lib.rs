@@ -7,7 +7,7 @@ pub mod tunnel;
 
 mod connection;
 mod listener;
-mod session;
+pub mod session;
 
 #[cfg(feature = "io-reactor")]
 pub mod resource;

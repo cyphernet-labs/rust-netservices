@@ -11,13 +11,13 @@
 //! [C10k]: https://en.wikipedia.org/wiki/C10k_problem
 
 use std::collections::VecDeque;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use std::io::Write;
 use std::marker::PhantomData;
 use std::net::{TcpListener, ToSocketAddrs};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
-use std::{io, net};
+use std::{fmt, io, net};
 
 use reactor::poller::IoType;
 use reactor::{Io, Resource, WriteAtomic, WriteError};
@@ -208,6 +208,15 @@ pub struct NetTransport<S: NetSession> {
     write_buffer: VecDeque<u8>,
 }
 
+impl<S: NetSession> Display for NetTransport<S> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.session.artifact() {
+            None => write!(f, "{}", self.as_raw_fd()),
+            Some(id) => Display::fmt(&id, f),
+        }
+    }
+}
+
 impl<S: NetSession> AsRawFd for NetTransport<S> {
     fn as_raw_fd(&self) -> RawFd {
         self.session.as_connection().as_raw_fd()
@@ -219,18 +228,13 @@ impl<S: NetSession> NetTransport<S> {
         Self::with_state(session, TransportState::Handshake, LinkDirection::Inbound)
     }
 
+    /* TODO: Do through a builder
     #[cfg(feature = "connect_nonblocking")]
-    pub fn connect<P: Proxy>(
-        addr: S::PeerAddr,
-        context: S::Context,
-        proxy: &P,
-    ) -> Result<Self, P::Error> {
-        let session = S::connect_nonblocking(addr, context, proxy)?;
+    pub fn connect(addr: S::PeerAddr, context: S::Context) -> io::Result<Self> {
+        let session = S::connect_nonblocking(addr, context)?;
         Self::with_state(session, TransportState::Init, LinkDirection::Outbound)
-            .map_err(P::Error::from)
     }
 
-    /*
     pub fn connect_blocking<P: Proxy>(
         addr: Self::PeerAddr,
         context: &Self::Context,
@@ -348,7 +352,7 @@ impl<S: NetSession> NetTransport<S> {
 
     fn terminate(&mut self, reason: io::Error) -> SessionEvent<S> {
         #[cfg(feature = "log")]
-        log::trace!(target: "transport", "Terminating session {self:?} due to {reason:?}");
+        log::trace!(target: "transport", "Terminating session {self} due to {reason:?}");
 
         self.state = TransportState::Terminated;
         SessionEvent::Terminated(reason)
@@ -435,14 +439,14 @@ where
         let mut force_write_intent = false;
         if self.state == TransportState::Init {
             #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Transport {self:?} is connected, initializing handshake");
+            log::debug!(target: "transport", "Transport {self} is connected, initializing handshake");
 
             force_write_intent = true;
             self.state = TransportState::Handshake;
         } else if self.state == TransportState::Handshake {
             debug_assert!(!self.session.is_established());
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Transport {self:?} got I/O while in handshake mode");
+            log::trace!(target: "transport", "Transport {self} got I/O while in handshake mode");
         }
 
         let resp = match io {
@@ -459,13 +463,13 @@ where
             && self.state != TransportState::Handshake
         {
             #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Peer {self:?} has reset the connection");
+            log::debug!(target: "transport", "Peer {self} has reset the connection");
 
             self.state = TransportState::Terminated;
             resp
         } else if self.session.is_established() && self.state == TransportState::Handshake {
             #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Handshake with {self:?} is complete");
+            log::debug!(target: "transport", "Handshake with {self} is complete");
 
             // We just got connected; may need to send output
             self.write_intent = true;
