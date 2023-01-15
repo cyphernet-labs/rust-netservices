@@ -3,6 +3,7 @@ extern crate amplify;
 
 use std::any::Any;
 use std::io::Write;
+use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -10,16 +11,15 @@ use std::{fs, io, thread};
 
 use clap::Parser;
 use cyphernet::addr::{HostName, InetHost, Localhost, NetAddr, PartialAddr, PeerAddr};
-use cyphernet::proxy::socks5;
-use cyphernet::{ed25519, EcSign, EcSk};
+use cyphernet::{ed25519, Cert, EcPk, EcSign, EcSk};
 use netservices::tunnel::Tunnel;
-use netservices::NetSession;
+use netservices::{LinkDirection, NetSession};
 use nsh::client::Client;
 use nsh::command::Command;
 use nsh::processor::Processor;
 use nsh::server::{Accept, Server};
 use nsh::shell::LogLevel;
-use nsh::{RemoteAddr, Session, SessionBuilder, Transport};
+use nsh::{RemoteAddr, Session, SessionBuild, SessionConfig, Transport};
 use reactor::poller::popol;
 use reactor::Reactor;
 
@@ -93,14 +93,17 @@ enum Mode {
 pub struct NodeKeys {
     pk: ed25519::PublicKey,
     sk: ed25519::PrivateKey,
+    cert: Cert<ed25519::Signature>,
 }
 
 impl From<ed25519::PrivateKey> for NodeKeys {
     fn from(sk: ed25519::PrivateKey) -> Self {
-        NodeKeys {
-            pk: sk.to_pk().expect("invalid node private key"),
-            sk,
-        }
+        let pk = sk.to_pk().expect("invalid node private key");
+        let cert = Cert {
+            pk: pk.clone(),
+            sig: sk.sign(pk.to_pk_compressed()),
+        };
+        NodeKeys { pk, sk, cert }
     }
 }
 
@@ -206,8 +209,12 @@ fn run() -> Result<(), AppError> {
         Mode::Listen(socket_addr) => {
             println!("Listening on {socket_addr} ...");
 
-            let processor = Processor::new();
-            let service = Server::with(&socket_addr, processor)?;
+            let sconfig = SessionConfig {
+                cert: config.node_keys.cert,
+                signer: config.node_keys.sk,
+            };
+            let processor = Processor::with(sconfig.clone(), config.proxy_addr);
+            let service = Server::with(&socket_addr, sconfig, processor)?;
             let reactor = Reactor::with(
                 service,
                 popol::Poller::new(),
@@ -219,7 +226,18 @@ fn run() -> Result<(), AppError> {
         Mode::Tunnel { remote, local } => {
             eprintln!("Tunneling to {remote} from {local}...");
 
-            let session = Session::build();
+            let sconfig = SessionConfig {
+                cert: config.node_keys.cert,
+                signer: config.node_keys.sk,
+            };
+
+            let connection = TcpStream::connect(config.proxy_addr)?;
+            let session = Session::build(
+                connection,
+                remote.clone().into(),
+                LinkDirection::Outbound,
+                sconfig,
+            );
             let mut tunnel = match Tunnel::with(session, local) {
                 Ok(tunnel) => tunnel,
                 Err((session, err)) => {
@@ -237,7 +255,12 @@ fn run() -> Result<(), AppError> {
             eprintln!("Connecting to {remote_host} ...");
 
             let mut stdout = io::stdout();
-            let mut client = Client::connect(remote_host)?;
+
+            let sconfig = SessionConfig {
+                cert: config.node_keys.cert,
+                signer: config.node_keys.sk,
+            };
+            let mut client = Client::connect(remote_host, sconfig, config.proxy_addr)?;
             let mut printout = client.exec(remote_command)?;
             eprintln!("Remote output >>>");
             for batch in &mut printout {

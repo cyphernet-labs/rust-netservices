@@ -33,35 +33,68 @@ pub trait NetSession: NetStream {
 }
 
 pub trait NetStateMachine {
+    const NAME: &'static str;
+
+    type Init;
     type Artifact;
     type Error: std::error::Error + Send + Sync + 'static;
 
+    fn init(&mut self, init: Self::Init);
     fn next_read_len(&self) -> usize;
     fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error>;
     fn artifact(&self) -> Option<Self::Artifact>;
+
+    fn is_init(&self) -> bool;
     fn is_complete(&self) -> bool {
         self.artifact().is_some()
     }
 }
 
+pub trait IntoInit<I: Sized> {
+    fn into_init(self) -> I;
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct ZeroInit;
+
+impl<T> IntoInit<ZeroInit> for T {
+    fn into_init(self) -> ZeroInit {
+        ZeroInit
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub struct NetProtocol<M: NetStateMachine, S: NetSession> {
-    name: &'static str,
+pub struct NetProtocol<M: NetStateMachine, S: NetSession>
+where
+    S::Artifact: IntoInit<M::Init>,
+{
     state_machine: M,
     session: S,
 }
 
-impl<M: NetStateMachine, S: NetSession> NetProtocol<M, S> {
-    pub fn new(name: &'static str, session: S, state_machine: M) -> Self {
+impl<M: NetStateMachine, S: NetSession> NetProtocol<M, S>
+where
+    S::Artifact: IntoInit<M::Init>,
+{
+    pub fn new(session: S) -> Self
+    where
+        M: Default,
+    {
+        Self::with(session, M::default())
+    }
+
+    pub fn with(session: S, state_machine: M) -> Self {
         Self {
-            name,
             state_machine,
             session,
         }
     }
 }
 
-impl<M: NetStateMachine, S: NetSession> io::Read for NetProtocol<M, S> {
+impl<M: NetStateMachine, S: NetSession> io::Read for NetProtocol<M, S>
+where
+    S::Artifact: IntoInit<M::Init>,
+{
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.state_machine.is_complete() {
             return self.session.read(buf);
@@ -72,7 +105,7 @@ impl<M: NetStateMachine, S: NetSession> io::Read for NetProtocol<M, S> {
         self.session.read_exact(&mut input)?;
 
         #[cfg(feature = "log")]
-        log::trace!(target: self.name, "Received handshake act: {input:02x?}");
+        log::trace!(target: M::NAME, "Received handshake act: {input:02x?}");
 
         if !input.is_empty() {
             let output = self
@@ -81,17 +114,32 @@ impl<M: NetStateMachine, S: NetSession> io::Read for NetProtocol<M, S> {
                 .map_err(|err| io::Error::new(io::ErrorKind::ConnectionAborted, err))?;
 
             #[cfg(feature = "log")]
-            log::trace!(target: self.name, "Sending handshake act: {output:02x?}");
+            log::trace!(target: M::NAME, "Sending handshake act: {output:02x?}");
 
             if !output.is_empty() {
                 self.session.write_all(&output)?;
             }
+        } else if !self.state_machine.is_init() {
+            if let Some(artifact) = self.session.artifact() {
+                #[cfg(feature = "log")]
+                log::trace!(
+                    target: M::NAME,
+                    "Initializing state with artifact {artifact}"
+                );
+
+                self.state_machine.init(artifact.into_init());
+                debug_assert!(self.state_machine.is_init());
+            }
         }
+
         Ok(0)
     }
 }
 
-impl<M: NetStateMachine, S: NetSession> io::Write for NetProtocol<M, S> {
+impl<M: NetStateMachine, S: NetSession> io::Write for NetProtocol<M, S>
+where
+    S::Artifact: IntoInit<M::Init>,
+{
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.state_machine.is_complete() {
             return self.session.write(buf);
@@ -103,7 +151,7 @@ impl<M: NetStateMachine, S: NetSession> io::Write for NetProtocol<M, S> {
 
         if !act.is_empty() {
             #[cfg(feature = "log")]
-            log::trace!(target: self.name, "Initializing handshake with: {act:02x?}");
+            log::trace!(target: M::NAME, "Initializing handshake with: {act:02x?}");
 
             self.session.write_all(&act)?;
 
@@ -118,7 +166,10 @@ impl<M: NetStateMachine, S: NetSession> io::Write for NetProtocol<M, S> {
     }
 }
 
-impl<M: NetStateMachine, S: NetSession> NetStream for NetProtocol<M, S> {}
+impl<M: NetStateMachine, S: NetSession> NetStream for NetProtocol<M, S> where
+    S::Artifact: IntoInit<M::Init>
+{
+}
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Display)]
 #[display("{session}")]
@@ -127,7 +178,10 @@ pub struct ProtocolArtifact<M: NetStateMachine, S: NetSession> {
     pub state: M::Artifact,
 }
 
-impl<M: NetStateMachine, S: NetSession> NetSession for NetProtocol<M, S> {
+impl<M: NetStateMachine, S: NetSession> NetSession for NetProtocol<M, S>
+where
+    S::Artifact: IntoInit<M::Init>,
+{
     type Inner = S;
     type Connection = S::Connection;
     type Artifact = ProtocolArtifact<M, S>;
@@ -216,13 +270,29 @@ mod imp_eidolon {
 
     use cyphernet::auth::eidolon;
     use cyphernet::display::{Encoding, MultiDisplay};
-    use cyphernet::{Cert, CertFormat, EcSign};
+    use cyphernet::{Cert, CertFormat, Digest, EcSign, Ecdh};
 
     use super::*;
 
     pub struct EidolonRuntime<S: EcSign> {
         state: EidolonState<S::Sig>,
         signer: S,
+    }
+
+    impl<S: EcSign> EidolonRuntime<S> {
+        pub fn initiator(signer: S, cert: Cert<S::Sig>) -> Self {
+            Self {
+                state: EidolonState::initiator(cert),
+                signer,
+            }
+        }
+
+        pub fn responder(signer: S, cert: Cert<S::Sig>) -> Self {
+            Self {
+                state: EidolonState::responder(cert),
+                signer,
+            }
+        }
     }
 
     impl<S: EcSign> Display for EidolonRuntime<S> {
@@ -237,11 +307,17 @@ mod imp_eidolon {
     }
 
     impl<S: EcSign> NetStateMachine for EidolonRuntime<S> {
+        const NAME: &'static str = "eidolon";
+        type Init = Vec<u8>;
         type Artifact = Cert<S::Sig>;
         type Error = eidolon::Error;
 
+        fn init(&mut self, init: Self::Init) {
+            self.state.init(init)
+        }
+
         fn next_read_len(&self) -> usize {
-            todo!()
+            self.state.next_read_len()
         }
 
         fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error> {
@@ -250,6 +326,18 @@ mod imp_eidolon {
 
         fn artifact(&self) -> Option<Self::Artifact> {
             self.state.remote_cert().cloned()
+        }
+
+        fn is_init(&self) -> bool {
+            self.state.is_init()
+        }
+    }
+
+    impl<S: NetSession, E: Ecdh, D: Digest> IntoInit<Vec<u8>>
+        for ProtocolArtifact<NoiseState<E, D>, S>
+    {
+        fn into_init(self) -> Vec<u8> {
+            self.state.as_ref().to_vec()
         }
     }
 }
@@ -263,8 +351,12 @@ mod impl_noise {
     use super::*;
 
     impl<E: Ecdh, D: Digest> NetStateMachine for NoiseState<E, D> {
+        const NAME: &'static str = "noise";
+        type Init = ZeroInit;
         type Artifact = D::Output;
         type Error = NoiseError;
+
+        fn init(&mut self, _: Self::Init) {}
 
         fn next_read_len(&self) -> usize {
             self.next_read_len()
@@ -277,6 +369,10 @@ mod impl_noise {
         fn artifact(&self) -> Option<Self::Artifact> {
             self.get_handshake_hash()
         }
+
+        fn is_init(&self) -> bool {
+            true
+        }
     }
 }
 
@@ -287,8 +383,12 @@ mod impl_socks5 {
     use super::*;
 
     impl NetStateMachine for Socks5 {
+        const NAME: &'static str = "socks5";
+        type Init = ZeroInit;
         type Artifact = ();
         type Error = socks5::Error;
+
+        fn init(&mut self, _: Self::Init) {}
 
         fn next_read_len(&self) -> usize {
             self.next_read_len()
@@ -300,6 +400,10 @@ mod impl_socks5 {
 
         fn artifact(&self) -> Option<Self::Artifact> {
             Some(())
+        }
+
+        fn is_init(&self) -> bool {
+            true
         }
     }
 }

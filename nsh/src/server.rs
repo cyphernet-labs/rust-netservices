@@ -5,10 +5,10 @@ use std::net::ToSocketAddrs;
 use std::os::fd::RawFd;
 use std::time::Duration;
 
-use netservices::{ListenerEvent, SessionEvent};
+use netservices::{LinkDirection, ListenerEvent, SessionEvent};
 use reactor::{Error, Resource};
 
-use crate::{Session, SessionBuilder, Transport};
+use crate::{Session, SessionBuild, SessionConfig, Transport};
 
 pub type Accept = netservices::NetAccept<Session>;
 pub type Action = reactor::Action<Accept, Transport>;
@@ -22,17 +22,23 @@ pub trait Delegate: Send {
 }
 
 pub struct Server<D: Delegate> {
+    config: SessionConfig,
     outbox: HashMap<RawFd, VecDeque<Vec<u8>>>,
     action_queue: VecDeque<Action>,
     delegate: D,
 }
 
 impl<D: Delegate> Server<D> {
-    pub fn with(listen: &impl ToSocketAddrs, delegate: D) -> io::Result<Self> {
+    pub fn with(
+        listen: &impl ToSocketAddrs,
+        config: SessionConfig,
+        delegate: D,
+    ) -> io::Result<Self> {
         let mut action_queue = VecDeque::new();
         let listener = Accept::bind(listen)?;
         action_queue.push_back(Action::RegisterListener(listener));
         Ok(Self {
+            config,
             outbox: empty!(),
             action_queue,
             delegate,
@@ -70,7 +76,12 @@ impl<D: Delegate> reactor::Handler for Server<D> {
                     .expect("unknown local address on accepted connection");
                 log::info!(target: "server", "Incoming connection from {peer_addr} on {local_addr}");
                 // TODO: Build session
-                let session = Session::build();
+                let session = Session::build(
+                    connection,
+                    peer_addr.into(),
+                    LinkDirection::Inbound,
+                    self.config.clone(),
+                );
                 match Transport::accept(session) {
                     Ok(transport) => {
                         log::info!(target: "server", "Connection accepted, registering transport with reactor");

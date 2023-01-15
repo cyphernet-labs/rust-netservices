@@ -1,23 +1,27 @@
-use std::net::SocketAddr;
+use cyphernet::addr::{InetHost, NetAddr};
+use std::net::TcpStream;
 use std::os::fd::RawFd;
 use std::process;
 use std::process::Stdio;
 use std::str::FromStr;
 
-use cyphernet::{ed25519, x25519};
-use netservices::resource::LinkDirection;
+use cyphernet::ed25519;
+use netservices::{LinkDirection, NetConnection};
 use reactor::Resource;
 
 use crate::command::Command;
-use crate::server::{Action, Auth, Delegate};
-use crate::{Session, SessionBuilder, Transport};
+use crate::server::{Action, Delegate};
+use crate::{Session, SessionBuild, SessionConfig, Transport};
 
 #[derive(Debug)]
-pub struct Processor {}
+pub struct Processor {
+    config: SessionConfig,
+    proxy_addr: NetAddr<InetHost>,
+}
 
 impl Processor {
-    pub fn new() -> Self {
-        Self {}
+    pub fn with(config: SessionConfig, proxy_addr: NetAddr<InetHost>) -> Self {
+        Self { config, proxy_addr }
     }
 }
 
@@ -67,7 +71,23 @@ impl Delegate for Processor {
                 }
             }
             Command::Forward { hop, command } => {
-                let session = Session::build();
+                let connection = match TcpStream::connect_nonblocking(self.proxy_addr.clone()) {
+                    Ok(connection) => connection,
+                    Err(err) => {
+                        action_queue.push(Action::Send(
+                            fd,
+                            format!("Failure: {err}").as_bytes().to_vec(),
+                        ));
+                        return action_queue;
+                    }
+                };
+                // Ensure that the host key equals the key provided during authentication
+                let session = Session::build(
+                    connection,
+                    hop.into(),
+                    LinkDirection::Outbound,
+                    self.config.clone(),
+                );
                 match Transport::with_session(session, LinkDirection::Outbound) {
                     Ok(transport) => {
                         let id = transport.id();
