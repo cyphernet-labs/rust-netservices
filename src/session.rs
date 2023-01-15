@@ -222,6 +222,23 @@ where
             session,
         }
     }
+
+    fn init(&mut self) -> bool {
+        if !self.state.is_init() {
+            if let Some(artifact) = self.session.artifact() {
+                #[cfg(feature = "log")]
+                log::trace!(
+                    target: M::NAME,
+                    "Initializing state with artifact {artifact}"
+                );
+
+                self.state.init(artifact.into_init());
+
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl<M: NetStateMachine, S: NetSession> io::Read for NetProtocol<M, S>
@@ -229,9 +246,11 @@ where
     S::Artifact: IntoInit<M::Init>,
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.state.is_complete() {
+        if self.state.is_complete() || !self.session.is_established() {
             return self.session.read(buf);
         }
+
+        self.init();
 
         let len = self.state.next_read_len();
         let mut input = vec![0u8; len];
@@ -252,17 +271,6 @@ where
             if !output.is_empty() {
                 self.session.write_all(&output)?;
             }
-        } else if !self.state.is_init() {
-            if let Some(artifact) = self.session.artifact() {
-                #[cfg(feature = "log")]
-                log::trace!(
-                    target: M::NAME,
-                    "Initializing state with artifact {artifact}"
-                );
-
-                self.state.init(artifact.into_init());
-                debug_assert!(self.state.is_init());
-            }
         }
 
         Ok(0)
@@ -274,9 +282,12 @@ where
     S::Artifact: IntoInit<M::Init>,
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.state.is_complete() {
+        if self.state.is_complete() || !self.session.is_established() {
             return self.session.write(buf);
         }
+
+        self.init();
+
         let act = self
             .state
             .advance(&[])
@@ -357,6 +368,7 @@ where
         if !self.session.is_established() {
             self.session.run_handshake()?;
         }
+        self.init();
         self.state.run_handshake(self.session.as_connection_mut())
     }
 
