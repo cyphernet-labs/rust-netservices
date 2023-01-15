@@ -1,14 +1,14 @@
 use cyphernet::{ed25519, x25519};
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::net::ToSocketAddrs;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::os::fd::RawFd;
 use std::time::Duration;
 
-use netservices::{LinkDirection, ListenerEvent, SessionEvent};
+use netservices::{ListenerEvent, SessionEvent};
 use reactor::{Error, Resource};
 
-use crate::{Session, SessionBuild, SessionConfig, Transport};
+use crate::{Session, Transport};
 
 pub type Accept = netservices::NetAccept<Session>;
 pub type Action = reactor::Action<Accept, Transport>;
@@ -17,28 +17,23 @@ pub type Ecdh = x25519::PrivateKey;
 pub type Auth = ed25519::PrivateKey;
 
 pub trait Delegate: Send {
+    fn accept(&self, connection: TcpStream) -> Session;
     fn new_client(&mut self, id: RawFd, key: ed25519::PublicKey) -> Vec<Action>;
     fn input(&mut self, id: RawFd, data: Vec<u8>) -> Vec<Action>;
 }
 
 pub struct Server<D: Delegate> {
-    config: SessionConfig,
     outbox: HashMap<RawFd, VecDeque<Vec<u8>>>,
     action_queue: VecDeque<Action>,
     delegate: D,
 }
 
 impl<D: Delegate> Server<D> {
-    pub fn with(
-        listen: &impl ToSocketAddrs,
-        config: SessionConfig,
-        delegate: D,
-    ) -> io::Result<Self> {
+    pub fn with(listen: &impl ToSocketAddrs, delegate: D) -> io::Result<Self> {
         let mut action_queue = VecDeque::new();
         let listener = Accept::bind(listen)?;
         action_queue.push_back(Action::RegisterListener(listener));
         Ok(Self {
-            config,
             outbox: empty!(),
             action_queue,
             delegate,
@@ -75,12 +70,7 @@ impl<D: Delegate> reactor::Handler for Server<D> {
                     .local_addr()
                     .expect("unknown local address on accepted connection");
                 log::info!(target: "server", "Incoming connection from {peer_addr} on {local_addr}");
-                let session = Session::build(
-                    connection,
-                    peer_addr.into(),
-                    LinkDirection::Inbound,
-                    self.config.clone(),
-                );
+                let session = self.delegate.accept(connection);
                 match Transport::accept(session) {
                     Ok(transport) => {
                         log::info!(target: "server", "Connection accepted, registering transport with reactor");

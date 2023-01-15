@@ -1,13 +1,13 @@
 use std::io::{self, Read, Write};
-use std::net::TcpStream;
 
 use amplify::hex::ToHex;
 use cyphernet::addr::{InetHost, NetAddr};
+use cyphernet::{ed25519, Cert, Digest, Sha256};
 use netservices::tunnel::READ_BUFFER_SIZE;
-use netservices::{LinkDirection, NetSession};
+use netservices::NetSession;
 
 use crate::command::Command;
-use crate::{RemoteAddr, Session, SessionBuild, SessionConfig};
+use crate::{RemoteHost, Session};
 
 pub struct Response {
     client: Client,
@@ -34,17 +34,19 @@ pub struct Client {
 
 impl Client {
     pub fn connect(
-        remote_addr: RemoteAddr,
-        config: SessionConfig,
+        remote_peer: RemoteHost,
+        cert: Cert<ed25519::Signature>,
+        signer: ed25519::PrivateKey,
         proxy_addr: NetAddr<InetHost>,
+        force_proxy: bool,
     ) -> io::Result<Self> {
-        let connection = TcpStream::connect(proxy_addr)?;
-        let session = Session::build(
-            connection,
-            remote_addr.into(),
-            LinkDirection::Outbound,
-            config,
-        );
+        let session = Session::connect_blocking::<{ Sha256::OUTPUT_LEN }>(
+            remote_peer.addr,
+            cert,
+            signer,
+            proxy_addr,
+            force_proxy,
+        )?;
         // TODO: Authenticate that the remote peer we are connecting to is indeed our peer
         Ok(Self {
             buf: vec![0u8; READ_BUFFER_SIZE],

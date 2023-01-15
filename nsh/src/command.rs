@@ -3,7 +3,7 @@ use std::str::FromStr;
 use cyphernet::addr::PeerAddrParseError;
 use cyphernet::ed25519::PublicKey;
 
-use crate::RemoteAddr;
+use crate::RemoteHost;
 
 #[derive(Subcommand, Copy, Clone, Eq, PartialEq, Hash, Debug, Display)]
 #[display(lowercase)]
@@ -38,7 +38,7 @@ pub enum Command {
     Execute { command: LocalCommand },
     #[display("{command}@{hop}")]
     Forward {
-        hop: RemoteAddr,
+        hop: RemoteHost,
         command: LocalCommand,
     },
 }

@@ -3,7 +3,6 @@ extern crate amplify;
 
 use std::any::Any;
 use std::io::Write;
-use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -11,15 +10,15 @@ use std::{fs, io, thread};
 
 use clap::Parser;
 use cyphernet::addr::{HostName, InetHost, Localhost, NetAddr, PartialAddr, PeerAddr};
-use cyphernet::{ed25519, Cert, EcPk, EcSign, EcSk};
+use cyphernet::{ed25519, Cert, Digest, EcPk, EcSign, EcSk, Sha256};
 use netservices::tunnel::Tunnel;
-use netservices::{LinkDirection, NetSession};
+use netservices::NetSession;
 use nsh::client::Client;
 use nsh::command::Command;
 use nsh::processor::Processor;
 use nsh::server::{Accept, Server};
 use nsh::shell::LogLevel;
-use nsh::{RemoteAddr, Session, SessionBuild, SessionConfig, Transport};
+use nsh::{RemoteHost, Session, Transport};
 use reactor::poller::popol;
 use reactor::Reactor;
 
@@ -81,11 +80,11 @@ enum Mode {
     Listen(NetAddr<InetHost>),
     Tunnel {
         local: NetAddr<InetHost>,
-        remote: RemoteAddr,
+        remote: RemoteHost,
     },
     Connect {
-        remote_host: RemoteAddr,
-        remote_command: Command,
+        host: RemoteHost,
+        command: Command,
     },
 }
 
@@ -110,6 +109,7 @@ impl From<ed25519::PrivateKey> for NodeKeys {
 struct Config {
     pub node_keys: NodeKeys,
     pub mode: Mode,
+    pub force_proxy: bool,
     pub proxy_addr: NetAddr<InetHost>,
 }
 
@@ -132,7 +132,7 @@ pub enum AppError {
     Thread(Box<dyn Any + Send>),
 
     #[display("unable to construct tunnel with {0}: {1}")]
-    Tunnel(RemoteAddr, io::Error),
+    Tunnel(RemoteHost, io::Error),
 }
 
 impl TryFrom<Args> for Config {
@@ -152,10 +152,10 @@ impl TryFrom<Args> for Config {
                 remote: remote.into(),
             }
         } else {
-            let remote_host = args.remote_host.expect("clap library broken");
+            let host = args.remote_host.expect("clap library broken");
             Mode::Connect {
-                remote_host: remote_host.into(),
-                remote_command: args.command.unwrap_or(Command::ECHO),
+                host: host.into(),
+                command: args.command.unwrap_or(Command::ECHO),
             }
         };
 
@@ -186,12 +186,14 @@ impl TryFrom<Args> for Config {
         let node_keys = NodeKeys::from(id_priv);
         println!("Using identity {}", node_keys.pk());
 
+        let force_proxy = args.proxy.is_some();
         let proxy_addr = args.proxy.unwrap_or(Localhost::localhost()).into();
 
         Ok(Config {
             node_keys,
             mode: command,
             proxy_addr,
+            force_proxy,
         })
     }
 }
@@ -203,18 +205,17 @@ fn run() -> Result<(), AppError> {
 
     let config = Config::try_from(args)?;
 
-    // let sig = config.node_keys.sk().sign(config.node_keys.pk().as_slice());
-
     match config.mode {
         Mode::Listen(socket_addr) => {
             println!("Listening on {socket_addr} ...");
 
-            let sconfig = SessionConfig {
-                cert: config.node_keys.cert,
-                signer: config.node_keys.sk,
-            };
-            let processor = Processor::with(sconfig.clone(), config.proxy_addr);
-            let service = Server::with(&socket_addr, sconfig, processor)?;
+            let processor = Processor::with(
+                config.node_keys.cert,
+                config.node_keys.sk.clone(),
+                config.proxy_addr,
+                config.force_proxy,
+            );
+            let service = Server::with(&socket_addr, processor)?;
             let reactor = Reactor::with(
                 service,
                 popol::Poller::new(),
@@ -226,18 +227,13 @@ fn run() -> Result<(), AppError> {
         Mode::Tunnel { remote, local } => {
             eprintln!("Tunneling to {remote} from {local}...");
 
-            let sconfig = SessionConfig {
-                cert: config.node_keys.cert,
-                signer: config.node_keys.sk,
-            };
-
-            let connection = TcpStream::connect(config.proxy_addr)?;
-            let session = Session::build(
-                connection,
-                remote.clone().into(),
-                LinkDirection::Outbound,
-                sconfig,
-            );
+            let session = Session::connect_blocking::<{ Sha256::OUTPUT_LEN }>(
+                remote.addr.clone(),
+                config.node_keys.cert,
+                config.node_keys.sk.clone(),
+                config.proxy_addr.clone(),
+                config.force_proxy,
+            )?;
             let mut tunnel = match Tunnel::with(session, local) {
                 Ok(tunnel) => tunnel,
                 Err((session, err)) => {
@@ -248,20 +244,19 @@ fn run() -> Result<(), AppError> {
             let _ = tunnel.tunnel_once(popol::Poller::new(), Duration::from_secs(10))?;
             tunnel.into_session().disconnect()?;
         }
-        Mode::Connect {
-            remote_host,
-            remote_command,
-        } => {
-            eprintln!("Connecting to {remote_host} ...");
+        Mode::Connect { host, command } => {
+            eprintln!("Connecting to {host} ...");
 
             let mut stdout = io::stdout();
 
-            let sconfig = SessionConfig {
-                cert: config.node_keys.cert,
-                signer: config.node_keys.sk,
-            };
-            let mut client = Client::connect(remote_host, sconfig, config.proxy_addr)?;
-            let mut printout = client.exec(remote_command)?;
+            let mut client = Client::connect(
+                host,
+                config.node_keys.cert,
+                config.node_keys.sk,
+                config.proxy_addr,
+                config.force_proxy,
+            )?;
+            let mut printout = client.exec(command)?;
             eprintln!("Remote output >>>");
             for batch in &mut printout {
                 stdout.write_all(&batch)?;
