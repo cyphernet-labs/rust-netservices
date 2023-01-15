@@ -98,7 +98,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
 
         let noise = NoiseState::initialize::<HASHLEN>(
             HandshakePattern::nn(),
-            true,
+            direction.is_outbound(),
             &[],
             Keyset::noise_nn(),
         );
