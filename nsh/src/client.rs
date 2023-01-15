@@ -43,6 +43,7 @@ impl Client {
         let session = Session::connect_blocking::<{ Sha256::OUTPUT_LEN }>(
             remote_peer.addr,
             cert,
+            vec![remote_peer.id],
             signer,
             proxy_addr,
             force_proxy,

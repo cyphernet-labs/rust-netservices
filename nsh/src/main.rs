@@ -230,6 +230,7 @@ fn run() -> Result<(), AppError> {
             let session = Session::connect_blocking::<{ Sha256::OUTPUT_LEN }>(
                 remote.addr.clone(),
                 config.node_keys.cert,
+                vec![remote.id],
                 config.node_keys.sk.clone(),
                 config.proxy_addr.clone(),
                 config.force_proxy,

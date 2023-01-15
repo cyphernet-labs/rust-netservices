@@ -42,6 +42,7 @@ impl Delegate for Processor {
         Session::accept::<{ Sha256::OUTPUT_LEN }>(
             connection,
             self.cert.clone(),
+            vec![],
             self.signer.clone(),
         )
     }
@@ -95,6 +96,7 @@ impl Delegate for Processor {
                 let session = match Session::connect_nonblocking::<{ Sha256::OUTPUT_LEN }>(
                     hop.addr,
                     self.cert,
+                    vec![hop.id],
                     self.signer.clone(),
                     self.proxy_addr.clone(),
                     self.force_proxy,

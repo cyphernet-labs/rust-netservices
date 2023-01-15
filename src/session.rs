@@ -20,6 +20,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
     pub fn connect_nonblocking<const HASHLEN: usize>(
         remote_addr: NetAddr<HostName>,
         cert: Cert<I::Sig>,
+        allowed_ids: Vec<I::Pk>,
         signer: I,
         proxy_addr: NetAddr<InetHost>,
         force_proxy: bool,
@@ -34,6 +35,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
             connection,
             LinkDirection::Outbound,
             cert,
+            allowed_ids,
             signer,
             force_proxy,
         ))
@@ -42,6 +44,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
     pub fn connect_blocking<const HASHLEN: usize>(
         remote_addr: NetAddr<HostName>,
         cert: Cert<I::Sig>,
+        allowed_ids: Vec<I::Pk>,
         signer: I,
         proxy_addr: NetAddr<InetHost>,
         force_proxy: bool,
@@ -56,6 +59,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
             connection,
             LinkDirection::Outbound,
             cert,
+            allowed_ids,
             signer,
             force_proxy,
         ))
@@ -64,6 +68,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
     pub fn accept<const HASHLEN: usize>(
         connection: TcpStream,
         cert: Cert<I::Sig>,
+        allowed_ids: Vec<I::Pk>,
         signer: I,
     ) -> Self {
         Self::with_config::<HASHLEN>(
@@ -71,6 +76,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
             connection,
             LinkDirection::Inbound,
             cert,
+            allowed_ids,
             signer,
             false,
         )
@@ -81,6 +87,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         connection: TcpStream,
         direction: LinkDirection,
         cert: Cert<I::Sig>,
+        allowed_ids: Vec<I::Pk>,
         signer: I,
         force_proxy: bool,
     ) -> Self {
@@ -96,8 +103,8 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
 
         let encoding = Noise::with(proxy, noise);
         let eidolon = match direction {
-            LinkDirection::Inbound => EidolonRuntime::initiator(signer, cert),
-            LinkDirection::Outbound => EidolonRuntime::responder(signer, cert),
+            LinkDirection::Inbound => EidolonRuntime::initiator(signer, cert, allowed_ids),
+            LinkDirection::Outbound => EidolonRuntime::responder(signer, cert, allowed_ids),
         };
         let auth = Eidolon::with(encoding, eidolon);
 
@@ -132,7 +139,7 @@ pub trait NetStateMachine {
 
     type Init;
     type Artifact;
-    type Error: std::error::Error + Send + Sync + 'static;
+    type Error: std::error::Error;
 
     fn init(&mut self, init: Self::Init);
     fn next_read_len(&self) -> usize;
@@ -206,7 +213,7 @@ where
             let output = self
                 .state_machine
                 .advance(&input)
-                .map_err(|err| io::Error::new(io::ErrorKind::ConnectionAborted, err))?;
+                .map_err(|_| io::Error::from(io::ErrorKind::ConnectionAborted))?;
 
             #[cfg(feature = "log")]
             log::trace!(target: M::NAME, "Sending handshake act: {output:02x?}");
@@ -242,7 +249,7 @@ where
         let act = self
             .state_machine
             .advance(&[])
-            .map_err(|err| io::Error::new(io::ErrorKind::ConnectionAborted, err))?;
+            .map_err(|_| io::Error::from(io::ErrorKind::ConnectionAborted))?;
 
         if !act.is_empty() {
             #[cfg(feature = "log")]
@@ -375,16 +382,16 @@ mod imp_eidolon {
     }
 
     impl<S: EcSign> EidolonRuntime<S> {
-        pub fn initiator(signer: S, cert: Cert<S::Sig>) -> Self {
+        pub fn initiator(signer: S, cert: Cert<S::Sig>, allowed_ids: Vec<S::Pk>) -> Self {
             Self {
-                state: EidolonState::initiator(cert),
+                state: EidolonState::initiator(cert, allowed_ids),
                 signer,
             }
         }
 
-        pub fn responder(signer: S, cert: Cert<S::Sig>) -> Self {
+        pub fn responder(signer: S, cert: Cert<S::Sig>, allowed_ids: Vec<S::Pk>) -> Self {
             Self {
-                state: EidolonState::responder(cert),
+                state: EidolonState::responder(cert, allowed_ids),
                 signer,
             }
         }
@@ -405,7 +412,7 @@ mod imp_eidolon {
         const NAME: &'static str = "eidolon";
         type Init = Vec<u8>;
         type Artifact = Cert<S::Sig>;
-        type Error = eidolon::Error;
+        type Error = eidolon::Error<S::Pk>;
 
         fn init(&mut self, init: Self::Init) {
             self.state.init(init)
