@@ -154,19 +154,32 @@ pub trait NetStateMachine {
     fn run_handshake(&mut self, stream: &mut impl NetStream) -> io::Result<()> {
         let mut input = vec![];
         while !self.is_complete() {
-            let act = self
-                .advance(&input)
-                .map_err(|_| io::Error::from(io::ErrorKind::ConnectionAborted))?;
+            let act = self.advance(&input).map_err(|err| {
+                #[cfg(feature = "log")]
+                log::error!(target: Self::NAME, "Handshake failure: {err}");
+
+                io::Error::from(io::ErrorKind::ConnectionAborted)
+            })?;
             if !act.is_empty() {
+                #[cfg(feature = "log")]
                 log::trace!(target: Self::NAME, "Sent {act:02x?}");
+
                 stream.write_all(&act)?;
             }
             if !self.is_complete() {
                 input = vec![0u8; self.next_read_len()];
                 stream.read_exact(&mut input)?;
+
+                #[cfg(feature = "log")]
                 log::trace!(target: Self::NAME, "Received {input:02x?}");
             }
         }
+        #[cfg(feature = "log")]
+        log::debug!(
+            target: Self::NAME,
+            "Handshake protocol {} successfully completed",
+            Self::NAME
+        );
         Ok(())
     }
 
@@ -227,7 +240,7 @@ where
         if !self.state.is_init() {
             if let Some(artifact) = self.session.artifact() {
                 #[cfg(feature = "log")]
-                log::trace!(
+                log::debug!(
                     target: M::NAME,
                     "Initializing state with artifact {artifact}"
                 );
@@ -260,10 +273,12 @@ where
         log::trace!(target: M::NAME, "Received handshake act: {input:02x?}");
 
         if !input.is_empty() {
-            let output = self
-                .state
-                .advance(&input)
-                .map_err(|_| io::Error::from(io::ErrorKind::ConnectionAborted))?;
+            let output = self.state.advance(&input).map_err(|err| {
+                #[cfg(feature = "log")]
+                log::error!(target: M::NAME, "Handshake failure: {err}");
+
+                io::Error::from(io::ErrorKind::ConnectionAborted)
+            })?;
 
             #[cfg(feature = "log")]
             log::trace!(target: M::NAME, "Sending handshake act: {output:02x?}");
@@ -288,10 +303,12 @@ where
 
         self.init();
 
-        let act = self
-            .state
-            .advance(&[])
-            .map_err(|_| io::Error::from(io::ErrorKind::ConnectionAborted))?;
+        let act = self.state.advance(&[]).map_err(|err| {
+            #[cfg(feature = "log")]
+            log::error!(target: M::NAME, "Handshake failure: {err}");
+
+            io::Error::from(io::ErrorKind::ConnectionAborted)
+        })?;
 
         if !act.is_empty() {
             #[cfg(feature = "log")]
@@ -365,6 +382,9 @@ where
     type Artifact = ProtocolArtifact<M, S>;
 
     fn run_handshake(&mut self) -> io::Result<()> {
+        #[cfg(feature = "log")]
+        log::debug!(target: M::NAME, "Starting handshake protocol {}", M::NAME);
+
         if !self.session.is_established() {
             self.session.run_handshake()?;
         }
