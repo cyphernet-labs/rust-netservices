@@ -105,8 +105,8 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
 
         let encoding = Noise::with(proxy, noise);
         let eidolon = match direction {
-            LinkDirection::Inbound => EidolonRuntime::initiator(signer, cert, allowed_ids),
-            LinkDirection::Outbound => EidolonRuntime::responder(signer, cert, allowed_ids),
+            LinkDirection::Inbound => EidolonRuntime::responder(signer, cert, allowed_ids),
+            LinkDirection::Outbound => EidolonRuntime::initiator(signer, cert, allowed_ids),
         };
         let auth = Eidolon::with(encoding, eidolon);
 
