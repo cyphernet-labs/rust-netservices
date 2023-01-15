@@ -54,7 +54,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         } else {
             TcpStream::connect_nonblocking(remote_addr.connection_addr(proxy_addr))?
         };
-        Ok(Self::with_config::<HASHLEN>(
+        let mut session = Self::with_config::<HASHLEN>(
             remote_addr,
             connection,
             LinkDirection::Outbound,
@@ -62,7 +62,9 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
             allowed_ids,
             signer,
             force_proxy,
-        ))
+        );
+        session.run_handshake()?;
+        Ok(session)
     }
 
     pub fn accept<const HASHLEN: usize>(
@@ -122,6 +124,7 @@ pub trait NetSession: NetStream + SplitIo {
     fn is_established(&self) -> bool {
         self.artifact().is_some()
     }
+
     fn display(&self) -> String {
         match self.artifact() {
             Some(artifact) => artifact.to_string(),
@@ -145,6 +148,26 @@ pub trait NetStateMachine {
     fn next_read_len(&self) -> usize;
     fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error>;
     fn artifact(&self) -> Option<Self::Artifact>;
+
+    // Blocking
+    fn run_handshake(&mut self, stream: &mut impl NetStream) -> io::Result<()> {
+        let mut input = vec![];
+        while !self.is_complete() {
+            let act = self
+                .advance(&input)
+                .map_err(|_| io::Error::from(io::ErrorKind::ConnectionAborted))?;
+            if !act.is_empty() {
+                log::trace!(target: Self::NAME, "Sent {act:02x?}");
+                stream.write_all(&act)?;
+            }
+            if !self.is_complete() {
+                input = vec![0u8; self.next_read_len()];
+                stream.read_exact(&mut input)?;
+                log::trace!(target: Self::NAME, "Received {input:02x?}");
+            }
+        }
+        Ok(())
+    }
 
     fn is_init(&self) -> bool;
     fn is_complete(&self) -> bool {
@@ -197,6 +220,10 @@ where
             state: state_machine,
             session,
         }
+    }
+
+    fn run_handshake(&mut self) -> io::Result<()> {
+        self.state.run_handshake(self.session.as_connection_mut())
     }
 }
 
