@@ -50,9 +50,9 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         force_proxy: bool,
     ) -> io::Result<Self> {
         let connection = if force_proxy {
-            TcpStream::connect_nonblocking(proxy_addr)?
+            TcpStream::connect_blocking(proxy_addr)?
         } else {
-            TcpStream::connect_nonblocking(remote_addr.connection_addr(proxy_addr))?
+            TcpStream::connect_blocking(remote_addr.connection_addr(proxy_addr))?
         };
         let mut session = Self::with_config::<HASHLEN>(
             remote_addr,
