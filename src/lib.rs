@@ -19,3 +19,18 @@ pub use session::{NetProtocol, NetSession, NetStateMachine};
 
 #[cfg(feature = "io-reactor")]
 pub use resource::{ListenerEvent, NetAccept, NetTransport, SessionEvent};
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum LinkDirection {
+    Inbound,
+    Outbound,
+}
+
+impl LinkDirection {
+    pub fn is_inbound(self) -> bool {
+        matches!(self, LinkDirection::Inbound)
+    }
+    pub fn is_outbound(self) -> bool {
+        matches!(self, LinkDirection::Outbound)
+    }
+}

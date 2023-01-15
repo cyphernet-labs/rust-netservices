@@ -23,7 +23,7 @@ use reactor::poller::IoType;
 use reactor::{Io, Resource, WriteAtomic, WriteError};
 
 use crate::tunnel::READ_BUFFER_SIZE;
-use crate::{NetConnection, NetListener, NetSession};
+use crate::{LinkDirection, NetConnection, NetListener, NetSession};
 
 // TODO: Make these parameters configurable
 /// Socket read buffer size.
@@ -154,12 +154,6 @@ where
         // We disconnect by dropping the self
         Ok(())
     }
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub enum LinkDirection {
-    Inbound,
-    Outbound,
 }
 
 /// An event happening for a [`NetTransport`] network transport and delivered to
