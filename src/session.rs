@@ -141,7 +141,7 @@ pub trait NetSession: NetStream + SplitIo {
 pub trait NetStateMachine {
     const NAME: &'static str;
 
-    type Init;
+    type Init: Debug;
     type Artifact;
     type Error: std::error::Error;
 
@@ -162,7 +162,7 @@ pub trait NetStateMachine {
             })?;
             if !act.is_empty() {
                 #[cfg(feature = "log")]
-                log::trace!(target: Self::NAME, "Sent {act:02x?}");
+                log::trace!(target: Self::NAME, "Sending handshake act {act:02x?}");
 
                 stream.write_all(&act)?;
             }
@@ -171,7 +171,7 @@ pub trait NetStateMachine {
                 stream.read_exact(&mut input)?;
 
                 #[cfg(feature = "log")]
-                log::trace!(target: Self::NAME, "Received {input:02x?}");
+                log::trace!(target: Self::NAME, "Receiving handshake act {input:02x?}");
             }
         }
         #[cfg(feature = "log")]
@@ -239,13 +239,15 @@ where
     fn init(&mut self) -> bool {
         if !self.state.is_init() {
             if let Some(artifact) = self.session.artifact() {
+                let init_data = artifact.into_init();
+
                 #[cfg(feature = "log")]
                 log::debug!(
                     target: M::NAME,
-                    "Initializing state with artifact {artifact}"
+                    "Initializing state with data {init_data:02x?}"
                 );
 
-                self.state.init(artifact.into_init());
+                self.state.init(init_data);
 
                 return true;
             }
@@ -312,7 +314,7 @@ where
 
         if !act.is_empty() {
             #[cfg(feature = "log")]
-            log::trace!(target: M::NAME, "Initializing handshake with: {act:02x?}");
+            log::trace!(target: M::NAME, "Sending handshake act: {act:02x?}");
 
             self.session.write_all(&act)?;
 
