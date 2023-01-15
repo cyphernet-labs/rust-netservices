@@ -8,7 +8,7 @@ use std::net::TcpStream;
 use cyphernet::addr::{HostName, InetHost, NetAddr};
 use cyphernet::{x25519, Cert, Digest, EcSign};
 
-use crate::{LinkDirection, NetConnection, NetStream};
+use crate::{LinkDirection, NetConnection, NetReader, NetStream, NetWriter, SplitIo, SplitIoError};
 
 pub type Eidolon<I, S> = NetProtocol<EidolonRuntime<I>, S>;
 pub type Noise<E, D, S> = NetProtocol<NoiseState<E, D>, S>;
@@ -112,7 +112,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
     }
 }
 
-pub trait NetSession: NetStream {
+pub trait NetSession: NetStream + SplitIo {
     /// Inner session type
     type Inner: NetSession;
     /// Underlying connection
@@ -165,12 +165,19 @@ impl<T> IntoInit<ZeroInit> for T {
     }
 }
 
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Display)]
+#[display("{session}")]
+pub struct ProtocolArtifact<M: NetStateMachine, S: NetSession> {
+    pub session: S::Artifact,
+    pub state: M::Artifact,
+}
+
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct NetProtocol<M: NetStateMachine, S: NetSession>
 where
     S::Artifact: IntoInit<M::Init>,
 {
-    state_machine: M,
+    state: M,
     session: S,
 }
 
@@ -187,7 +194,7 @@ where
 
     pub fn with(session: S, state_machine: M) -> Self {
         Self {
-            state_machine,
+            state: state_machine,
             session,
         }
     }
@@ -198,11 +205,11 @@ where
     S::Artifact: IntoInit<M::Init>,
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.state_machine.is_complete() {
+        if self.state.is_complete() {
             return self.session.read(buf);
         }
 
-        let len = self.state_machine.next_read_len();
+        let len = self.state.next_read_len();
         let mut input = vec![0u8; len];
         self.session.read_exact(&mut input)?;
 
@@ -211,7 +218,7 @@ where
 
         if !input.is_empty() {
             let output = self
-                .state_machine
+                .state
                 .advance(&input)
                 .map_err(|_| io::Error::from(io::ErrorKind::ConnectionAborted))?;
 
@@ -221,7 +228,7 @@ where
             if !output.is_empty() {
                 self.session.write_all(&output)?;
             }
-        } else if !self.state_machine.is_init() {
+        } else if !self.state.is_init() {
             if let Some(artifact) = self.session.artifact() {
                 #[cfg(feature = "log")]
                 log::trace!(
@@ -229,8 +236,8 @@ where
                     "Initializing state with artifact {artifact}"
                 );
 
-                self.state_machine.init(artifact.into_init());
-                debug_assert!(self.state_machine.is_init());
+                self.state.init(artifact.into_init());
+                debug_assert!(self.state.is_init());
             }
         }
 
@@ -243,11 +250,11 @@ where
     S::Artifact: IntoInit<M::Init>,
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.state_machine.is_complete() {
+        if self.state.is_complete() {
             return self.session.write(buf);
         }
         let act = self
-            .state_machine
+            .state
             .advance(&[])
             .map_err(|_| io::Error::from(io::ErrorKind::ConnectionAborted))?;
 
@@ -273,11 +280,45 @@ impl<M: NetStateMachine, S: NetSession> NetStream for NetProtocol<M, S> where
 {
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Display)]
-#[display("{session}")]
-pub struct ProtocolArtifact<M: NetStateMachine, S: NetSession> {
-    pub session: S::Artifact,
-    pub state: M::Artifact,
+impl<M: NetStateMachine, S: NetSession> SplitIo for NetProtocol<M, S>
+where
+    S::Artifact: IntoInit<M::Init>,
+{
+    type Read = NetReader<S>;
+    type Write = NetWriter<M, S>;
+
+    fn split_io(mut self) -> Result<(Self::Read, Self::Write), SplitIoError<Self>> {
+        let unique_id = rand::random();
+
+        match self.session.split_io() {
+            Err(err) => {
+                self.session = err.original;
+                Err(SplitIoError {
+                    original: self,
+                    error: err.error,
+                })
+            }
+            Ok((reader, writer)) => Ok((
+                NetReader { unique_id, reader },
+                NetWriter {
+                    unique_id,
+                    state: self.state,
+                    writer,
+                },
+            )),
+        }
+    }
+
+    fn from_split_io(read: Self::Read, write: Self::Write) -> Self {
+        if read.unique_id != write.unique_id {
+            panic!("joining into NetProtocol parts not produced by the same split_io()")
+        }
+
+        Self {
+            state: write.state,
+            session: S::from_split_io(read.reader, write.writer),
+        }
+    }
 }
 
 impl<M: NetStateMachine, S: NetSession> NetSession for NetProtocol<M, S>
@@ -291,7 +332,7 @@ where
     fn artifact(&self) -> Option<Self::Artifact> {
         Some(ProtocolArtifact {
             session: self.session.artifact()?,
-            state: self.state_machine.artifact()?,
+            state: self.state.artifact()?,
         })
     }
 
