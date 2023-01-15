@@ -1,14 +1,99 @@
 use cyphernet::auth::eidolon::EidolonState;
-use cyphernet::encrypt::noise::NoiseState;
+use cyphernet::encrypt::noise::{HandshakePattern, Keyset, NoiseState};
 use cyphernet::proxy::socks5;
 use std::fmt::{Debug, Display};
 use std::io;
+use std::net::TcpStream;
 
-use crate::{NetConnection, NetStream};
+use cyphernet::addr::{HostName, InetHost, NetAddr};
+use cyphernet::{x25519, Cert, Digest, EcSign};
 
-pub type Eidolon<E, S> = NetProtocol<EidolonRuntime<E>, S>;
+use crate::{LinkDirection, NetConnection, NetStream};
+
+pub type Eidolon<I, S> = NetProtocol<EidolonRuntime<I>, S>;
 pub type Noise<E, D, S> = NetProtocol<NoiseState<E, D>, S>;
 pub type Socks5<S> = NetProtocol<socks5::Socks5, S>;
+
+pub type CypherSession<I, D> = Eidolon<I, Noise<x25519::PrivateKey, D, Socks5<TcpStream>>>;
+
+impl<I: EcSign, D: Digest> CypherSession<I, D> {
+    pub fn connect_nonblocking<const HASHLEN: usize>(
+        remote_addr: NetAddr<HostName>,
+        cert: Cert<I::Sig>,
+        signer: I,
+        handshake: HandshakePattern,
+        keyset: Keyset<x25519::PrivateKey>,
+        proxy_addr: NetAddr<InetHost>,
+        force_proxy: bool,
+    ) -> io::Result<Self> {
+        let connection = if force_proxy {
+            TcpStream::connect_nonblocking(proxy_addr)?
+        } else {
+            TcpStream::connect_nonblocking(remote_addr.connection_addr(proxy_addr))?
+        };
+        Ok(Self::with_config::<HASHLEN>(
+            remote_addr,
+            connection,
+            LinkDirection::Outbound,
+            cert,
+            signer,
+            handshake,
+            keyset,
+            force_proxy,
+        ))
+    }
+
+    pub fn connect_blocking<const HASHLEN: usize>(
+        remote_addr: NetAddr<HostName>,
+        cert: Cert<I::Sig>,
+        signer: I,
+        handshake: HandshakePattern,
+        keyset: Keyset<x25519::PrivateKey>,
+        proxy_addr: NetAddr<InetHost>,
+        force_proxy: bool,
+    ) -> io::Result<Self> {
+        let connection = if force_proxy {
+            TcpStream::connect_nonblocking(proxy_addr)?
+        } else {
+            TcpStream::connect_nonblocking(remote_addr.connection_addr(proxy_addr))?
+        };
+        Ok(Self::with_config::<HASHLEN>(
+            remote_addr,
+            connection,
+            LinkDirection::Outbound,
+            cert,
+            signer,
+            handshake,
+            keyset,
+            force_proxy,
+        ))
+    }
+
+    fn with_config<const HASHLEN: usize>(
+        remote_addr: NetAddr<HostName>,
+        connection: TcpStream,
+        direction: LinkDirection,
+        cert: Cert<I::Sig>,
+        signer: I,
+        handshake: HandshakePattern,
+        keyset: Keyset<x25519::PrivateKey>,
+        force_proxy: bool,
+    ) -> Self {
+        let socks5 = socks5::Socks5::with(remote_addr, force_proxy);
+        let proxy = Socks5::with(connection, socks5);
+
+        let noise = NoiseState::initialize::<HASHLEN>(handshake, true, &[], keyset);
+
+        let encoding = Noise::with(proxy, noise);
+        let eidolon = match direction {
+            LinkDirection::Inbound => EidolonRuntime::initiator(signer, cert),
+            LinkDirection::Outbound => EidolonRuntime::responder(signer, cert),
+        };
+        let auth = Eidolon::with(encoding, eidolon);
+
+        auth
+    }
+}
 
 pub trait NetSession: NetStream {
     /// Inner session type
