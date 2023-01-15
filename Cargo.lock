@@ -358,7 +358,7 @@ dependencies = [
 [[package]]
 name = "cypheraddr"
 version = "0.1.0"
-source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#bcc4389ed0aa6f2081a258d57b351f1eb5d0d924"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#e0c7b6f99f87ec559185f4e39035dbf3d7c2746b"
 dependencies = [
  "amplify",
  "base32",
@@ -369,7 +369,7 @@ dependencies = [
 [[package]]
 name = "cyphergraphy"
 version = "0.1.0"
-source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#bcc4389ed0aa6f2081a258d57b351f1eb5d0d924"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#e0c7b6f99f87ec559185f4e39035dbf3d7c2746b"
 dependencies = [
  "amplify",
  "ed25519-compact",
@@ -380,7 +380,7 @@ dependencies = [
 [[package]]
 name = "cyphernet"
 version = "0.1.0"
-source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#bcc4389ed0aa6f2081a258d57b351f1eb5d0d924"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#e0c7b6f99f87ec559185f4e39035dbf3d7c2746b"
 dependencies = [
  "cypheraddr",
  "cyphergraphy",
@@ -479,7 +479,7 @@ dependencies = [
 [[package]]
 name = "eidolon"
 version = "0.1.0"
-source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#bcc4389ed0aa6f2081a258d57b351f1eb5d0d924"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#e0c7b6f99f87ec559185f4e39035dbf3d7c2746b"
 dependencies = [
  "amplify",
  "cyphergraphy",
@@ -732,7 +732,7 @@ dependencies = [
 [[package]]
 name = "noise-framework"
 version = "0.1.0"
-source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#bcc4389ed0aa6f2081a258d57b351f1eb5d0d924"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#e0c7b6f99f87ec559185f4e39035dbf3d7c2746b"
 dependencies = [
  "amplify",
  "chacha20poly1305 0.10.1",
@@ -1033,7 +1033,7 @@ dependencies = [
 [[package]]
 name = "socks5-client"
 version = "0.1.0"
-source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#bcc4389ed0aa6f2081a258d57b351f1eb5d0d924"
+source = "git+https://github.com/Cyphernet-WG/rust-cyphernet?branch=noise-refactor#e0c7b6f99f87ec559185f4e39035dbf3d7c2746b"
 dependencies = [
  "amplify",
  "cypheraddr",

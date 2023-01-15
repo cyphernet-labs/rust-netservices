@@ -61,6 +61,21 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         ))
     }
 
+    pub fn accept<const HASHLEN: usize>(
+        connection: TcpStream,
+        cert: Cert<I::Sig>,
+        signer: I,
+    ) -> io::Result<Self> {
+        Ok(Self::with_config::<HASHLEN>(
+            connection.remote_addr().into(),
+            connection,
+            LinkDirection::Inbound,
+            cert,
+            signer,
+            false,
+        ))
+    }
+
     fn with_config<const HASHLEN: usize>(
         remote_addr: NetAddr<HostName>,
         connection: TcpStream,
