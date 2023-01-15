@@ -75,7 +75,6 @@ impl<D: Delegate> reactor::Handler for Server<D> {
                     .local_addr()
                     .expect("unknown local address on accepted connection");
                 log::info!(target: "server", "Incoming connection from {peer_addr} on {local_addr}");
-                // TODO: Build session
                 let session = Session::build(
                     connection,
                     peer_addr.into(),

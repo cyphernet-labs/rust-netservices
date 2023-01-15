@@ -36,7 +36,7 @@ impl SessionBuild for Session {
     ) -> Self {
         let SessionConfig { cert, signer } = config;
 
-        let proxy = Socks5::with(connection, socks5::Socks5::with(remote_addr));
+        let proxy = Socks5::with(connection, socks5::Socks5::with(remote_addr, false));
         let noise = NoiseState::initialize::<{ Sha256::OUTPUT_LEN }>(
             HandshakePattern::nn(),
             direction.is_outbound(),
