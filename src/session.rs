@@ -21,8 +21,6 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         remote_addr: NetAddr<HostName>,
         cert: Cert<I::Sig>,
         signer: I,
-        handshake: HandshakePattern,
-        keyset: Keyset<x25519::PrivateKey>,
         proxy_addr: NetAddr<InetHost>,
         force_proxy: bool,
     ) -> io::Result<Self> {
@@ -37,8 +35,6 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
             LinkDirection::Outbound,
             cert,
             signer,
-            handshake,
-            keyset,
             force_proxy,
         ))
     }
@@ -47,8 +43,6 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         remote_addr: NetAddr<HostName>,
         cert: Cert<I::Sig>,
         signer: I,
-        handshake: HandshakePattern,
-        keyset: Keyset<x25519::PrivateKey>,
         proxy_addr: NetAddr<InetHost>,
         force_proxy: bool,
     ) -> io::Result<Self> {
@@ -63,8 +57,6 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
             LinkDirection::Outbound,
             cert,
             signer,
-            handshake,
-            keyset,
             force_proxy,
         ))
     }
@@ -75,14 +67,17 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         direction: LinkDirection,
         cert: Cert<I::Sig>,
         signer: I,
-        handshake: HandshakePattern,
-        keyset: Keyset<x25519::PrivateKey>,
         force_proxy: bool,
     ) -> Self {
         let socks5 = socks5::Socks5::with(remote_addr, force_proxy);
         let proxy = Socks5::with(connection, socks5);
 
-        let noise = NoiseState::initialize::<HASHLEN>(handshake, true, &[], keyset);
+        let noise = NoiseState::initialize::<HASHLEN>(
+            HandshakePattern::nn(),
+            true,
+            &[],
+            Keyset::noise_nn(),
+        );
 
         let encoding = Noise::with(proxy, noise);
         let eidolon = match direction {
