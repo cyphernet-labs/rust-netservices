@@ -124,6 +124,7 @@ pub trait NetSession: NetStream + SplitIo {
     fn is_established(&self) -> bool {
         self.artifact().is_some()
     }
+    fn run_handshake(&mut self) -> io::Result<()>;
 
     fn display(&self) -> String {
         match self.artifact() {
@@ -220,10 +221,6 @@ where
             state: state_machine,
             session,
         }
-    }
-
-    fn run_handshake(&mut self) -> io::Result<()> {
-        self.state.run_handshake(self.session.as_connection_mut())
     }
 }
 
@@ -356,6 +353,13 @@ where
     type Connection = S::Connection;
     type Artifact = ProtocolArtifact<M, S>;
 
+    fn run_handshake(&mut self) -> io::Result<()> {
+        if !self.session.is_established() {
+            self.session.run_handshake()?;
+        }
+        self.state.run_handshake(self.session.as_connection_mut())
+    }
+
     fn artifact(&self) -> Option<Self::Artifact> {
         Some(ProtocolArtifact {
             session: self.session.artifact()?,
@@ -385,6 +389,10 @@ mod imp_std {
         type Inner = Self;
         type Connection = Self;
         type Artifact = SocketAddr;
+
+        fn run_handshake(&mut self) -> io::Result<()> {
+            Ok(())
+        }
 
         fn artifact(&self) -> Option<Self::Artifact> {
             self.peer_addr().ok()
@@ -416,6 +424,10 @@ mod imp_socket2 {
         type Inner = Self;
         type Connection = Self;
         type Artifact = SocketAddr;
+
+        fn run_handshake(&mut self) -> io::Result<()> {
+            Ok(())
+        }
 
         fn artifact(&self) -> Option<Self::Artifact> {
             self.peer_addr().ok()?.as_socket()
