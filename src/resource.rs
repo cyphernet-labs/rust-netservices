@@ -13,16 +13,17 @@
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Write;
+use std::marker::PhantomData;
 use std::net::{TcpListener, ToSocketAddrs};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
-use std::{io, net};
+use std::{fmt, io, net};
 
 use reactor::poller::IoType;
 use reactor::{Io, Resource, WriteAtomic, WriteError};
 
 use crate::tunnel::READ_BUFFER_SIZE;
-use crate::{NetConnection, NetListener, NetSession, Proxy};
+use crate::{LinkDirection, NetConnection, NetListener, NetSession};
 
 // TODO: Make these parameters configurable
 /// Socket read buffer size.
@@ -40,7 +41,7 @@ pub enum ListenerEvent<S: NetSession> {
     ///
     /// The connection is already upgraded to a [`NetSession`], however no I/O
     /// events was read or wrote for it yet.
-    Accepted(S),
+    Accepted(S::Connection),
 
     /// Listener `accept` call has resulted in a I/O error from the OS.
     Failure(io::Error),
@@ -57,8 +58,8 @@ pub struct NetAccept<S: NetSession, L: NetListener<Stream = S::Connection> = Tcp
     /// specific transport layer and are automatically injected into the
     /// new sessions constructed by this listener before they are inserted into
     /// the [`reactor`] and notifications are delivered to [`reactor::Handler`].
-    session_context: S::Context,
     listener: L,
+    _phantom: PhantomData<S>,
 }
 
 impl<L: NetListener<Stream = S::Connection>, S: NetSession> AsRawFd for NetAccept<S, L> {
@@ -100,12 +101,12 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
     /// new sessions constructed by this listener before they are inserted into
     /// the [`reactor`] and notifications are delivered to [`reactor::Handler`].
     /// The injection is made by calling [`NetSession::accept`] method.
-    pub fn bind(addr: &impl ToSocketAddrs, session_context: S::Context) -> io::Result<Self> {
+    pub fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self> {
         let listener = L::bind(addr)?;
         listener.set_nonblocking(true)?;
         Ok(Self {
-            session_context,
             listener,
+            _phantom: default!(),
         })
     }
 
@@ -115,16 +116,19 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
         self.listener.local_addr()
     }
 
-    fn handle_accept(&mut self) -> io::Result<S> {
-        let mut stream = self.listener.accept()?;
-        stream.set_read_timeout(Some(READ_TIMEOUT))?;
-        stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
-        stream.set_nonblocking(true)?;
-        S::accept(stream, self.session_context.clone())
+    fn handle_accept(&mut self) -> io::Result<S::Connection> {
+        let mut connection = self.listener.accept()?;
+        connection.set_read_timeout(Some(READ_TIMEOUT))?;
+        connection.set_write_timeout(Some(WRITE_TIMEOUT))?;
+        connection.set_nonblocking(true)?;
+        Ok(connection)
     }
 }
 
-impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAccept<S, L> {
+impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAccept<S, L>
+where
+    S: Send,
+{
     type Id = net::SocketAddr;
     type Event = ListenerEvent<S>;
 
@@ -152,16 +156,10 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAcce
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub enum LinkDirection {
-    Inbound,
-    Outbound,
-}
-
 /// An event happening for a [`NetTransport`] network transport and delivered to
 /// a [`reactor::Handler`].
 pub enum SessionEvent<S: NetSession> {
-    Established(S::Id),
+    Established(S::Artifact),
     Data(Vec<u8>),
     Terminated(io::Error),
 }
@@ -205,18 +203,17 @@ pub struct NetTransport<S: NetSession> {
 }
 
 impl<S: NetSession> Display for NetTransport<S> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if let Some(addr) = self.session.peer_addr() {
-            Display::fmt(&addr, f)
-        } else {
-            Display::fmt(&self.session.transient_addr(), f)
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.session.artifact() {
+            None => write!(f, "{}", self.as_raw_fd()),
+            Some(id) => Display::fmt(&id, f),
         }
     }
 }
 
 impl<S: NetSession> AsRawFd for NetTransport<S> {
     fn as_raw_fd(&self) -> RawFd {
-        self.session.as_raw_fd()
+        self.session.as_connection().as_raw_fd()
     }
 }
 
@@ -224,29 +221,6 @@ impl<S: NetSession> NetTransport<S> {
     pub fn accept(session: S) -> io::Result<Self> {
         Self::with_state(session, TransportState::Handshake, LinkDirection::Inbound)
     }
-
-    #[cfg(feature = "socket2")]
-    pub fn connect<P: Proxy>(
-        addr: S::PeerAddr,
-        context: S::Context,
-        proxy: &P,
-    ) -> Result<Self, P::Error> {
-        let session = S::connect_nonblocking(addr, context, proxy)?;
-        Self::with_state(session, TransportState::Init, LinkDirection::Outbound)
-            .map_err(P::Error::from)
-    }
-
-    /*
-    pub fn connect_blocking<P: Proxy>(
-        addr: Self::PeerAddr,
-        context: &Self::Context,
-        proxy: &P,
-    ) -> Result<Self, P::Error> {
-        let session = S::connect_blocking(addr, context, proxy)?;
-        Self::with_state(session, TransportState::Handshake, LinkDirection::Outbound)
-            .map_err(P::Error::from)
-    }
-     */
 
     /// Constructs reactor-managed resource around an existing [`NetSession`].
     ///
@@ -263,12 +237,12 @@ impl<S: NetSession> NetTransport<S> {
         } else {
             TransportState::Handshake
         };
-        session.set_nonblocking(true)?;
+        session.as_connection_mut().set_nonblocking(true)?;
         Ok(Self {
             state,
             session,
             link_direction,
-            write_intent: false,
+            write_intent: true,
             read_buffer: Box::new([0u8; READ_BUFFER_SIZE]),
             write_buffer: empty!(),
         })
@@ -301,8 +275,12 @@ impl<S: NetSession> NetTransport<S> {
         state: TransportState,
         link_direction: LinkDirection,
     ) -> io::Result<Self> {
-        session.set_read_timeout(Some(READ_TIMEOUT))?;
-        session.set_write_timeout(Some(WRITE_TIMEOUT))?;
+        session
+            .as_connection_mut()
+            .set_read_timeout(Some(READ_TIMEOUT))?;
+        session
+            .as_connection_mut()
+            .set_write_timeout(Some(WRITE_TIMEOUT))?;
         Ok(Self {
             state,
             session,
@@ -331,23 +309,17 @@ impl<S: NetSession> NetTransport<S> {
     }
 
     pub fn local_addr(&self) -> <S::Connection as NetConnection>::Addr {
-        self.session.local_addr()
+        self.session.as_connection().local_addr()
     }
 
-    pub fn remote_addr(&self) -> Option<S::PeerAddr> {
-        self.session.peer_addr()
+    pub fn artifact(&self) -> Option<S::Artifact> {
+        self.session.artifact()
     }
 
-    pub fn transient_addr(&self) -> S::TransientAddr {
-        self.session.transient_addr()
-    }
-
-    pub fn peer_id(&self) -> Option<S::Id> {
-        self.session.session_id()
-    }
-
-    pub fn expect_peer_id(&self) -> S::Id {
-        self.session.expect_id()
+    pub fn expect_peer_id(&self) -> S::Artifact {
+        self.session
+            .artifact()
+            .expect("session is expected to be established at this stage")
     }
 
     pub fn write_buf_len(&self) -> usize {
@@ -356,7 +328,7 @@ impl<S: NetSession> NetTransport<S> {
 
     fn terminate(&mut self, reason: io::Error) -> SessionEvent<S> {
         #[cfg(feature = "log")]
-        log::trace!(target: "transport", "Terminating connection {self} due to {reason:?}");
+        log::trace!(target: "transport", "Terminating session {self} due to {reason:?}");
 
         self.state = TransportState::Terminated;
         SessionEvent::Terminated(reason)
@@ -411,12 +383,12 @@ impl<S: NetSession> NetTransport<S> {
 }
 
 impl<S: NetSession> Resource for NetTransport<S> {
-    // TODO: Use S::SessionId instead
+    // TODO: Use S::Artifact instead
     type Id = RawFd;
     type Event = SessionEvent<S>;
 
     fn id(&self) -> Self::Id {
-        self.session.as_raw_fd()
+        self.session.as_connection().as_raw_fd()
     }
 
     fn interests(&self) -> IoType {
@@ -455,9 +427,11 @@ impl<S: NetSession> Resource for NetTransport<S> {
             Io::Write => self.handle_writable(),
         };
 
-        // During handshake, after each read we need to write
-        if (io == Io::Read && self.state == TransportState::Handshake) || force_write_intent {
+        if force_write_intent {
             self.write_intent = true;
+        } else if self.state == TransportState::Handshake {
+            // During handshake, after each read we need to write and then wait
+            self.write_intent = io == Io::Read;
         }
 
         if matches!(&resp, Some(SessionEvent::Terminated(e)) if e.kind() == io::ErrorKind::ConnectionReset)
@@ -475,7 +449,9 @@ impl<S: NetSession> Resource for NetTransport<S> {
             // We just got connected; may need to send output
             self.write_intent = true;
             self.state = TransportState::Active;
-            Some(SessionEvent::Established(self.session.expect_id()))
+            Some(SessionEvent::Established(
+                self.session.artifact().expect("session is established"),
+            ))
         } else {
             resp
         }

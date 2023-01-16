@@ -68,7 +68,7 @@ impl NetListener for TcpListener {
     }
 }
 
-#[cfg(feature = "socket2")]
+#[cfg(feature = "connect_nonblocking")]
 impl NetListener for socket2::Socket {
     type Stream = socket2::Socket;
 
