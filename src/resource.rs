@@ -260,7 +260,7 @@ impl<S: NetSession> NetTransport<S> {
             state,
             session,
             link_direction,
-            write_intent: false,
+            write_intent: true,
             read_buffer: Box::new([0u8; READ_BUFFER_SIZE]),
             write_buffer: empty!(),
         })
@@ -448,9 +448,11 @@ where
             Io::Write => self.handle_writable(),
         };
 
-        // During handshake, after each read we need to write
-        if (io == Io::Read && self.state == TransportState::Handshake) || force_write_intent {
+        if force_write_intent {
             self.write_intent = true;
+        } else if self.state == TransportState::Handshake {
+            // During handshake, after each read we need to write and then wait
+            self.write_intent = io == Io::Read;
         }
 
         if matches!(&resp, Some(SessionEvent::Terminated(e)) if e.kind() == io::ErrorKind::ConnectionReset)
