@@ -10,11 +10,19 @@ use cyphernet::{x25519, Cert, Digest, EcSign};
 
 use crate::{LinkDirection, NetConnection, NetReader, NetStream, NetWriter, SplitIo, SplitIoError};
 
-pub type Eidolon<I, S> = NetProtocol<EidolonRuntime<I>, S>;
-pub type Noise<E, D, S> = NetProtocol<NoiseState<E, D>, S>;
-pub type Socks5<S> = NetProtocol<socks5::Socks5, S>;
+pub type EidolonSession<I, S> = NetProtocol<EidolonRuntime<I>, S>;
+pub type NoiseSession<E, D, S> = NetProtocol<NoiseState<E, D>, S>;
+pub type Socks5Session<S> = NetProtocol<socks5::Socks5, S>;
 
-pub type CypherSession<I, D> = Eidolon<I, Noise<x25519::PrivateKey, D, Socks5<TcpStream>>>;
+pub type CypherSession<I, D> =
+    EidolonSession<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
+
+pub type EidolonReader<S> = NetReader<S>;
+pub type EidolonWriter<I, S> = NetWriter<EidolonRuntime<I>, S>;
+pub type CypherReader<D> =
+    EidolonReader<NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
+pub type CypherWriter<I, D> =
+    EidolonWriter<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
 
 impl<I: EcSign, D: Digest> CypherSession<I, D> {
     pub fn connect_nonblocking<const HASHLEN: usize>(
@@ -94,7 +102,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         force_proxy: bool,
     ) -> Self {
         let socks5 = socks5::Socks5::with(remote_addr, force_proxy);
-        let proxy = Socks5::with(connection, socks5);
+        let proxy = Socks5Session::with(connection, socks5);
 
         let noise = NoiseState::initialize::<HASHLEN>(
             HandshakePattern::nn(),
@@ -103,12 +111,12 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
             Keyset::noise_nn(),
         );
 
-        let encoding = Noise::with(proxy, noise);
+        let encoding = NoiseSession::with(proxy, noise);
         let eidolon = match direction {
             LinkDirection::Inbound => EidolonRuntime::responder(signer, cert, allowed_ids),
             LinkDirection::Outbound => EidolonRuntime::initiator(signer, cert, allowed_ids),
         };
-        let auth = Eidolon::with(encoding, eidolon);
+        let auth = EidolonSession::with(encoding, eidolon);
 
         auth
     }
