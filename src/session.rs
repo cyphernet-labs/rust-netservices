@@ -313,23 +313,25 @@ where
 
         self.init();
 
-        let act = self.state.advance(&[]).map_err(|err| {
-            #[cfg(feature = "log")]
-            log::error!(target: M::NAME, "Handshake failure: {err}");
+        if self.state.next_read_len() == 0 {
+            let act = self.state.advance(&[]).map_err(|err| {
+                #[cfg(feature = "log")]
+                log::error!(target: M::NAME, "Handshake failure: {err}");
 
-            io::Error::from(io::ErrorKind::ConnectionAborted)
-        })?;
+                io::Error::from(io::ErrorKind::ConnectionAborted)
+            })?;
 
-        if !act.is_empty() {
-            #[cfg(feature = "log")]
-            log::trace!(target: M::NAME, "Sending handshake act: {act:02x?}");
+            if !act.is_empty() {
+                #[cfg(feature = "log")]
+                log::trace!(target: M::NAME, "Sending handshake act: {act:02x?}");
 
-            self.session.write_all(&act)?;
+                self.session.write_all(&act)?;
+            }
 
-            Err(io::ErrorKind::Interrupted.into())
-        } else {
-            self.session.write(buf)
+            return Err(io::ErrorKind::Interrupted.into());
         }
+
+        self.session.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
