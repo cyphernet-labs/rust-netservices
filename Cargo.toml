@@ -28,9 +28,6 @@ reactor = ["io-reactor", "connect_nonblocking"]
 log = ["log_crate", "io-reactor/log"]
 connect_nonblocking = ["socket2"]
 
-[patch.crates-io]
-cyphernet = { git = "https://github.com/Cyphernet-WG/rust-cyphernet", branch = "master" }
-
 [workspace]
 members = ["io-reactor", "nsh"]
 default-members = ["."]
