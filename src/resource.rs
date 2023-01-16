@@ -222,24 +222,6 @@ impl<S: NetSession> NetTransport<S> {
         Self::with_state(session, TransportState::Handshake, LinkDirection::Inbound)
     }
 
-    /* TODO: Do through a builder
-    #[cfg(feature = "connect_nonblocking")]
-    pub fn connect(addr: S::PeerAddr, context: S::Context) -> io::Result<Self> {
-        let session = S::connect_nonblocking(addr, context)?;
-        Self::with_state(session, TransportState::Init, LinkDirection::Outbound)
-    }
-
-    pub fn connect_blocking<P: Proxy>(
-        addr: Self::PeerAddr,
-        context: &Self::Context,
-        proxy: &P,
-    ) -> Result<Self, P::Error> {
-        let session = S::connect_blocking(addr, context, proxy)?;
-        Self::with_state(session, TransportState::Handshake, LinkDirection::Outbound)
-            .map_err(P::Error::from)
-    }
-     */
-
     /// Constructs reactor-managed resource around an existing [`NetSession`].
     ///
     /// NB: Must not be called for connections created in a non-blocking mode!
