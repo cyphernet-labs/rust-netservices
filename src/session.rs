@@ -146,7 +146,7 @@ pub trait NetSession: NetStream + SplitIo {
     fn disconnect(self) -> io::Result<()>;
 }
 
-pub trait NetStateMachine {
+pub trait NetStateMachine: Sized + Send {
     const NAME: &'static str;
 
     type Init: Debug;

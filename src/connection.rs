@@ -11,7 +11,7 @@ use cyphernet::addr::{Addr, InetHost, NetAddr};
 pub trait Address: Addr + Send + Clone + Eq + Hash + Debug + Display {}
 impl<T> Address for T where T: Addr + Send + Clone + Eq + Hash + Debug + Display {}
 
-pub trait NetStream: io::Read + io::Write {}
+pub trait NetStream: Send + io::Read + io::Write {}
 
 /// Network stream is an abstraction of TCP stream object.
 pub trait NetConnection: Send + NetStream + AsRawFd + Debug {
