@@ -382,10 +382,7 @@ impl<S: NetSession> NetTransport<S> {
     }
 }
 
-impl<S: NetSession> Resource for NetTransport<S>
-where
-    S: Send,
-{
+impl<S: NetSession> Resource for NetTransport<S> {
     // TODO: Use S::Artifact instead
     type Id = RawFd;
     type Event = SessionEvent<S>;
