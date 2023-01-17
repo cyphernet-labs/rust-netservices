@@ -10,8 +10,6 @@ ed25519-compact = "2.0.4"
 cyphernet = { version = "0.1.0", features = ["ed25519", "pem", "multibase", "noise_sha2", "noise_x25519", "noise-framework", "mixnets"] }
 mio = { version = "0.8.5", optional = true }
 socket2 = { version = "0.4.7", optional = true }
-chacha20 = "0.9"
-chacha20poly1305 = "0.9"
 libc = "0.2.138"
 log_crate = { package = "log", version = "0.4.17", optional = true }
 rand = "0.8.5" # Used in SplitIo shared secret
