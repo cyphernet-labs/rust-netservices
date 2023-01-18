@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 amplify = "4.0.0-beta.1"
-io-reactor = { version = "0.1.0", git = "https://github.com/rust-amplify/io-reactor", optional = true }
+io-reactor = { version = "0.1.0", optional = true }
 ed25519-compact = "2.0.4"
 cyphernet = { version = "0.1.0", features = ["ed25519", "pem", "multibase", "noise_sha2", "noise_x25519", "noise-framework", "mixnets"] }
 mio = { version = "0.8.5", optional = true }
@@ -29,3 +29,6 @@ connect_nonblocking = ["socket2"]
 [workspace]
 members = ["nsh"]
 default-members = ["."]
+
+[patch.crates-io]
+io-reactor = { git = "https://github.com/rust-amplify/io-reactor" }
