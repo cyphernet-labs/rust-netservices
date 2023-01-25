@@ -25,10 +25,3 @@ all = ["reactor", "connect_nonblocking", "mio", "log"]
 reactor = ["io-reactor", "connect_nonblocking"]
 log = ["log_crate", "io-reactor/log"]
 connect_nonblocking = ["socket2"]
-
-[workspace]
-members = ["nsh"]
-default-members = ["."]
-
-[patch.crates-io]
-io-reactor = { git = "https://github.com/rust-amplify/io-reactor" }
