@@ -22,8 +22,7 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::io;
-use std::mem::MaybeUninit;
-use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::net::{Shutdown, TcpStream};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
@@ -149,6 +148,8 @@ impl NetConnection for socket2::Socket {
 
     #[cfg(feature = "connect_nonblocking")]
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
+        use std::net::ToSocketAddrs;
+
         let addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
         let socket =
             socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
@@ -217,6 +218,8 @@ impl NetConnection for socket2::Socket {
     }
 
     fn peek(&self, buf: &mut [u8]) -> io::Result<usize> {
+        use std::mem::MaybeUninit;
+
         let mut buf2 = vec![MaybeUninit::<u8>::uninit(); buf.len()];
         let len = socket2::Socket::peek(self, &mut buf2)?;
         for i in 0..len {

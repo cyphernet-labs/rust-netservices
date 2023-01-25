@@ -45,11 +45,14 @@ impl<S: NetSession> Tunnel<S> {
         Ok(Self { listener, session })
     }
 
-    pub fn local_addr(&self) -> io::Result<net::SocketAddr> { self.listener.local_addr() }
+    pub fn local_addr(&self) -> io::Result<net::SocketAddr> {
+        self.listener.local_addr()
+    }
 
     /// # Returns
     ///
     /// Number of bytes which passed through the tunnel
+    #[allow(unused_variables)]
     pub fn tunnel_once<P: Poll>(
         &mut self,
         mut poller: P,
@@ -133,7 +136,9 @@ impl<S: NetSession> Tunnel<S> {
                 };
                 if fd == int_fd {
                     if ev.write {
+                        #[cfg(feature = "log")]
                         log::trace!(target: "tunnel", "attempting to write {} bytes received from the remote {socket_addr}", in_buf.len());
+
                         handle!(stream.write(in_buf.make_contiguous()), |written| {
                             stream.flush()?;
                             in_buf.drain(..written);
@@ -146,7 +151,9 @@ impl<S: NetSession> Tunnel<S> {
                         });
                     }
                     if ev.read {
+                        #[cfg(feature = "log")]
                         log::trace!(target: "tunnel", "attempting to read from the {socket_addr}");
+
                         handle!(stream.read(&mut buf), |read| {
                             out_buf.extend(&buf[..read]);
                             poller.set_interest(&ext_fd, IoType::read_write());
@@ -156,7 +163,9 @@ impl<S: NetSession> Tunnel<S> {
                     }
                 } else if fd == ext_fd {
                     if ev.write {
+                        #[cfg(feature = "log")]
                         log::trace!(target: "tunnel", "attempting to write {} bytes received from {socket_addr} to remote", out_buf.len());
+
                         handle!(self.session.write(out_buf.make_contiguous()), |written| {
                             self.session.flush()?;
                             out_buf.drain(..written);
@@ -169,7 +178,9 @@ impl<S: NetSession> Tunnel<S> {
                         });
                     }
                     if ev.read {
+                        #[cfg(feature = "log")]
                         log::trace!(target: "tunnel", "attempting to read from the remote");
+
                         handle!(self.session.read(&mut buf), |read| {
                             in_buf.extend(&buf[..read]);
                             poller.set_interest(&int_fd, IoType::read_write());
@@ -182,5 +193,7 @@ impl<S: NetSession> Tunnel<S> {
         }
     }
 
-    pub fn into_session(self) -> S { self.session }
+    pub fn into_session(self) -> S {
+        self.session
+    }
 }

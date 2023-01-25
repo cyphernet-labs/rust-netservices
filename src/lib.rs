@@ -23,9 +23,11 @@
 
 #[macro_use]
 extern crate amplify;
+#[cfg(feature = "log")]
 extern crate log_crate as log;
 
 pub mod frame;
+#[cfg(feature = "reactor")]
 pub mod tunnel;
 
 mod connection;
@@ -51,6 +53,10 @@ pub enum LinkDirection {
 }
 
 impl LinkDirection {
-    pub fn is_inbound(self) -> bool { matches!(self, LinkDirection::Inbound) }
-    pub fn is_outbound(self) -> bool { matches!(self, LinkDirection::Outbound) }
+    pub fn is_inbound(self) -> bool {
+        matches!(self, LinkDirection::Inbound)
+    }
+    pub fn is_outbound(self) -> bool {
+        matches!(self, LinkDirection::Outbound)
+    }
 }

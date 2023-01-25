@@ -380,6 +380,7 @@ impl<S: NetSession> NetTransport<S> {
                 // This shouldn't normally happen, since this function is only called
                 // when there's data on the socket. We leave it here in case external
                 // conditions change.
+                #[cfg(feature = "log")]
                 log::warn!(target: "transport",
                     "WOULD_BLOCK on resource which had read intent - probably normal thing to happen"
                 );

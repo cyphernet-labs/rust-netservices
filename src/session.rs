@@ -46,6 +46,7 @@ pub type CypherWriter<I, D> =
     EidolonWriter<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
 
 impl<I: EcSign, D: Digest> CypherSession<I, D> {
+    #[cfg(feature = "reactor")]
     pub fn connect_nonblocking<const HASHLEN: usize>(
         remote_addr: NetAddr<HostName>,
         cert: Cert<I::Sig>,
@@ -178,7 +179,7 @@ pub trait NetStateMachine: Sized + Send {
     fn artifact(&self) -> Option<Self::Artifact>;
 
     // Blocking
-    #[allow(clippy::read_zero_byte_vec)]
+    #[allow(clippy::read_zero_byte_vec, unused_variables)]
     fn run_handshake(&mut self, stream: &mut impl NetStream) -> io::Result<()> {
         let mut input = vec![];
         while !self.is_complete() {
@@ -296,6 +297,7 @@ where
         log::trace!(target: M::NAME, "Received handshake act: {input:02x?}");
 
         if !input.is_empty() {
+            #[allow(unused_variables)]
             let output = self.state.advance(&input).map_err(|err| {
                 #[cfg(feature = "log")]
                 log::error!(target: M::NAME, "Handshake failure: {err}");
@@ -327,6 +329,7 @@ where
         self.init();
 
         if self.state.next_read_len() == 0 {
+            #[allow(unused_variables)]
             let act = self.state.advance(&[]).map_err(|err| {
                 #[cfg(feature = "log")]
                 log::error!(target: M::NAME, "Handshake failure: {err}");
