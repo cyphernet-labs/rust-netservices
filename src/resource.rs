@@ -149,11 +149,6 @@ where
             Io::Write => None,
         }
     }
-
-    fn disconnect(self) -> io::Result<()> {
-        // We disconnect by dropping the self
-        Ok(())
-    }
 }
 
 /// An event happening for a [`NetTransport`] network transport and delivered to
@@ -455,10 +450,6 @@ impl<S: NetSession> Resource for NetTransport<S> {
         } else {
             resp
         }
-    }
-
-    fn disconnect(self) -> io::Result<()> {
-        self.session.disconnect()
     }
 }
 
