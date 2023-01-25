@@ -21,7 +21,7 @@
 
 use std::collections::VecDeque;
 use std::io::{Read, Write};
-use std::os::fd::AsRawFd;
+use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 use std::{io, net};
 
