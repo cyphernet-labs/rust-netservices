@@ -1,3 +1,24 @@
+// Library for building scalable privacy-preserving microservices P2P nodes
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+// Written in 2022-2023 by
+//     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
+//
+// Copyright 2022-2023 Cyphernet DAO, Switzerland
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! The module provides adaptors for networking sessions (see [`NetSession`]
 //! trait) to become a [`reactor`]-managed [`Resource`]es, which can be polled
 //! for I/O events in a non-blocking but synchronous mode in a dedicated reactor
@@ -270,12 +291,8 @@ impl<S: NetSession> NetTransport<S> {
         state: TransportState,
         link_direction: LinkDirection,
     ) -> io::Result<Self> {
-        session
-            .as_connection_mut()
-            .set_read_timeout(Some(READ_TIMEOUT))?;
-        session
-            .as_connection_mut()
-            .set_write_timeout(Some(WRITE_TIMEOUT))?;
+        session.as_connection_mut().set_read_timeout(Some(READ_TIMEOUT))?;
+        session.as_connection_mut().set_write_timeout(Some(WRITE_TIMEOUT))?;
         Ok(Self {
             state,
             session,
@@ -312,9 +329,7 @@ impl<S: NetSession> NetTransport<S> {
     }
 
     pub fn expect_peer_id(&self) -> S::Artifact {
-        self.session
-            .artifact()
-            .expect("session is expected to be established at this stage")
+        self.session.artifact().expect("session is expected to be established at this stage")
     }
 
     pub fn write_buf_len(&self) -> usize {
@@ -359,9 +374,7 @@ impl<S: NetSession> NetTransport<S> {
         // invocation would likely block.
         match self.session.read(self.read_buffer.as_mut()) {
             Ok(0) if !self.session.is_established() => None,
-            Ok(0) => Some(SessionEvent::Terminated(
-                io::ErrorKind::ConnectionReset.into(),
-            )),
+            Ok(0) => Some(SessionEvent::Terminated(io::ErrorKind::ConnectionReset.into())),
             Ok(len) => Some(SessionEvent::Data(self.read_buffer[..len].to_vec())),
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
                 // This shouldn't normally happen, since this function is only called
@@ -398,11 +411,7 @@ impl<S: NetSession> Resource for NetTransport<S> {
     }
 
     fn handle_io(&mut self, io: Io) -> Option<Self::Event> {
-        debug_assert_ne!(
-            self.state,
-            TransportState::Terminated,
-            "I/O on terminated transport"
-        );
+        debug_assert_ne!(self.state, TransportState::Terminated, "I/O on terminated transport");
 
         let mut force_write_intent = false;
         if self.state == TransportState::Init {

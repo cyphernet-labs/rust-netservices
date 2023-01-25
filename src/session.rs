@@ -1,3 +1,24 @@
+// Library for building scalable privacy-preserving microservices P2P nodes
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+// Written in 2022-2023 by
+//     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
+//
+// Copyright 2022-2023 Cyphernet DAO, Switzerland
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use cyphernet::auth::eidolon::EidolonState;
 use cyphernet::encrypt::noise::{HandshakePattern, Keyset, NoiseState};
 use cyphernet::proxy::socks5;
@@ -183,11 +204,7 @@ pub trait NetStateMachine: Sized + Send {
             }
         }
         #[cfg(feature = "log")]
-        log::debug!(
-            target: Self::NAME,
-            "Handshake protocol {} successfully completed",
-            Self::NAME
-        );
+        log::debug!(target: Self::NAME, "Handshake protocol {} successfully completed", Self::NAME);
         Ok(())
     }
 
@@ -250,10 +267,7 @@ where
                 let init_data = artifact.into_init();
 
                 #[cfg(feature = "log")]
-                log::debug!(
-                    target: M::NAME,
-                    "Initializing state with data {init_data:02x?}"
-                );
+                log::debug!(target: M::NAME, "Initializing state with data {init_data:02x?}");
 
                 self.state.init(init_data);
 

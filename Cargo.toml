@@ -1,7 +1,16 @@
 [package]
 name = "netservices"
+description = "A set of tools for building scalable microservice-based apps and P2P nodes in a privacy-preserving way"
+authors = ["Dr. Maxim Orlovsky <orlovsky@cyphernet.org>"]
+keywords = ["privacy", "cypherpunk", "tor", "microservices", "reactor"]
+categories = ["network-programming", "cryptography", "concurrency"]
+homepage = "https://cyphernet.org"
+repository = "https://github.com/Cyphernet-DAO/rust-netservices"
 version = "0.1.0"
+rust-version = "1.65"
 edition = "2021"
+license = "Apache-2.0"
+readme = "README.md"
 
 [dependencies]
 amplify = "4.0.0-beta.1"
