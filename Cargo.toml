@@ -1,6 +1,6 @@
 [package]
 name = "netservices"
-description = "A set of tools for building scalable microservice-based apps and P2P nodes in a privacy-preserving way"
+description = "Library for building scalable privacy-preserving microservices P2P nodes"
 authors = ["Dr. Maxim Orlovsky <orlovsky@cyphernet.org>"]
 keywords = ["privacy", "cypherpunk", "tor", "microservices", "reactor"]
 categories = ["network-programming", "cryptography", "concurrency"]
@@ -34,3 +34,7 @@ all = ["reactor", "connect_nonblocking", "mio", "log"]
 reactor = ["io-reactor", "connect_nonblocking"]
 log = ["log_crate", "io-reactor/log"]
 connect_nonblocking = ["socket2"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustc-args = ["--cfg", "docsrs"]
