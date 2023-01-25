@@ -43,8 +43,7 @@ use std::{fmt, io, net};
 use reactor::poller::IoType;
 use reactor::{Io, Resource, WriteAtomic, WriteError};
 
-use crate::tunnel::READ_BUFFER_SIZE;
-use crate::{LinkDirection, NetConnection, NetListener, NetSession};
+use crate::{LinkDirection, NetConnection, NetListener, NetSession, READ_BUFFER_SIZE};
 
 // TODO: Make these parameters configurable
 /// Socket read buffer size.

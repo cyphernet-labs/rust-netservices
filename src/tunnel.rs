@@ -27,9 +27,7 @@ use std::{io, net};
 
 use reactor::poller::{IoFail, IoType, Poll};
 
-use crate::{NetConnection, NetSession};
-
-pub const READ_BUFFER_SIZE: usize = u16::MAX as usize;
+use crate::{NetConnection, NetSession, READ_BUFFER_SIZE};
 
 pub struct Tunnel<S: NetSession> {
     listener: net::TcpListener,

@@ -38,6 +38,8 @@ mod split;
 #[cfg(feature = "io-reactor")]
 pub mod resource;
 
+pub const READ_BUFFER_SIZE: usize = u16::MAX as usize;
+
 pub use connection::{Address, NetConnection, NetStream};
 pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
