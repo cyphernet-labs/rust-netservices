@@ -38,13 +38,11 @@ pub trait NetConnection: Send + NetStream + AsRawFd + Debug {
     type Addr: Address;
 
     fn connect_blocking(addr: Self::Addr) -> io::Result<Self>
-    where
-        Self: Sized;
+    where Self: Sized;
 
     #[cfg(feature = "connect_nonblocking")]
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self>
-    where
-        Self: Sized;
+    where Self: Sized;
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()>;
 
@@ -65,8 +63,7 @@ pub trait NetConnection: Send + NetStream + AsRawFd + Debug {
     fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()>;
 
     fn try_clone(&self) -> io::Result<Self>
-    where
-        Self: Sized;
+    where Self: Sized;
     fn take_error(&self) -> io::Result<Option<io::Error>>;
 }
 
@@ -74,18 +71,14 @@ impl NetStream for TcpStream {}
 impl NetConnection for TcpStream {
     type Addr = NetAddr<InetHost>;
 
-    fn connect_blocking(addr: Self::Addr) -> io::Result<Self> {
-        TcpStream::connect(addr)
-    }
+    fn connect_blocking(addr: Self::Addr) -> io::Result<Self> { TcpStream::connect(addr) }
 
     #[cfg(feature = "connect_nonblocking")]
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
         Ok(socket2::Socket::connect_nonblocking(addr)?.into())
     }
 
-    fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
-        TcpStream::shutdown(self, how)
-    }
+    fn shutdown(&mut self, how: Shutdown) -> io::Result<()> { TcpStream::shutdown(self, how) }
 
     fn remote_addr(&self) -> Self::Addr {
         TcpStream::peer_addr(self).expect("TCP stream doesn't know remote peer address").into()
@@ -101,39 +94,23 @@ impl NetConnection for TcpStream {
     fn set_write_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
         TcpStream::set_write_timeout(self, dur)
     }
-    fn read_timeout(&self) -> io::Result<Option<Duration>> {
-        TcpStream::read_timeout(self)
-    }
-    fn write_timeout(&self) -> io::Result<Option<Duration>> {
-        TcpStream::write_timeout(self)
-    }
+    fn read_timeout(&self) -> io::Result<Option<Duration>> { TcpStream::read_timeout(self) }
+    fn write_timeout(&self) -> io::Result<Option<Duration>> { TcpStream::write_timeout(self) }
 
-    fn peek(&self, buf: &mut [u8]) -> io::Result<usize> {
-        TcpStream::peek(self, buf)
-    }
+    fn peek(&self, buf: &mut [u8]) -> io::Result<usize> { TcpStream::peek(self, buf) }
 
     fn set_nodelay(&mut self, nodelay: bool) -> io::Result<()> {
         TcpStream::set_nodelay(self, nodelay)
     }
-    fn nodelay(&self) -> io::Result<bool> {
-        TcpStream::nodelay(self)
-    }
-    fn set_ttl(&mut self, ttl: u32) -> io::Result<()> {
-        TcpStream::set_ttl(self, ttl)
-    }
-    fn ttl(&self) -> io::Result<u32> {
-        TcpStream::ttl(self)
-    }
+    fn nodelay(&self) -> io::Result<bool> { TcpStream::nodelay(self) }
+    fn set_ttl(&mut self, ttl: u32) -> io::Result<()> { TcpStream::set_ttl(self, ttl) }
+    fn ttl(&self) -> io::Result<u32> { TcpStream::ttl(self) }
     fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()> {
         TcpStream::set_nonblocking(self, nonblocking)
     }
 
-    fn try_clone(&self) -> io::Result<TcpStream> {
-        TcpStream::try_clone(self)
-    }
-    fn take_error(&self) -> io::Result<Option<io::Error>> {
-        TcpStream::take_error(self)
-    }
+    fn try_clone(&self) -> io::Result<TcpStream> { TcpStream::try_clone(self) }
+    fn take_error(&self) -> io::Result<Option<io::Error>> { TcpStream::take_error(self) }
 }
 
 #[cfg(feature = "socket2")]
@@ -181,9 +158,7 @@ impl NetConnection for socket2::Socket {
         Ok(socket)
     }
 
-    fn shutdown(&mut self, how: Shutdown) -> io::Result<()> {
-        socket2::Socket::shutdown(self, how)
-    }
+    fn shutdown(&mut self, how: Shutdown) -> io::Result<()> { socket2::Socket::shutdown(self, how) }
 
     fn remote_addr(&self) -> Self::Addr {
         socket2::Socket::peer_addr(self)
@@ -209,13 +184,9 @@ impl NetConnection for socket2::Socket {
         socket2::Socket::set_write_timeout(self, dur)
     }
 
-    fn read_timeout(&self) -> io::Result<Option<Duration>> {
-        socket2::Socket::read_timeout(self)
-    }
+    fn read_timeout(&self) -> io::Result<Option<Duration>> { socket2::Socket::read_timeout(self) }
 
-    fn write_timeout(&self) -> io::Result<Option<Duration>> {
-        socket2::Socket::write_timeout(self)
-    }
+    fn write_timeout(&self) -> io::Result<Option<Duration>> { socket2::Socket::write_timeout(self) }
 
     fn peek(&self, buf: &mut [u8]) -> io::Result<usize> {
         use std::mem::MaybeUninit;
@@ -232,27 +203,17 @@ impl NetConnection for socket2::Socket {
         socket2::Socket::set_nodelay(self, nodelay)
     }
 
-    fn nodelay(&self) -> io::Result<bool> {
-        socket2::Socket::nodelay(self)
-    }
+    fn nodelay(&self) -> io::Result<bool> { socket2::Socket::nodelay(self) }
 
-    fn set_ttl(&mut self, ttl: u32) -> io::Result<()> {
-        socket2::Socket::set_ttl(self, ttl)
-    }
+    fn set_ttl(&mut self, ttl: u32) -> io::Result<()> { socket2::Socket::set_ttl(self, ttl) }
 
-    fn ttl(&self) -> io::Result<u32> {
-        socket2::Socket::ttl(self)
-    }
+    fn ttl(&self) -> io::Result<u32> { socket2::Socket::ttl(self) }
 
     fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()> {
         socket2::Socket::set_nonblocking(self, nonblocking)
     }
 
-    fn try_clone(&self) -> io::Result<Self> {
-        socket2::Socket::try_clone(self)
-    }
+    fn try_clone(&self) -> io::Result<Self> { socket2::Socket::try_clone(self) }
 
-    fn take_error(&self) -> io::Result<Option<io::Error>> {
-        socket2::Socket::take_error(self)
-    }
+    fn take_error(&self) -> io::Result<Option<io::Error>> { socket2::Socket::take_error(self) }
 }

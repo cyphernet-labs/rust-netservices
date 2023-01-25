@@ -84,9 +84,7 @@ pub struct NetAccept<S: NetSession, L: NetListener<Stream = S::Connection> = Tcp
 }
 
 impl<L: NetListener<Stream = S::Connection>, S: NetSession> AsRawFd for NetAccept<S, L> {
-    fn as_raw_fd(&self) -> RawFd {
-        self.listener.as_raw_fd()
-    }
+    fn as_raw_fd(&self) -> RawFd { self.listener.as_raw_fd() }
 }
 
 impl<L: NetListener<Stream = S::Connection>, S: NetSession> io::Write for NetAccept<S, L> {
@@ -94,19 +92,13 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> io::Write for NetAcc
         Err(io::ErrorKind::InvalidInput.into())
     }
 
-    fn flush(&mut self) -> io::Result<()> {
-        Err(io::ErrorKind::InvalidInput.into())
-    }
+    fn flush(&mut self) -> io::Result<()> { Err(io::ErrorKind::InvalidInput.into()) }
 }
 
 impl<L: NetListener<Stream = S::Connection>, S: NetSession> WriteAtomic for NetAccept<S, L> {
-    fn is_ready_to_write(&self) -> bool {
-        false
-    }
+    fn is_ready_to_write(&self) -> bool { false }
 
-    fn empty_write_buf(&mut self) -> io::Result<bool> {
-        Ok(true)
-    }
+    fn empty_write_buf(&mut self) -> io::Result<bool> { Ok(true) }
 
     fn write_or_buf(&mut self, _: &[u8]) -> io::Result<()> {
         Err(io::ErrorKind::InvalidInput.into())
@@ -133,9 +125,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
 
     /// Returns the local [`net::SocketAddr`] on which listener accepts
     /// connections.
-    pub fn local_addr(&self) -> net::SocketAddr {
-        self.listener.local_addr()
-    }
+    pub fn local_addr(&self) -> net::SocketAddr { self.listener.local_addr() }
 
     fn handle_accept(&mut self) -> io::Result<S::Connection> {
         let mut connection = self.listener.accept()?;
@@ -147,19 +137,14 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
 }
 
 impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAccept<S, L>
-where
-    S: Send,
+where S: Send
 {
     type Id = net::SocketAddr;
     type Event = ListenerEvent<S>;
 
-    fn id(&self) -> Self::Id {
-        self.listener.local_addr()
-    }
+    fn id(&self) -> Self::Id { self.listener.local_addr() }
 
-    fn interests(&self) -> IoType {
-        IoType::read_only()
-    }
+    fn interests(&self) -> IoType { IoType::read_only() }
 
     fn handle_io(&mut self, io: Io) -> Option<Self::Event> {
         match io {
@@ -228,9 +213,7 @@ impl<S: NetSession> Display for NetTransport<S> {
 }
 
 impl<S: NetSession> AsRawFd for NetTransport<S> {
-    fn as_raw_fd(&self) -> RawFd {
-        self.session.as_connection().as_raw_fd()
-    }
+    fn as_raw_fd(&self) -> RawFd { self.session.as_connection().as_raw_fd() }
 }
 
 impl<S: NetSession> NetTransport<S> {
@@ -303,38 +286,24 @@ impl<S: NetSession> NetTransport<S> {
         })
     }
 
-    pub fn state(&self) -> TransportState {
-        self.state
-    }
-    pub fn is_active(&self) -> bool {
-        self.state == TransportState::Active
-    }
+    pub fn state(&self) -> TransportState { self.state }
+    pub fn is_active(&self) -> bool { self.state == TransportState::Active }
 
-    pub fn is_inbound(&self) -> bool {
-        self.link_direction() == LinkDirection::Inbound
-    }
-    pub fn is_outbound(&self) -> bool {
-        self.link_direction() == LinkDirection::Outbound
-    }
-    pub fn link_direction(&self) -> LinkDirection {
-        self.link_direction
-    }
+    pub fn is_inbound(&self) -> bool { self.link_direction() == LinkDirection::Inbound }
+    pub fn is_outbound(&self) -> bool { self.link_direction() == LinkDirection::Outbound }
+    pub fn link_direction(&self) -> LinkDirection { self.link_direction }
 
     pub fn local_addr(&self) -> <S::Connection as NetConnection>::Addr {
         self.session.as_connection().local_addr()
     }
 
-    pub fn artifact(&self) -> Option<S::Artifact> {
-        self.session.artifact()
-    }
+    pub fn artifact(&self) -> Option<S::Artifact> { self.session.artifact() }
 
     pub fn expect_peer_id(&self) -> S::Artifact {
         self.session.artifact().expect("session is expected to be established at this stage")
     }
 
-    pub fn write_buf_len(&self) -> usize {
-        self.write_buffer.len()
-    }
+    pub fn write_buf_len(&self) -> usize { self.write_buffer.len() }
 
     fn terminate(&mut self, reason: io::Error) -> SessionEvent<S> {
         #[cfg(feature = "log")]
@@ -396,9 +365,7 @@ impl<S: NetSession> Resource for NetTransport<S> {
     type Id = RawFd;
     type Event = SessionEvent<S>;
 
-    fn id(&self) -> Self::Id {
-        self.session.as_connection().as_raw_fd()
-    }
+    fn id(&self) -> Self::Id { self.session.as_connection().as_raw_fd() }
 
     fn interests(&self) -> IoType {
         match self.state {
@@ -472,15 +439,11 @@ impl<S: NetSession> Write for NetTransport<S> {
         }
     }
 
-    fn flush(&mut self) -> io::Result<()> {
-        self.session.flush()
-    }
+    fn flush(&mut self) -> io::Result<()> { self.session.flush() }
 }
 
 impl<S: NetSession> WriteAtomic for NetTransport<S> {
-    fn is_ready_to_write(&self) -> bool {
-        self.state == TransportState::Active
-    }
+    fn is_ready_to_write(&self) -> bool { self.state == TransportState::Active }
 
     fn empty_write_buf(&mut self) -> io::Result<bool> {
         let len = self.session.write(self.write_buffer.make_contiguous())?;

@@ -53,10 +53,6 @@ pub enum LinkDirection {
 }
 
 impl LinkDirection {
-    pub fn is_inbound(self) -> bool {
-        matches!(self, LinkDirection::Inbound)
-    }
-    pub fn is_outbound(self) -> bool {
-        matches!(self, LinkDirection::Outbound)
-    }
+    pub fn is_inbound(self) -> bool { matches!(self, LinkDirection::Inbound) }
+    pub fn is_outbound(self) -> bool { matches!(self, LinkDirection::Outbound) }
 }
