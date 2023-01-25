@@ -59,16 +59,18 @@ impl Marshaller {
 
     pub fn pop<F: Frame>(&mut self) -> Result<Option<F>, F::Error> {
         let slice = self.read_queue.make_contiguous();
-        let mut cursor = io::Cursor::new(slice.as_ref());
+        let mut cursor = io::Cursor::new(slice);
         let frame = F::unmarshall(&mut cursor)?;
         let pos = cursor.position() as usize;
         if frame.is_some() {
             self.read_queue.drain(..pos);
         }
-        return Ok(frame);
+        Ok(frame)
     }
 
-    pub fn queue_len(&self) -> usize { self.write_queue.len() }
+    pub fn queue_len(&self) -> usize {
+        self.write_queue.len()
+    }
 
     /// # Errors
     ///
@@ -84,11 +86,15 @@ impl Marshaller {
 }
 
 impl Read for Marshaller {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.write_queue.read(buf) }
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.write_queue.read(buf)
+    }
 }
 
 impl Write for Marshaller {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> { self.read_queue.write(buf) }
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.read_queue.write(buf)
+    }
 
     fn flush(&mut self) -> io::Result<()> {
         // Do nothing

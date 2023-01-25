@@ -137,9 +137,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
             LinkDirection::Inbound => EidolonRuntime::responder(signer, cert, allowed_ids),
             LinkDirection::Outbound => EidolonRuntime::initiator(signer, cert, allowed_ids),
         };
-        let auth = EidolonSession::with(encoding, eidolon);
-
-        auth
+        EidolonSession::with(encoding, eidolon)
     }
 }
 
@@ -150,7 +148,9 @@ pub trait NetSession: NetStream + SplitIo {
     type Connection: NetConnection;
     type Artifact: Display;
 
-    fn is_established(&self) -> bool { self.artifact().is_some() }
+    fn is_established(&self) -> bool {
+        self.artifact().is_some()
+    }
     fn run_handshake(&mut self) -> io::Result<()>;
 
     fn display(&self) -> String {
@@ -178,6 +178,7 @@ pub trait NetStateMachine: Sized + Send {
     fn artifact(&self) -> Option<Self::Artifact>;
 
     // Blocking
+    #[allow(clippy::read_zero_byte_vec)]
     fn run_handshake(&mut self, stream: &mut impl NetStream) -> io::Result<()> {
         let mut input = vec![];
         while !self.is_complete() {
@@ -207,7 +208,9 @@ pub trait NetStateMachine: Sized + Send {
     }
 
     fn is_init(&self) -> bool;
-    fn is_complete(&self) -> bool { self.artifact().is_some() }
+    fn is_complete(&self) -> bool {
+        self.artifact().is_some()
+    }
 }
 
 pub trait IntoInit<I: Sized> {
@@ -218,7 +221,9 @@ pub trait IntoInit<I: Sized> {
 pub struct ZeroInit;
 
 impl<T> IntoInit<ZeroInit> for T {
-    fn into_init(self) -> ZeroInit { ZeroInit }
+    fn into_init(self) -> ZeroInit {
+        ZeroInit
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Display)]
@@ -230,17 +235,21 @@ pub struct ProtocolArtifact<M: NetStateMachine, S: NetSession> {
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct NetProtocol<M: NetStateMachine, S: NetSession>
-where S::Artifact: IntoInit<M::Init>
+where
+    S::Artifact: IntoInit<M::Init>,
 {
     state: M,
     session: S,
 }
 
 impl<M: NetStateMachine, S: NetSession> NetProtocol<M, S>
-where S::Artifact: IntoInit<M::Init>
+where
+    S::Artifact: IntoInit<M::Init>,
 {
     pub fn new(session: S) -> Self
-    where M: Default {
+    where
+        M: Default,
+    {
         Self::with(session, M::default())
     }
 
@@ -269,7 +278,8 @@ where S::Artifact: IntoInit<M::Init>
 }
 
 impl<M: NetStateMachine, S: NetSession> io::Read for NetProtocol<M, S>
-where S::Artifact: IntoInit<M::Init>
+where
+    S::Artifact: IntoInit<M::Init>,
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.state.is_complete() || !self.session.is_established() {
@@ -306,7 +316,8 @@ where S::Artifact: IntoInit<M::Init>
 }
 
 impl<M: NetStateMachine, S: NetSession> io::Write for NetProtocol<M, S>
-where S::Artifact: IntoInit<M::Init>
+where
+    S::Artifact: IntoInit<M::Init>,
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.state.is_complete() || !self.session.is_established() {
@@ -336,14 +347,19 @@ where S::Artifact: IntoInit<M::Init>
         self.session.write(buf)
     }
 
-    fn flush(&mut self) -> io::Result<()> { self.session.flush() }
+    fn flush(&mut self) -> io::Result<()> {
+        self.session.flush()
+    }
 }
 
-impl<M: NetStateMachine, S: NetSession> NetStream for NetProtocol<M, S> where S::Artifact: IntoInit<M::Init>
-{}
+impl<M: NetStateMachine, S: NetSession> NetStream for NetProtocol<M, S> where
+    S::Artifact: IntoInit<M::Init>
+{
+}
 
 impl<M: NetStateMachine, S: NetSession> SplitIo for NetProtocol<M, S>
-where S::Artifact: IntoInit<M::Init>
+where
+    S::Artifact: IntoInit<M::Init>,
 {
     type Read = NetReader<S>;
     type Write = NetWriter<M, S>;
@@ -359,11 +375,14 @@ where S::Artifact: IntoInit<M::Init>
                     error: err.error,
                 })
             }
-            Ok((reader, writer)) => Ok((NetReader { unique_id, reader }, NetWriter {
-                unique_id,
-                state: self.state,
-                writer,
-            })),
+            Ok((reader, writer)) => Ok((
+                NetReader { unique_id, reader },
+                NetWriter {
+                    unique_id,
+                    state: self.state,
+                    writer,
+                },
+            )),
         }
     }
 
@@ -380,7 +399,8 @@ where S::Artifact: IntoInit<M::Init>
 }
 
 impl<M: NetStateMachine, S: NetSession> NetSession for NetProtocol<M, S>
-where S::Artifact: IntoInit<M::Init>
+where
+    S::Artifact: IntoInit<M::Init>,
 {
     type Inner = S;
     type Connection = S::Connection;
@@ -404,11 +424,17 @@ where S::Artifact: IntoInit<M::Init>
         })
     }
 
-    fn as_connection(&self) -> &Self::Connection { self.session.as_connection() }
+    fn as_connection(&self) -> &Self::Connection {
+        self.session.as_connection()
+    }
 
-    fn as_connection_mut(&mut self) -> &mut Self::Connection { self.session.as_connection_mut() }
+    fn as_connection_mut(&mut self) -> &mut Self::Connection {
+        self.session.as_connection_mut()
+    }
 
-    fn disconnect(self) -> io::Result<()> { self.session.disconnect() }
+    fn disconnect(self) -> io::Result<()> {
+        self.session.disconnect()
+    }
 }
 
 mod imp_std {
@@ -421,15 +447,25 @@ mod imp_std {
         type Connection = Self;
         type Artifact = SocketAddr;
 
-        fn run_handshake(&mut self) -> io::Result<()> { Ok(()) }
+        fn run_handshake(&mut self) -> io::Result<()> {
+            Ok(())
+        }
 
-        fn artifact(&self) -> Option<Self::Artifact> { self.peer_addr().ok() }
+        fn artifact(&self) -> Option<Self::Artifact> {
+            self.peer_addr().ok()
+        }
 
-        fn as_connection(&self) -> &Self::Connection { self }
+        fn as_connection(&self) -> &Self::Connection {
+            self
+        }
 
-        fn as_connection_mut(&mut self) -> &mut Self::Connection { self }
+        fn as_connection_mut(&mut self) -> &mut Self::Connection {
+            self
+        }
 
-        fn disconnect(self) -> io::Result<()> { self.shutdown(Shutdown::Both) }
+        fn disconnect(self) -> io::Result<()> {
+            self.shutdown(Shutdown::Both)
+        }
     }
 }
 
@@ -446,15 +482,25 @@ mod imp_socket2 {
         type Connection = Self;
         type Artifact = SocketAddr;
 
-        fn run_handshake(&mut self) -> io::Result<()> { Ok(()) }
+        fn run_handshake(&mut self) -> io::Result<()> {
+            Ok(())
+        }
 
-        fn artifact(&self) -> Option<Self::Artifact> { self.peer_addr().ok()?.as_socket() }
+        fn artifact(&self) -> Option<Self::Artifact> {
+            self.peer_addr().ok()?.as_socket()
+        }
 
-        fn as_connection(&self) -> &Self::Connection { self }
+        fn as_connection(&self) -> &Self::Connection {
+            self
+        }
 
-        fn as_connection_mut(&mut self) -> &mut Self::Connection { self }
+        fn as_connection_mut(&mut self) -> &mut Self::Connection {
+            self
+        }
 
-        fn disconnect(self) -> io::Result<()> { self.shutdown(Shutdown::Both) }
+        fn disconnect(self) -> io::Result<()> {
+            self.shutdown(Shutdown::Both)
+        }
     }
 }
 
@@ -505,23 +551,33 @@ mod imp_eidolon {
         type Artifact = Cert<S::Sig>;
         type Error = eidolon::Error<S::Pk>;
 
-        fn init(&mut self, init: Self::Init) { self.state.init(init) }
+        fn init(&mut self, init: Self::Init) {
+            self.state.init(init)
+        }
 
-        fn next_read_len(&self) -> usize { self.state.next_read_len() }
+        fn next_read_len(&self) -> usize {
+            self.state.next_read_len()
+        }
 
         fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error> {
             self.state.advance(input, &self.signer)
         }
 
-        fn artifact(&self) -> Option<Self::Artifact> { self.state.remote_cert().cloned() }
+        fn artifact(&self) -> Option<Self::Artifact> {
+            self.state.remote_cert().cloned()
+        }
 
-        fn is_init(&self) -> bool { self.state.is_init() }
+        fn is_init(&self) -> bool {
+            self.state.is_init()
+        }
     }
 
     impl<S: NetSession, E: Ecdh, D: Digest> IntoInit<Vec<u8>>
         for ProtocolArtifact<NoiseState<E, D>, S>
     {
-        fn into_init(self) -> Vec<u8> { self.state.as_ref().to_vec() }
+        fn into_init(self) -> Vec<u8> {
+            self.state.as_ref().to_vec()
+        }
     }
 }
 pub use imp_eidolon::EidolonRuntime;
@@ -541,13 +597,21 @@ mod impl_noise {
 
         fn init(&mut self, _: Self::Init) {}
 
-        fn next_read_len(&self) -> usize { self.next_read_len() }
+        fn next_read_len(&self) -> usize {
+            self.next_read_len()
+        }
 
-        fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error> { self.advance(input) }
+        fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error> {
+            self.advance(input)
+        }
 
-        fn artifact(&self) -> Option<Self::Artifact> { self.get_handshake_hash() }
+        fn artifact(&self) -> Option<Self::Artifact> {
+            self.get_handshake_hash()
+        }
 
-        fn is_init(&self) -> bool { true }
+        fn is_init(&self) -> bool {
+            true
+        }
     }
 }
 
@@ -565,12 +629,20 @@ mod impl_socks5 {
 
         fn init(&mut self, _: Self::Init) {}
 
-        fn next_read_len(&self) -> usize { self.next_read_len() }
+        fn next_read_len(&self) -> usize {
+            self.next_read_len()
+        }
 
-        fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error> { self.advance(input) }
+        fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error> {
+            self.advance(input)
+        }
 
-        fn artifact(&self) -> Option<Self::Artifact> { Some(()) }
+        fn artifact(&self) -> Option<Self::Artifact> {
+            Some(())
+        }
 
-        fn is_init(&self) -> bool { true }
+        fn is_init(&self) -> bool {
+            true
+        }
     }
 }
