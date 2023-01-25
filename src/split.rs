@@ -50,9 +50,7 @@ pub struct NetReader<S: NetSession> {
 }
 
 impl<S: NetSession> io::Read for NetReader<S> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.reader.read(buf)
-    }
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.reader.read(buf) }
 }
 
 pub struct NetWriter<M: NetStateMachine, S: NetSession> {
@@ -62,12 +60,8 @@ pub struct NetWriter<M: NetStateMachine, S: NetSession> {
 }
 
 impl<M: NetStateMachine, S: NetSession> io::Write for NetWriter<M, S> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.writer.write(buf)
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        self.writer.flush()
-    }
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> { self.writer.write(buf) }
+    fn flush(&mut self) -> io::Result<()> { self.writer.flush() }
 }
 
 pub struct TcpReader<C: NetConnection> {
@@ -76,9 +70,7 @@ pub struct TcpReader<C: NetConnection> {
 }
 
 impl<C: NetConnection> io::Read for TcpReader<C> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.connection.read(buf)
-    }
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.connection.read(buf) }
 }
 
 pub struct TcpWriter<C: NetConnection> {
@@ -87,13 +79,9 @@ pub struct TcpWriter<C: NetConnection> {
 }
 
 impl<C: NetConnection> io::Write for TcpWriter<C> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.connection.write(buf)
-    }
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> { self.connection.write(buf) }
 
-    fn flush(&mut self) -> io::Result<()> {
-        self.connection.flush()
-    }
+    fn flush(&mut self) -> io::Result<()> { self.connection.flush() }
 }
 
 impl SplitIo for TcpStream {

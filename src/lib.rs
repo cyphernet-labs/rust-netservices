@@ -39,11 +39,10 @@ pub mod resource;
 pub use connection::{Address, NetConnection, NetStream};
 pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
-pub use session::{NetProtocol, NetSession, NetStateMachine};
-pub use split::{NetReader, NetWriter, SplitIo, SplitIoError, TcpReader, TcpWriter};
-
 #[cfg(feature = "io-reactor")]
 pub use resource::{ListenerEvent, NetAccept, NetTransport, SessionEvent};
+pub use session::{NetProtocol, NetSession, NetStateMachine};
+pub use split::{NetReader, NetWriter, SplitIo, SplitIoError, TcpReader, TcpWriter};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum LinkDirection {
@@ -52,10 +51,6 @@ pub enum LinkDirection {
 }
 
 impl LinkDirection {
-    pub fn is_inbound(self) -> bool {
-        matches!(self, LinkDirection::Inbound)
-    }
-    pub fn is_outbound(self) -> bool {
-        matches!(self, LinkDirection::Outbound)
-    }
+    pub fn is_inbound(self) -> bool { matches!(self, LinkDirection::Inbound) }
+    pub fn is_outbound(self) -> bool { matches!(self, LinkDirection::Outbound) }
 }

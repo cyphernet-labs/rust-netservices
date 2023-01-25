@@ -45,9 +45,7 @@ impl<S: NetSession> Tunnel<S> {
         Ok(Self { listener, session })
     }
 
-    pub fn local_addr(&self) -> io::Result<net::SocketAddr> {
-        self.listener.local_addr()
-    }
+    pub fn local_addr(&self) -> io::Result<net::SocketAddr> { self.listener.local_addr() }
 
     /// # Returns
     ///
@@ -184,7 +182,5 @@ impl<S: NetSession> Tunnel<S> {
         }
     }
 
-    pub fn into_session(self) -> S {
-        self.session
-    }
+    pub fn into_session(self) -> S { self.session }
 }
