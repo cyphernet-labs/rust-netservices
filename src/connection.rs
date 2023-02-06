@@ -33,8 +33,13 @@ impl<T> Address for T where T: Addr + Send + Clone + Eq + Hash + Debug + Display
 
 pub trait NetStream: Send + io::Read + io::Write {}
 
+pub trait AsConnection {
+    type Connection: NetConnection;
+    fn as_connection(&self) -> &Self::Connection;
+}
+
 /// Network stream is an abstraction of TCP stream object.
-pub trait NetConnection: Send + NetStream + AsRawFd + Debug {
+pub trait NetConnection: NetStream + AsRawFd + Debug {
     type Addr: Address;
 
     fn connect_blocking(addr: Self::Addr) -> io::Result<Self>

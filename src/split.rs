@@ -22,6 +22,7 @@
 use std::io;
 use std::net::TcpStream;
 
+use crate::connection::AsConnection;
 use crate::{NetConnection, NetSession, NetStateMachine};
 
 #[derive(Debug, Display)]
@@ -34,8 +35,8 @@ pub struct SplitIoError<T: SplitIo> {
 impl<T: SplitIo + std::fmt::Debug> std::error::Error for SplitIoError<T> {}
 
 pub trait SplitIo: Sized {
-    type Read: io::Read + Sized;
-    type Write: io::Write + Sized;
+    type Read: AsConnection + io::Read + Sized;
+    type Write: AsConnection + io::Write + Sized;
 
     /// # Panics
     ///
@@ -49,6 +50,11 @@ pub struct NetReader<S: NetSession> {
     pub(crate) reader: <S as SplitIo>::Read,
 }
 
+impl<S: NetSession> AsConnection for NetReader<S> {
+    type Connection = <<S as SplitIo>::Read as AsConnection>::Connection;
+    fn as_connection(&self) -> &Self::Connection { self.reader.as_connection() }
+}
+
 impl<S: NetSession> io::Read for NetReader<S> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.reader.read(buf) }
 }
@@ -57,6 +63,11 @@ pub struct NetWriter<M: NetStateMachine, S: NetSession> {
     pub(crate) unique_id: u64,
     pub(crate) state: M,
     pub(crate) writer: <S as SplitIo>::Write,
+}
+
+impl<M: NetStateMachine, S: NetSession> AsConnection for NetWriter<M, S> {
+    type Connection = <<S as SplitIo>::Write as AsConnection>::Connection;
+    fn as_connection(&self) -> &Self::Connection { self.writer.as_connection() }
 }
 
 impl<M: NetStateMachine, S: NetSession> io::Write for NetWriter<M, S> {
@@ -73,6 +84,11 @@ impl<C: NetConnection> io::Read for TcpReader<C> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.connection.read(buf) }
 }
 
+impl<C: NetConnection> AsConnection for TcpReader<C> {
+    type Connection = C;
+    fn as_connection(&self) -> &Self::Connection { &self.connection }
+}
+
 pub struct TcpWriter<C: NetConnection> {
     unique_id: u64,
     connection: C,
@@ -82,6 +98,11 @@ impl<C: NetConnection> io::Write for TcpWriter<C> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> { self.connection.write(buf) }
 
     fn flush(&mut self) -> io::Result<()> { self.connection.flush() }
+}
+
+impl<C: NetConnection> AsConnection for TcpWriter<C> {
+    type Connection = C;
+    fn as_connection(&self) -> &Self::Connection { &self.connection }
 }
 
 impl SplitIo for TcpStream {
