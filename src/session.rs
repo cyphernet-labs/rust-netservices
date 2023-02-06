@@ -523,7 +523,7 @@ mod imp_eidolon {
     impl<S: NetSession, E: Ecdh, D: Digest> IntoInit<Vec<u8>>
         for ProtocolArtifact<NoiseState<E, D>, S>
     {
-        fn into_init(self) -> Vec<u8> { self.state.as_ref().to_vec() }
+        fn into_init(self) -> Vec<u8> { self.state.to_vec() }
     }
 }
 pub use imp_eidolon::EidolonRuntime;
@@ -531,14 +531,38 @@ pub use imp_eidolon::EidolonRuntime;
 mod impl_noise {
     use cyphernet::encrypt::noise::error::NoiseError;
     use cyphernet::encrypt::noise::NoiseState;
-    use cyphernet::{Digest, Ecdh};
+    use cyphernet::{Digest, EcPk, Ecdh};
 
     use super::*;
+
+    #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+    pub struct NoiseArtifact<E: Ecdh, D: Digest> {
+        pub handshake_hash: D::Output,
+        pub remote_static_key: Option<E::Pk>,
+    }
+
+    impl<E: Ecdh, D: Digest> NoiseArtifact<E, D> {
+        pub fn with(handshake_hash: D::Output, remote_static_key: Option<E::Pk>) -> Self {
+            NoiseArtifact {
+                handshake_hash,
+                remote_static_key,
+            }
+        }
+
+        pub fn to_vec(&self) -> Vec<u8> {
+            let mut vec = Vec::<u8>::with_capacity(D::OUTPUT_LEN + E::Pk::COMPRESSED_LEN);
+            vec.extend_from_slice(self.handshake_hash.as_ref());
+            self.remote_static_key
+                .as_ref()
+                .map(|pk| vec.extend_from_slice(pk.to_pk_compressed().as_ref()));
+            vec
+        }
+    }
 
     impl<E: Ecdh, D: Digest> NetStateMachine for NoiseState<E, D> {
         const NAME: &'static str = "noise";
         type Init = ZeroInit;
-        type Artifact = D::Output;
+        type Artifact = NoiseArtifact<E, D>;
         type Error = NoiseError;
 
         fn init(&mut self, _: Self::Init) {}
@@ -547,7 +571,10 @@ mod impl_noise {
 
         fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error> { self.advance(input) }
 
-        fn artifact(&self) -> Option<Self::Artifact> { self.get_handshake_hash() }
+        fn artifact(&self) -> Option<Self::Artifact> {
+            self.get_handshake_hash()
+                .map(|hh| NoiseArtifact::with(hh, self.get_remote_static_key()))
+        }
 
         fn is_init(&self) -> bool { true }
     }
