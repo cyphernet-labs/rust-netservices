@@ -357,6 +357,23 @@ impl<S: NetSession> NetTransport<S> {
             Err(err) => Some(self.terminate(err)),
         }
     }
+
+    fn flush_buffer(&mut self) -> io::Result<usize> {
+        match self.session.write(self.write_buffer.make_contiguous()) {
+            Ok(len) => {
+                self.write_buffer.drain(..len);
+                Ok(len)
+            }
+            Err(err)
+                if err.kind() == io::ErrorKind::WouldBlock
+                    || err.kind() == io::ErrorKind::WriteZero
+                    || err.kind() == io::ErrorKind::Interrupted =>
+            {
+                Ok(0)
+            }
+            Err(err) => Err(err),
+        }
+    }
 }
 
 impl<S: NetSession> Resource for NetTransport<S> {
@@ -438,7 +455,10 @@ impl<S: NetSession> Write for NetTransport<S> {
         }
     }
 
-    fn flush(&mut self) -> io::Result<()> { self.session.flush() }
+    fn flush(&mut self) -> io::Result<()> {
+        let res = self.flush_buffer().map(|_| ());
+        self.session.flush().and_then(|_| res)
+    }
 }
 
 impl<S: NetSession> WriteAtomic for NetTransport<S> {
@@ -454,20 +474,26 @@ impl<S: NetSession> WriteAtomic for NetTransport<S> {
     }
 
     fn write_or_buf(&mut self, buf: &[u8]) -> io::Result<()> {
-        let len = self.session.write(self.write_buffer.make_contiguous())?;
-        if len < self.write_buffer.len() {
-            self.write_buffer.drain(..len);
-            self.write_buffer.extend(buf);
-            return Ok(());
-        }
-        self.write_buffer.drain(..);
-        match self.session.write(buf) {
-            Err(err) => Err(err),
-            Ok(len) if len < buf.len() => {
-                self.write_buffer.extend(&buf[len..]);
-                Ok(())
+        if self.write_buffer.is_empty() {
+            match self.session.write(buf) {
+                Err(err)
+                    if err.kind() == io::ErrorKind::WouldBlock
+                        || err.kind() == io::ErrorKind::WriteZero
+                        || err.kind() == io::ErrorKind::Interrupted =>
+                {
+                    self.write_buffer.extend(buf);
+                    Ok(())
+                }
+                Err(err) => Err(err),
+                Ok(len) if len < buf.len() => {
+                    self.write_buffer.extend(&buf[len..]);
+                    Ok(())
+                }
+                Ok(_) => Ok(()),
             }
-            Ok(_) => Ok(()),
+        } else {
+            self.write_buffer.extend(buf);
+            Ok(())
         }
     }
 }
