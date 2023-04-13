@@ -326,8 +326,16 @@ impl<S: NetSession> NetTransport<S> {
             // In this case, the write couldn't complete. Leave `needs_flush` set
             // to be notified when the socket is ready to write again.
             Err(err)
-                if [io::ErrorKind::WouldBlock, io::ErrorKind::WriteZero].contains(&err.kind()) =>
+                if [
+                    io::ErrorKind::WouldBlock,
+                    io::ErrorKind::WriteZero,
+                    io::ErrorKind::OutOfMemory,
+                    io::ErrorKind::Interrupted,
+                ]
+                .contains(&err.kind()) =>
             {
+                #[cfg(feature = "log")]
+                log::warn!(target: "transport", "Resource {} was not able to consume any data even though it has announced its write readiness", self.id());
                 self.write_intent = true;
                 None
             }
@@ -358,21 +366,34 @@ impl<S: NetSession> NetTransport<S> {
         }
     }
 
-    fn flush_buffer(&mut self) -> io::Result<usize> {
-        match self.session.write(self.write_buffer.make_contiguous()) {
-            Ok(len) => {
-                self.write_buffer.drain(..len);
-                Ok(len)
-            }
-            Err(err)
-                if err.kind() == io::ErrorKind::WouldBlock
-                    || err.kind() == io::ErrorKind::WriteZero
-                    || err.kind() == io::ErrorKind::Interrupted =>
-            {
-                Ok(0)
-            }
-            Err(err) => Err(err),
+    fn flush_buffer(&mut self) -> io::Result<()> {
+        let orig_len = self.write_buffer.len();
+        #[cfg(feature = "log")]
+        log::trace!(target: "transport", "Resource {} is flushing its buffer of {orig_len} bytes", self.id());
+        let len =
+            self.session.write(self.write_buffer.make_contiguous()).or_else(|err| {
+                match err.kind() {
+                    io::ErrorKind::WouldBlock
+                    | io::ErrorKind::OutOfMemory
+                    | io::ErrorKind::WriteZero
+                    | io::ErrorKind::Interrupted => {
+                        #[cfg(feature = "log")]
+                        log::warn!(target: "transport", "Resource {} kernel buffer is fulled (system message is '{err}')", self.id());
+                        Ok(0)
+                    },
+                    _ => {
+                        #[cfg(feature = "log")]
+                        log::error!(target: "transport", "Resource {} failed write operation with message '{err}'", self.id());
+                        Err(err)
+                    },
+                }
+            })?;
+        if orig_len > len {
+            #[cfg(feature = "log")]
+            log::debug!(target: "transport", "Resource {} was able to consume only a part of the buffered data ({len} of {orig_len} bytes)", self.id());
         }
+        self.write_buffer.drain(..len);
+        Ok(())
     }
 }
 
@@ -456,7 +477,7 @@ impl<S: NetSession> Write for NetTransport<S> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        let res = self.flush_buffer().map(|_| ());
+        let res = self.flush_buffer();
         self.session.flush().and_then(|_| res)
     }
 }
@@ -474,26 +495,12 @@ impl<S: NetSession> WriteAtomic for NetTransport<S> {
     }
 
     fn write_or_buf(&mut self, buf: &[u8]) -> io::Result<()> {
-        if self.write_buffer.is_empty() {
-            match self.session.write(buf) {
-                Err(err)
-                    if err.kind() == io::ErrorKind::WouldBlock
-                        || err.kind() == io::ErrorKind::WriteZero
-                        || err.kind() == io::ErrorKind::Interrupted =>
-                {
-                    self.write_buffer.extend(buf);
-                    Ok(())
-                }
-                Err(err) => Err(err),
-                Ok(len) if len < buf.len() => {
-                    self.write_buffer.extend(&buf[len..]);
-                    Ok(())
-                }
-                Ok(_) => Ok(()),
-            }
-        } else {
-            self.write_buffer.extend(buf);
-            Ok(())
+        if buf.is_empty() {
+            // Write empty data is a non-op
+            return Ok(());
         }
+        self.write_intent = true;
+        self.write_buffer.extend(buf);
+        self.flush_buffer()
     }
 }
