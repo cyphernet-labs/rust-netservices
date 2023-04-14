@@ -391,6 +391,7 @@ impl<S: NetSession> NetTransport<S> {
         if orig_len > len {
             #[cfg(feature = "log")]
             log::debug!(target: "transport", "Resource {} was able to consume only a part of the buffered data ({len} of {orig_len} bytes)", self.id());
+            self.write_intent = true;
         }
         self.write_buffer.drain(..len);
         Ok(())
@@ -499,7 +500,6 @@ impl<S: NetSession> WriteAtomic for NetTransport<S> {
             // Write empty data is a non-op
             return Ok(());
         }
-        self.write_intent = true;
         self.write_buffer.extend(buf);
         self.flush_buffer()
     }
