@@ -319,10 +319,7 @@ impl<S: NetSession> NetTransport<S> {
             return None;
         }
         match self.flush() {
-            Ok(_) => {
-                self.write_intent = false;
-                None
-            }
+            Ok(_) => None,
             // In this case, the write couldn't complete. Leave `needs_flush` set
             // to be notified when the socket is ready to write again.
             Err(err)
@@ -392,6 +389,10 @@ impl<S: NetSession> NetTransport<S> {
             #[cfg(feature = "log")]
             log::debug!(target: "transport", "Resource {} was able to consume only a part of the buffered data ({len} of {orig_len} bytes)", self.id());
             self.write_intent = true;
+        } else {
+            #[cfg(feature = "log")]
+            log::trace!(target: "transport", "Resource {} was able to consume all of the buffered data ({len} of {orig_len} bytes)", self.id());
+            self.write_intent = false;
         }
         self.write_buffer.drain(..len);
         Ok(())
