@@ -43,7 +43,7 @@ use std::{fmt, io, net};
 use reactor::poller::IoType;
 use reactor::{Io, Resource, WriteAtomic, WriteError};
 
-use crate::{LinkDirection, NetConnection, NetListener, NetSession, READ_BUFFER_SIZE};
+use crate::{Direction, NetConnection, NetListener, NetSession, READ_BUFFER_SIZE};
 
 // TODO: Make these parameters configurable
 /// Socket read buffer size.
@@ -196,7 +196,7 @@ pub enum TransportState {
 pub struct NetTransport<S: NetSession> {
     state: TransportState,
     session: S,
-    link_direction: LinkDirection,
+    link_direction: Direction,
     write_intent: bool,
     read_buffer: Box<[u8; HEAP_BUFFER_SIZE]>,
     write_buffer: VecDeque<u8>,
@@ -217,7 +217,7 @@ impl<S: NetSession> AsRawFd for NetTransport<S> {
 
 impl<S: NetSession> NetTransport<S> {
     pub fn accept(session: S) -> io::Result<Self> {
-        Self::with_state(session, TransportState::Handshake, LinkDirection::Inbound)
+        Self::with_state(session, TransportState::Handshake, Direction::Inbound)
     }
 
     /// Constructs reactor-managed resource around an existing [`NetSession`].
@@ -227,7 +227,7 @@ impl<S: NetSession> NetTransport<S> {
     /// # Errors
     ///
     /// If a session can be put into a non-blocking mode.
-    pub fn with_session(mut session: S, link_direction: LinkDirection) -> io::Result<Self> {
+    pub fn with_session(mut session: S, link_direction: Direction) -> io::Result<Self> {
         let state = if session.is_established() {
             // If we are disconnected, we will get instantly updated from the
             // reactor and the state will change automatically
@@ -271,7 +271,7 @@ impl<S: NetSession> NetTransport<S> {
     fn with_state(
         mut session: S,
         state: TransportState,
-        link_direction: LinkDirection,
+        link_direction: Direction,
     ) -> io::Result<Self> {
         session.as_connection_mut().set_read_timeout(Some(READ_TIMEOUT))?;
         session.as_connection_mut().set_write_timeout(Some(WRITE_TIMEOUT))?;
@@ -288,9 +288,9 @@ impl<S: NetSession> NetTransport<S> {
     pub fn state(&self) -> TransportState { self.state }
     pub fn is_active(&self) -> bool { self.state == TransportState::Active }
 
-    pub fn is_inbound(&self) -> bool { self.link_direction() == LinkDirection::Inbound }
-    pub fn is_outbound(&self) -> bool { self.link_direction() == LinkDirection::Outbound }
-    pub fn link_direction(&self) -> LinkDirection { self.link_direction }
+    pub fn is_inbound(&self) -> bool { self.link_direction() == Direction::Inbound }
+    pub fn is_outbound(&self) -> bool { self.link_direction() == Direction::Outbound }
+    pub fn link_direction(&self) -> Direction { self.link_direction }
 
     pub fn local_addr(&self) -> <S::Connection as NetConnection>::Addr {
         self.session.as_connection().local_addr()

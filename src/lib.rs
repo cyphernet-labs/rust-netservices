@@ -49,12 +49,12 @@ pub use session::{NetProtocol, NetSession, NetStateMachine};
 pub use split::{NetReader, NetWriter, SplitIo, SplitIoError, TcpReader, TcpWriter};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub enum LinkDirection {
+pub enum Direction {
     Inbound,
     Outbound,
 }
 
-impl LinkDirection {
-    pub fn is_inbound(self) -> bool { matches!(self, LinkDirection::Inbound) }
-    pub fn is_outbound(self) -> bool { matches!(self, LinkDirection::Outbound) }
+impl Direction {
+    pub fn is_inbound(self) -> bool { matches!(self, Direction::Inbound) }
+    pub fn is_outbound(self) -> bool { matches!(self, Direction::Outbound) }
 }

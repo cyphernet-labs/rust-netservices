@@ -29,7 +29,7 @@ use cyphernet::encrypt::noise::{HandshakePattern, Keyset, NoiseState};
 use cyphernet::proxy::socks5;
 use cyphernet::{x25519, Cert, Digest, EcSign};
 
-use crate::{LinkDirection, NetConnection, NetReader, NetStream, NetWriter, SplitIo, SplitIoError};
+use crate::{Direction, NetConnection, NetReader, NetStream, NetWriter, SplitIo, SplitIoError};
 
 pub type EidolonSession<I, S> = NetProtocol<EidolonRuntime<I>, S>;
 pub type NoiseSession<E, D, S> = NetProtocol<NoiseState<E, D>, S>;
@@ -63,7 +63,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         Ok(Self::with_config::<HASHLEN>(
             remote_addr,
             connection,
-            LinkDirection::Outbound,
+            Direction::Outbound,
             cert,
             allowed_ids,
             signer,
@@ -87,7 +87,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         let mut session = Self::with_config::<HASHLEN>(
             remote_addr,
             connection,
-            LinkDirection::Outbound,
+            Direction::Outbound,
             cert,
             allowed_ids,
             signer,
@@ -106,7 +106,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         Self::with_config::<HASHLEN>(
             connection.remote_addr().into(),
             connection,
-            LinkDirection::Inbound,
+            Direction::Inbound,
             cert,
             allowed_ids,
             signer,
@@ -117,7 +117,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
     fn with_config<const HASHLEN: usize>(
         remote_addr: NetAddr<HostName>,
         connection: TcpStream,
-        direction: LinkDirection,
+        direction: Direction,
         cert: Cert<I::Sig>,
         allowed_ids: Vec<I::Pk>,
         signer: I,
@@ -135,8 +135,8 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
 
         let encoding = NoiseSession::with(proxy, noise);
         let eidolon = match direction {
-            LinkDirection::Inbound => EidolonRuntime::responder(signer, cert, allowed_ids),
-            LinkDirection::Outbound => EidolonRuntime::initiator(signer, cert, allowed_ids),
+            Direction::Inbound => EidolonRuntime::responder(signer, cert, allowed_ids),
+            Direction::Outbound => EidolonRuntime::initiator(signer, cert, allowed_ids),
         };
         EidolonSession::with(encoding, eidolon)
     }
