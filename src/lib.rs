@@ -48,7 +48,7 @@ pub use resource::{ListenerEvent, NetAccept, NetTransport, SessionEvent};
 pub use session::{NetProtocol, NetSession, NetStateMachine};
 pub use split::{NetReader, NetWriter, SplitIo, SplitIoError, TcpReader, TcpWriter};
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub enum Direction {
     Inbound,
     Outbound,
