@@ -20,8 +20,8 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Display};
-use std::io;
 use std::net::TcpStream;
+use std::{error, io};
 
 use cyphernet::addr::{HostName, InetHost, NetAddr};
 use cyphernet::auth::eidolon::EidolonState;
@@ -164,12 +164,20 @@ pub trait NetSession: NetStream + SplitIo {
     fn disconnect(self) -> io::Result<()>;
 }
 
+#[derive(Clone, Debug, Display, Error)]
+#[display("handshake has failed due to {0}")]
+pub struct HandshakeError(String);
+
+impl HandshakeError {
+    fn with(err: impl error::Error) -> Self { HandshakeError(err.to_string()) }
+}
+
 pub trait NetStateMachine: Sized + Send {
     const NAME: &'static str;
 
     type Init: Debug;
     type Artifact;
-    type Error: std::error::Error;
+    type Error: error::Error;
 
     fn init(&mut self, init: Self::Init);
     fn next_read_len(&self) -> usize;
@@ -185,7 +193,7 @@ pub trait NetStateMachine: Sized + Send {
                 #[cfg(feature = "log")]
                 log::error!(target: Self::NAME, "Handshake failure: {err}");
 
-                io::Error::from(io::ErrorKind::ConnectionAborted)
+                io::Error::new(io::ErrorKind::ConnectionAborted, HandshakeError::with(err))
             })?;
             if !act.is_empty() {
                 #[cfg(feature = "log")]
@@ -291,7 +299,7 @@ where S::Artifact: IntoInit<M::Init>
                 #[cfg(feature = "log")]
                 log::error!(target: M::NAME, "Handshake failure: {err}");
 
-                io::Error::from(io::ErrorKind::ConnectionAborted)
+                io::Error::new(io::ErrorKind::ConnectionAborted, HandshakeError::with(err))
             })?;
 
             #[cfg(feature = "log")]
@@ -322,7 +330,7 @@ where S::Artifact: IntoInit<M::Init>
                 #[cfg(feature = "log")]
                 log::error!(target: M::NAME, "Handshake failure: {err}");
 
-                io::Error::from(io::ErrorKind::ConnectionAborted)
+                io::Error::new(io::ErrorKind::ConnectionAborted, HandshakeError::with(err))
             })?;
 
             if !act.is_empty() {
