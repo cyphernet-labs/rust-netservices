@@ -20,31 +20,46 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Display};
+#[cfg(feature = "eidolon")]
 use std::net::TcpStream;
 use std::{error, io};
 
+#[cfg(feature = "eidolon")]
 use cyphernet::addr::{HostName, InetHost, NetAddr};
+#[cfg(feature = "eidolon")]
 use cyphernet::auth::eidolon::EidolonState;
-use cyphernet::encrypt::noise::{HandshakePattern, Keyset, NoiseState};
+use cyphernet::encrypt::noise::NoiseState;
+#[cfg(feature = "eidolon")]
+use cyphernet::encrypt::noise::{HandshakePattern, Keyset};
 use cyphernet::proxy::socks5;
+#[cfg(feature = "eidolon")]
 use cyphernet::{x25519, Cert, Digest, EcSign};
 
-use crate::{Direction, NetConnection, NetReader, NetStream, NetWriter, SplitIo, SplitIoError};
+#[cfg(feature = "eidolon")]
+use crate::Direction;
+use crate::{NetConnection, NetReader, NetStream, NetWriter, SplitIo, SplitIoError};
 
+#[cfg(feature = "eidolon")]
 pub type EidolonSession<I, S> = NetProtocol<EidolonRuntime<I>, S>;
 pub type NoiseSession<E, D, S> = NetProtocol<NoiseState<E, D>, S>;
 pub type Socks5Session<S> = NetProtocol<socks5::Socks5, S>;
 
+#[cfg(feature = "eidolon")]
 pub type CypherSession<I, D> =
     EidolonSession<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
 
+#[cfg(feature = "eidolon")]
 pub type EidolonReader<S> = NetReader<S>;
+#[cfg(feature = "eidolon")]
 pub type EidolonWriter<I, S> = NetWriter<EidolonRuntime<I>, S>;
+#[cfg(feature = "eidolon")]
 pub type CypherReader<D> =
     EidolonReader<NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
+#[cfg(feature = "eidolon")]
 pub type CypherWriter<I, D> =
     EidolonWriter<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
 
+#[cfg(feature = "eidolon")]
 impl<I: EcSign, D: Digest> CypherSession<I, D> {
     #[cfg(feature = "reactor")]
     pub fn connect_nonblocking<const HASHLEN: usize>(
@@ -468,6 +483,7 @@ mod imp_socket2 {
     }
 }
 
+#[cfg(feature = "eidolon")]
 mod imp_eidolon {
     use std::fmt::{self, Display, Formatter};
 
@@ -534,6 +550,7 @@ mod imp_eidolon {
         fn into_init(self) -> Vec<u8> { self.state.to_vec() }
     }
 }
+#[cfg(feature = "eidolon")]
 pub use imp_eidolon::EidolonRuntime;
 
 mod impl_noise {
