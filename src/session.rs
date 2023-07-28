@@ -86,6 +86,35 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         ))
     }
 
+    #[cfg(feature = "reactor")]
+    pub fn connect_reusable_nonblocking<const HASHLEN: usize>(
+        local_addr: NetAddr<InetHost>,
+        remote_addr: NetAddr<HostName>,
+        cert: Cert<I::Sig>,
+        allowed_ids: Vec<I::Pk>,
+        signer: I,
+        proxy_addr: NetAddr<InetHost>,
+        force_proxy: bool,
+    ) -> io::Result<Self> {
+        let connection = if force_proxy {
+            TcpStream::connect_reusable_nonblocking(local_addr, proxy_addr)?
+        } else {
+            TcpStream::connect_reusable_nonblocking(
+                local_addr,
+                remote_addr.connection_addr(proxy_addr),
+            )?
+        };
+        Ok(Self::with_config::<HASHLEN>(
+            remote_addr,
+            connection,
+            Direction::Outbound,
+            cert,
+            allowed_ids,
+            signer,
+            force_proxy,
+        ))
+    }
+
     pub fn connect_blocking<const HASHLEN: usize>(
         remote_addr: NetAddr<HostName>,
         cert: Cert<I::Sig>,
