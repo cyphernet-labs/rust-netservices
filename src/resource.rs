@@ -122,6 +122,19 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
         })
     }
 
+    /// Binds listener to the provided socket address(es) with a given context. Same as
+    /// [`NetAccept::bind`] except that it uses `SO_REUSEADDR`/`SO_REUSEPORT` to enable more
+    /// sockets to bound to the same address.
+    #[cfg(feature = "nonblocking")]
+    pub fn bind_reusable(addr: &impl ToSocketAddrs) -> io::Result<Self> {
+        let listener = L::bind_reusable(addr)?;
+        listener.set_nonblocking(true)?;
+        Ok(Self {
+            listener,
+            _phantom: default!(),
+        })
+    }
+
     /// Returns the local [`net::SocketAddr`] on which listener accepts
     /// connections.
     pub fn local_addr(&self) -> net::SocketAddr { self.listener.local_addr() }
