@@ -75,7 +75,7 @@ impl NetListener for TcpListener {
     fn take_error(&self) -> io::Result<Option<io::Error>> { TcpListener::take_error(self) }
 }
 
-#[cfg(feature = "connect_nonblocking")]
+#[cfg(feature = "nonblocking")]
 impl NetListener for socket2::Socket {
     type Stream = socket2::Socket;
 

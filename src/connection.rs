@@ -45,7 +45,7 @@ pub trait NetConnection: NetStream + AsRawFd + Debug {
     fn connect_blocking(addr: Self::Addr) -> io::Result<Self>
     where Self: Sized;
 
-    #[cfg(feature = "connect_nonblocking")]
+    #[cfg(feature = "nonblocking")]
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self>
     where Self: Sized;
 
@@ -78,7 +78,7 @@ impl NetConnection for TcpStream {
 
     fn connect_blocking(addr: Self::Addr) -> io::Result<Self> { TcpStream::connect(addr) }
 
-    #[cfg(feature = "connect_nonblocking")]
+    #[cfg(feature = "nonblocking")]
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
         Ok(socket2::Socket::connect_nonblocking(addr)?.into())
     }
@@ -128,7 +128,7 @@ impl NetConnection for socket2::Socket {
         TcpStream::connect(addr).map(socket2::Socket::from)
     }
 
-    #[cfg(feature = "connect_nonblocking")]
+    #[cfg(feature = "nonblocking")]
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
         use std::net::ToSocketAddrs;
 
