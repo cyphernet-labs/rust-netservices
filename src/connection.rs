@@ -45,9 +45,17 @@ pub trait NetConnection: NetStream + AsRawFd + Debug {
     fn connect_blocking(addr: Self::Addr) -> io::Result<Self>
     where Self: Sized;
 
-    #[cfg(feature = "connect_nonblocking")]
+    #[cfg(feature = "nonblocking")]
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self>
     where Self: Sized;
+
+    #[cfg(feature = "nonblocking")]
+    fn connect_reusable_nonblocking(
+        local_addr: Self::Addr,
+        remote_addr: Self::Addr,
+    ) -> io::Result<Self>
+    where
+        Self: Sized;
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()>;
 
@@ -78,9 +86,17 @@ impl NetConnection for TcpStream {
 
     fn connect_blocking(addr: Self::Addr) -> io::Result<Self> { TcpStream::connect(addr) }
 
-    #[cfg(feature = "connect_nonblocking")]
+    #[cfg(feature = "nonblocking")]
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
         Ok(socket2::Socket::connect_nonblocking(addr)?.into())
+    }
+
+    #[cfg(feature = "nonblocking")]
+    fn connect_reusable_nonblocking(
+        local_addr: Self::Addr,
+        remote_addr: Self::Addr,
+    ) -> io::Result<Self> {
+        Ok(socket2::Socket::connect_reusable_nonblocking(local_addr, remote_addr)?.into())
     }
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> { TcpStream::shutdown(self, how) }
@@ -128,7 +144,7 @@ impl NetConnection for socket2::Socket {
         TcpStream::connect(addr).map(socket2::Socket::from)
     }
 
-    #[cfg(feature = "connect_nonblocking")]
+    #[cfg(feature = "nonblocking")]
     fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
         use std::net::ToSocketAddrs;
 
@@ -157,6 +173,55 @@ impl NetConnection for socket2::Socket {
             Err(e) => {
                 #[cfg(feature = "log")]
                 log::debug!(target: "netservices", "Error connecting to {}: {}", addr, e);
+                return Err(e);
+            }
+        }
+        Ok(socket)
+    }
+
+    fn connect_reusable_nonblocking(
+        local_addr: Self::Addr,
+        remote_addr: Self::Addr,
+    ) -> io::Result<Self> {
+        use std::net::ToSocketAddrs;
+
+        let local_addr = local_addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::InvalidInput)?;
+        let remote_addr =
+            remote_addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
+        let socket = socket2::Socket::new(
+            socket2::Domain::for_address(local_addr),
+            socket2::Type::STREAM,
+            None,
+        )?;
+        socket.set_nonblocking(true)?;
+        socket.set_reuse_address(true)?;
+        #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
+        {
+            socket.set_reuse_port(true)?;
+        }
+        socket2::Socket::bind(&socket, &local_addr.into())?;
+
+        match socket2::Socket::connect(&socket, &remote_addr.into()) {
+            Ok(()) => {
+                #[cfg(feature = "log")]
+                log::debug!(target: "netservices", "Connected to {}", remote_addr);
+            }
+            Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {
+                #[cfg(feature = "log")]
+                log::debug!(target: "netservices", "Connecting to {} in a non-blocking way", remote_addr);
+            }
+            Err(e) if e.raw_os_error() == Some(libc::EALREADY) => {
+                #[cfg(feature = "log")]
+                log::error!(target: "netservices", "Can't connect to {}: address already in use", remote_addr);
+                return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                #[cfg(feature = "log")]
+                log::error!(target: "netservices", "Can't connect to {} in a non-blocking way", remote_addr);
+            }
+            Err(e) => {
+                #[cfg(feature = "log")]
+                log::debug!(target: "netservices", "Error connecting to {}: {}", remote_addr, e);
                 return Err(e);
             }
         }

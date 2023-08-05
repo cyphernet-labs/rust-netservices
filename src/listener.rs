@@ -31,6 +31,10 @@ pub trait NetListener: AsRawFd + Send {
     fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self>
     where Self: Sized;
 
+    #[cfg(feature = "nonblocking")]
+    fn bind_reusable(addr: &impl ToSocketAddrs) -> io::Result<Self>
+    where Self: Sized;
+
     fn accept(&self) -> io::Result<Self::Stream>;
 
     fn local_addr(&self) -> SocketAddr;
@@ -51,6 +55,18 @@ impl NetListener for TcpListener {
     fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self>
     where Self: Sized {
         TcpListener::bind(addr)
+    }
+
+    #[cfg(feature = "nonblocking")]
+    fn bind_reusable(addr: &impl ToSocketAddrs) -> io::Result<Self>
+    where Self: Sized {
+        // This is the default used by std::net::TcpListener at the time of writing. Unfortunately
+        // the standard library doesn't export this value so we have to hard-code it here.
+        const BACKLOG: i32 = 128;
+
+        let socket = socket2::Socket::bind_reusable(addr)?;
+        socket.listen(BACKLOG)?;
+        Ok(TcpListener::from(socket))
     }
 
     fn accept(&self) -> io::Result<Self::Stream> { Ok(TcpListener::accept(self)?.0) }
@@ -75,7 +91,7 @@ impl NetListener for TcpListener {
     fn take_error(&self) -> io::Result<Option<io::Error>> { TcpListener::take_error(self) }
 }
 
-#[cfg(feature = "connect_nonblocking")]
+#[cfg(feature = "nonblocking")]
 impl NetListener for socket2::Socket {
     type Stream = socket2::Socket;
 
@@ -84,6 +100,20 @@ impl NetListener for socket2::Socket {
         let addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::InvalidInput)?;
         let socket =
             socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
+        socket2::Socket::bind(&socket, &addr.into())?;
+        Ok(socket)
+    }
+
+    fn bind_reusable(addr: &impl ToSocketAddrs) -> io::Result<Self>
+    where Self: Sized {
+        let addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::InvalidInput)?;
+        let socket =
+            socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
+        socket.set_reuse_address(true)?;
+        #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
+        {
+            socket.set_reuse_port(true)?;
+        }
         socket2::Socket::bind(&socket, &addr.into())?;
         Ok(socket)
     }

@@ -138,7 +138,7 @@ impl SplitIo for TcpStream {
     }
 }
 
-#[cfg(feature = "connect_nonblocking")]
+#[cfg(feature = "nonblocking")]
 impl SplitIo for socket2::Socket {
     type Read = TcpReader<Self>;
     type Write = TcpWriter<Self>;
