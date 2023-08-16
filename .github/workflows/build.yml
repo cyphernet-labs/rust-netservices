@@ -31,7 +31,7 @@ jobs:
       matrix:
         feature:
           - reactor
-          - connect_nonblocking
+          - nonblocking
           - mio
           - log
     steps:
