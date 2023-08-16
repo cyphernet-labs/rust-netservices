@@ -69,11 +69,12 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         signer: I,
         proxy_addr: NetAddr<InetHost>,
         force_proxy: bool,
+        timeout: std::time::Duration,
     ) -> io::Result<Self> {
         let connection = if force_proxy {
-            TcpStream::connect_nonblocking(proxy_addr)?
+            TcpStream::connect_nonblocking(proxy_addr, timeout)?
         } else {
-            TcpStream::connect_nonblocking(remote_addr.connection_addr(proxy_addr))?
+            TcpStream::connect_nonblocking(remote_addr.connection_addr(proxy_addr), timeout)?
         };
         Ok(Self::with_config::<HASHLEN>(
             remote_addr,

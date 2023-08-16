@@ -46,7 +46,7 @@ pub trait NetConnection: NetStream + AsRawFd + Debug {
     where Self: Sized;
 
     #[cfg(feature = "nonblocking")]
-    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self>
+    fn connect_nonblocking(addr: Self::Addr, timeout: Duration) -> io::Result<Self>
     where Self: Sized;
 
     #[cfg(feature = "nonblocking")]
@@ -87,8 +87,8 @@ impl NetConnection for TcpStream {
     fn connect_blocking(addr: Self::Addr) -> io::Result<Self> { TcpStream::connect(addr) }
 
     #[cfg(feature = "nonblocking")]
-    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
-        Ok(socket2::Socket::connect_nonblocking(addr)?.into())
+    fn connect_nonblocking(addr: Self::Addr, timeout: Duration) -> io::Result<Self> {
+        Ok(socket2::Socket::connect_nonblocking(addr, timeout)?.into())
     }
 
     #[cfg(feature = "nonblocking")]
@@ -145,14 +145,14 @@ impl NetConnection for socket2::Socket {
     }
 
     #[cfg(feature = "nonblocking")]
-    fn connect_nonblocking(addr: Self::Addr) -> io::Result<Self> {
+    fn connect_nonblocking(addr: Self::Addr, timeout: Duration) -> io::Result<Self> {
         use std::net::ToSocketAddrs;
 
         let addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
         let socket =
             socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
         socket.set_nonblocking(true)?;
-        match socket2::Socket::connect(&socket, &addr.into()) {
+        match socket2::Socket::connect_timeout(&socket, &addr.into(), timeout) {
             Ok(()) => {
                 #[cfg(feature = "log")]
                 log::debug!(target: "netservices", "Connected to {}", addr);
