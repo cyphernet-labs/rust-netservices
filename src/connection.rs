@@ -22,7 +22,7 @@
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::io;
-use std::net::{Shutdown, TcpStream};
+use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
@@ -42,7 +42,7 @@ pub trait AsConnection {
 pub trait NetConnection: NetStream + AsRawFd + Debug {
     type Addr: Address;
 
-    fn connect_blocking(addr: Self::Addr) -> io::Result<Self>
+    fn connect_blocking(addr: Self::Addr, timeout: Duration) -> io::Result<Self>
     where Self: Sized;
 
     #[cfg(feature = "nonblocking")]
@@ -84,7 +84,10 @@ impl NetStream for TcpStream {}
 impl NetConnection for TcpStream {
     type Addr = NetAddr<InetHost>;
 
-    fn connect_blocking(addr: Self::Addr) -> io::Result<Self> { TcpStream::connect(addr) }
+    fn connect_blocking(addr: Self::Addr, timeout: Duration) -> io::Result<Self> {
+        let socket_addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
+        TcpStream::connect_timeout(&socket_addr, timeout)
+    }
 
     #[cfg(feature = "nonblocking")]
     fn connect_nonblocking(addr: Self::Addr, timeout: Duration) -> io::Result<Self> {
@@ -140,14 +143,12 @@ impl NetStream for socket2::Socket {}
 impl NetConnection for socket2::Socket {
     type Addr = NetAddr<InetHost>;
 
-    fn connect_blocking(addr: Self::Addr) -> io::Result<Self> {
-        TcpStream::connect(addr).map(socket2::Socket::from)
+    fn connect_blocking(addr: Self::Addr, timeout: Duration) -> io::Result<Self> {
+        TcpStream::connect_blocking(addr, timeout).map(socket2::Socket::from)
     }
 
     #[cfg(feature = "nonblocking")]
     fn connect_nonblocking(addr: Self::Addr, timeout: Duration) -> io::Result<Self> {
-        use std::net::ToSocketAddrs;
-
         let addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
         let socket =
             socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
@@ -183,8 +184,6 @@ impl NetConnection for socket2::Socket {
         local_addr: Self::Addr,
         remote_addr: Self::Addr,
     ) -> io::Result<Self> {
-        use std::net::ToSocketAddrs;
-
         let local_addr = local_addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::InvalidInput)?;
         let remote_addr =
             remote_addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
