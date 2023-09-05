@@ -31,7 +31,7 @@ jobs:
       matrix:
         feature:
           - reactor
-          - connect_nonblocking
+          - nonblocking
           - mio
           - log
     steps:
@@ -80,7 +80,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [ nightly, beta, stable, 1.65.0 ]
+        toolchain: [ nightly, beta, stable, 1.66.0 ]
     steps:
       - uses: actions/checkout@v2
       - name: Install rust ${{ matrix.toolchain }}

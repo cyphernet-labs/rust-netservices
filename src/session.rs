@@ -22,6 +22,8 @@
 use std::fmt::{Debug, Display};
 #[cfg(feature = "eidolon")]
 use std::net::TcpStream;
+#[cfg(feature = "eidolon")]
+use std::time::Duration;
 use std::{error, io};
 
 #[cfg(feature = "eidolon")]
@@ -69,11 +71,12 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         signer: I,
         proxy_addr: NetAddr<InetHost>,
         force_proxy: bool,
+        timeout: Duration,
     ) -> io::Result<Self> {
         let connection = if force_proxy {
-            TcpStream::connect_nonblocking(proxy_addr)?
+            TcpStream::connect_nonblocking(proxy_addr, timeout)?
         } else {
-            TcpStream::connect_nonblocking(remote_addr.connection_addr(proxy_addr))?
+            TcpStream::connect_nonblocking(remote_addr.connection_addr(proxy_addr), timeout)?
         };
         Ok(Self::with_config::<HASHLEN>(
             remote_addr,
@@ -122,11 +125,12 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         signer: I,
         proxy_addr: NetAddr<InetHost>,
         force_proxy: bool,
+        timeout: Duration,
     ) -> io::Result<Self> {
         let connection = if force_proxy {
-            TcpStream::connect_blocking(proxy_addr)?
+            TcpStream::connect_blocking(proxy_addr, timeout)?
         } else {
-            TcpStream::connect_blocking(remote_addr.connection_addr(proxy_addr))?
+            TcpStream::connect_blocking(remote_addr.connection_addr(proxy_addr), timeout)?
         };
         let mut session = Self::with_config::<HASHLEN>(
             remote_addr,
