@@ -323,7 +323,7 @@ dependencies = [
 [[package]]
 name = "io-reactor"
 version = "0.2.1"
-source = "git+https://github.com/rust-amplify/io-reactor?branch=resourceid#c4015910cd5ed4a4629993868b9c721ec3abb4f3"
+source = "git+https://github.com/rust-amplify/io-reactor?branch=resourceid#8244a415235f9411635ddebeb5f461b70058df41"
 dependencies = [
  "amplify",
  "crossbeam-channel",

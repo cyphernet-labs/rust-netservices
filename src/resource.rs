@@ -202,7 +202,10 @@ pub enum TransportState {
 /// Error indicating that method [`NetTransport::set_resource_id`] was called more than once.
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Display, Error)]
 #[display("an attempt to re-assign resource id to {new} for net transport {current}.")]
-pub struct ResIdReassigned { current: ResourceId, new: ResourceId }
+pub struct ResIdReassigned {
+    current: ResourceId,
+    new: ResourceId,
+}
 
 /// Net transport is an adaptor around specific [`NetSession`] (implementing
 /// session management, including optional handshake, encoding etc) to be used
@@ -215,8 +218,6 @@ pub struct NetTransport<S: NetSession> {
     write_intent: bool,
     read_buffer: Box<[u8; HEAP_BUFFER_SIZE]>,
     write_buffer: VecDeque<u8>,
-    /// Resource id assigned by the reactor
-    id: Option<ResourceId>
 }
 
 impl<S: NetSession> Display for NetTransport<S> {
@@ -260,7 +261,6 @@ impl<S: NetSession> NetTransport<S> {
             write_intent: true,
             read_buffer: Box::new([0u8; READ_BUFFER_SIZE]),
             write_buffer: empty!(),
-            id: None,
         })
     }
 
@@ -300,28 +300,10 @@ impl<S: NetSession> NetTransport<S> {
             write_intent: false,
             read_buffer: Box::new([0u8; READ_BUFFER_SIZE]),
             write_buffer: empty!(),
-            id: None,
         })
     }
 
-    pub fn display(&self) -> impl Display {
-        match self.id {
-            None => self.session.display(),
-            Some(id) => id.to_string()
-        }
-    }
-
-    pub fn resource_id(&self) -> Option<ResourceId> {
-        self.id
-    }
-
-    pub fn set_resource_id(&mut self, id: ResourceId) -> Result<(), ResIdReassigned> {
-        if let Some(current) = self.id {
-            return Err(ResIdReassigned { current, new: id })
-        }
-        self.id = Some(id);
-        Ok(())
-    }
+    pub fn display(&self) -> impl Display { self.session.display() }
 
     pub fn state(&self) -> TransportState { self.state }
     pub fn is_active(&self) -> bool { self.state == TransportState::Active }
