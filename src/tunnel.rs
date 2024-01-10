@@ -73,8 +73,8 @@ impl<S: NetSession> Tunnel<S> {
 
         let int_fd = stream.as_raw_fd();
         let ext_fd = self.session.as_connection().as_raw_fd();
-        poller.register(&int_fd, IoType::read_only());
-        poller.register(&ext_fd, IoType::read_only());
+        let int_id = poller.register(&int_fd, IoType::read_only());
+        let ext_id = poller.register(&ext_fd, IoType::read_only());
 
         let mut in_buf = VecDeque::<u8>::new();
         let mut out_buf = VecDeque::<u8>::new();
@@ -116,7 +116,7 @@ impl<S: NetSession> Tunnel<S> {
                 log::warn!(target: "tunnel", "Tunnel {listener_addr} timed out with client {socket_addr}");
                 return Err(io::ErrorKind::TimedOut.into());
             }
-            while let Some((fd, res)) = poller.next() {
+            while let Some((id, res)) = poller.next() {
                 let ev = match res {
                     Ok(ev) => ev,
                     Err(IoFail::Connectivity(code)) => {
@@ -130,7 +130,7 @@ impl<S: NetSession> Tunnel<S> {
                         return Err(io::ErrorKind::BrokenPipe.into());
                     }
                 };
-                if fd == int_fd {
+                if id == int_id {
                     if ev.write {
                         #[cfg(feature = "log")]
                         log::trace!(target: "tunnel", "attempting to write {} bytes received from the remote {socket_addr}", in_buf.len());
@@ -140,7 +140,7 @@ impl<S: NetSession> Tunnel<S> {
                             in_buf.drain(..written);
                             in_count += written;
                             if in_buf.is_empty() {
-                                poller.set_interest(&int_fd, IoType::read_only());
+                                poller.set_interest(int_id, IoType::read_only());
                             }
                             #[cfg(feature = "log")]
                             log::trace!(target: "tunnel", "{socket_addr} received {written} bytes from local out of {} buffered", in_buf.len());
@@ -152,12 +152,12 @@ impl<S: NetSession> Tunnel<S> {
 
                         handle!(stream.read(&mut buf), |read| {
                             out_buf.extend(&buf[..read]);
-                            poller.set_interest(&ext_fd, IoType::read_write());
+                            poller.set_interest(ext_id, IoType::read_write());
                             #[cfg(feature = "log")]
                             log::trace!(target: "tunnel", "{socket_addr} read {read} bytes from local ({} total in the buffer)", out_buf.len());
                         });
                     }
-                } else if fd == ext_fd {
+                } else if id == ext_id {
                     if ev.write {
                         #[cfg(feature = "log")]
                         log::trace!(target: "tunnel", "attempting to write {} bytes received from {socket_addr} to remote", out_buf.len());
@@ -167,7 +167,7 @@ impl<S: NetSession> Tunnel<S> {
                             out_buf.drain(..written);
                             out_count += written;
                             if out_buf.is_empty() {
-                                poller.set_interest(&ext_fd, IoType::read_only());
+                                poller.set_interest(ext_id, IoType::read_only());
                             }
                             #[cfg(feature = "log")]
                             log::trace!(target: "tunnel", "{socket_addr} sent {written} bytes to remote out of {} buffered", out_buf.len());
@@ -179,7 +179,7 @@ impl<S: NetSession> Tunnel<S> {
 
                         handle!(self.session.read(&mut buf), |read| {
                             in_buf.extend(&buf[..read]);
-                            poller.set_interest(&int_fd, IoType::read_write());
+                            poller.set_interest(int_id, IoType::read_write());
                             #[cfg(feature = "log")]
                             log::trace!(target: "tunnel", "{socket_addr} read {read} bytes from remote ({} total in the buffer)", in_buf.len());
                         });

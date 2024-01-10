@@ -41,7 +41,7 @@ use std::time::Duration;
 use std::{fmt, io, net};
 
 use reactor::poller::IoType;
-use reactor::{Io, Resource, WriteAtomic, WriteError};
+use reactor::{Io, Resource, ResourceId, WriteAtomic, WriteError};
 
 use crate::{Direction, NetConnection, NetListener, NetSession, READ_BUFFER_SIZE};
 
@@ -151,10 +151,7 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
 impl<L: NetListener<Stream = S::Connection>, S: NetSession> Resource for NetAccept<S, L>
 where S: Send
 {
-    type Id = net::SocketAddr;
     type Event = ListenerEvent<S>;
-
-    fn id(&self) -> Self::Id { self.listener.local_addr() }
 
     fn interests(&self) -> IoType { IoType::read_only() }
 
@@ -172,7 +169,7 @@ where S: Send
 /// An event happening for a [`NetTransport`] network transport and delivered to
 /// a [`reactor::Handler`].
 pub enum SessionEvent<S: NetSession> {
-    Established(S::Artifact),
+    Established(RawFd, S::Artifact),
     Data(Vec<u8>),
     Terminated(io::Error),
 }
@@ -200,6 +197,14 @@ pub enum TransportState {
     /// authentication problem etc. Reading and writing from the resource in
     /// this state will result in an error ([`io::Error`]).
     Terminated,
+}
+
+/// Error indicating that method [`NetTransport::set_resource_id`] was called more than once.
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Display, Error)]
+#[display("an attempt to re-assign resource id to {new} for net transport {current}.")]
+pub struct ResIdReassigned {
+    current: ResourceId,
+    new: ResourceId,
 }
 
 /// Net transport is an adaptor around specific [`NetSession`] (implementing
@@ -298,6 +303,8 @@ impl<S: NetSession> NetTransport<S> {
         })
     }
 
+    pub fn display(&self) -> impl Display { self.session.display() }
+
     pub fn state(&self) -> TransportState { self.state }
     pub fn is_active(&self) -> bool { self.state == TransportState::Active }
 
@@ -345,7 +352,7 @@ impl<S: NetSession> NetTransport<S> {
                 .contains(&err.kind()) =>
             {
                 #[cfg(feature = "log")]
-                log::warn!(target: "transport", "Resource {} was not able to consume any data even though it has announced its write readiness", self.id());
+                log::warn!(target: "transport", "Resource {} was not able to consume any data even though it has announced its write readiness", self.display());
                 self.write_intent = true;
                 None
             }
@@ -379,7 +386,7 @@ impl<S: NetSession> NetTransport<S> {
     fn flush_buffer(&mut self) -> io::Result<()> {
         let orig_len = self.write_buffer.len();
         #[cfg(feature = "log")]
-        log::trace!(target: "transport", "Resource {} is flushing its buffer of {orig_len} bytes", self.id());
+        log::trace!(target: "transport", "Resource {} is flushing its buffer of {orig_len} bytes", self.display());
         let len =
             self.session.write(self.write_buffer.make_contiguous()).or_else(|err| {
                 match err.kind() {
@@ -388,23 +395,23 @@ impl<S: NetSession> NetTransport<S> {
                     | io::ErrorKind::WriteZero
                     | io::ErrorKind::Interrupted => {
                         #[cfg(feature = "log")]
-                        log::warn!(target: "transport", "Resource {} kernel buffer is fulled (system message is '{err}')", self.id());
+                        log::warn!(target: "transport", "Resource {} kernel buffer is fulled (system message is '{err}')", self.display());
                         Ok(0)
                     },
                     _ => {
                         #[cfg(feature = "log")]
-                        log::error!(target: "transport", "Resource {} failed write operation with message '{err}'", self.id());
+                        log::error!(target: "transport", "Resource {} failed write operation with message '{err}'", self.display());
                         Err(err)
                     },
                 }
             })?;
         if orig_len > len {
             #[cfg(feature = "log")]
-            log::debug!(target: "transport", "Resource {} was able to consume only a part of the buffered data ({len} of {orig_len} bytes)", self.id());
+            log::debug!(target: "transport", "Resource {} was able to consume only a part of the buffered data ({len} of {orig_len} bytes)", self.display());
             self.write_intent = true;
         } else {
             #[cfg(feature = "log")]
-            log::trace!(target: "transport", "Resource {} was able to consume all of the buffered data ({len} of {orig_len} bytes)", self.id());
+            log::trace!(target: "transport", "Resource {} was able to consume all of the buffered data ({len} of {orig_len} bytes)", self.display());
             self.write_intent = false;
         }
         self.write_buffer.drain(..len);
@@ -413,11 +420,7 @@ impl<S: NetSession> NetTransport<S> {
 }
 
 impl<S: NetSession> Resource for NetTransport<S> {
-    // TODO: Use S::Artifact instead
-    type Id = RawFd;
     type Event = SessionEvent<S>;
-
-    fn id(&self) -> Self::Id { self.session.as_connection().as_raw_fd() }
 
     fn interests(&self) -> IoType {
         match self.state {
@@ -474,6 +477,7 @@ impl<S: NetSession> Resource for NetTransport<S> {
             self.write_intent = true;
             self.state = TransportState::Active;
             Some(SessionEvent::Established(
+                self.as_raw_fd(),
                 self.session.artifact().expect("session is established"),
             ))
         } else {
