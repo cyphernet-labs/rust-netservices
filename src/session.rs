@@ -150,16 +150,16 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         cert: Cert<I::Sig>,
         allowed_ids: Vec<I::Pk>,
         signer: I,
-    ) -> Self {
-        Self::with_config::<HASHLEN>(
-            connection.remote_addr().into(),
+    ) -> io::Result<Self> {
+        Ok(Self::with_config::<HASHLEN>(
+            connection.remote_addr()?.into(),
             connection,
             Direction::Inbound,
             cert,
             allowed_ids,
             signer,
             false,
-        )
+        ))
     }
 
     fn with_config<const HASHLEN: usize>(
