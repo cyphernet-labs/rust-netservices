@@ -497,7 +497,7 @@ impl<S: NetSession> Write for NetTransport<S> {
 
     fn flush(&mut self) -> io::Result<()> {
         let res = self.flush_buffer();
-        self.session.flush().and_then(|_| res)
+        self.session.flush().and(res)
     }
 }
 
