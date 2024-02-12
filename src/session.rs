@@ -150,16 +150,16 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
         cert: Cert<I::Sig>,
         allowed_ids: Vec<I::Pk>,
         signer: I,
-    ) -> Self {
-        Self::with_config::<HASHLEN>(
-            connection.remote_addr().into(),
+    ) -> io::Result<Self> {
+        Ok(Self::with_config::<HASHLEN>(
+            connection.remote_addr()?.into(),
             connection,
             Direction::Inbound,
             cert,
             allowed_ids,
             signer,
             false,
-        )
+        ))
     }
 
     fn with_config<const HASHLEN: usize>(
@@ -610,9 +610,9 @@ mod impl_noise {
         pub fn to_vec(&self) -> Vec<u8> {
             let mut vec = Vec::<u8>::with_capacity(D::OUTPUT_LEN + E::Pk::COMPRESSED_LEN);
             vec.extend_from_slice(self.handshake_hash.as_ref());
-            self.remote_static_key
-                .as_ref()
-                .map(|pk| vec.extend_from_slice(pk.to_pk_compressed().as_ref()));
+            if let Some(pk) = self.remote_static_key.as_ref() {
+                vec.extend_from_slice(pk.to_pk_compressed().as_ref())
+            }
             vec
         }
     }

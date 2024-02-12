@@ -59,8 +59,8 @@ pub trait NetConnection: NetStream + AsRawFd + Debug {
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()>;
 
-    fn remote_addr(&self) -> Self::Addr;
-    fn local_addr(&self) -> Self::Addr;
+    fn remote_addr(&self) -> io::Result<Self::Addr>;
+    fn local_addr(&self) -> io::Result<Self::Addr>;
 
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()>;
     fn set_write_timeout(&mut self, dur: Option<Duration>) -> io::Result<()>;
@@ -104,13 +104,9 @@ impl NetConnection for TcpStream {
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> { TcpStream::shutdown(self, how) }
 
-    fn remote_addr(&self) -> Self::Addr {
-        TcpStream::peer_addr(self).expect("TCP stream doesn't know remote peer address").into()
-    }
+    fn remote_addr(&self) -> io::Result<Self::Addr> { Ok(TcpStream::peer_addr(self)?.into()) }
 
-    fn local_addr(&self) -> Self::Addr {
-        TcpStream::local_addr(self).expect("TCP stream doesn't has local address").into()
-    }
+    fn local_addr(&self) -> io::Result<Self::Addr> { Ok(TcpStream::local_addr(self)?.into()) }
 
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
         TcpStream::set_read_timeout(self, dur)
@@ -229,20 +225,18 @@ impl NetConnection for socket2::Socket {
 
     fn shutdown(&mut self, how: Shutdown) -> io::Result<()> { socket2::Socket::shutdown(self, how) }
 
-    fn remote_addr(&self) -> Self::Addr {
-        socket2::Socket::peer_addr(self)
-            .expect("net stream must use only connections")
+    fn remote_addr(&self) -> io::Result<Self::Addr> {
+        Ok(socket2::Socket::peer_addr(self)?
             .as_socket()
-            .expect("net stream must use only connections")
-            .into()
+            .ok_or::<io::Error>(io::ErrorKind::NotFound.into())?
+            .into())
     }
 
-    fn local_addr(&self) -> Self::Addr {
-        socket2::Socket::local_addr(self)
-            .expect("net stream doesn't has local socket")
+    fn local_addr(&self) -> io::Result<Self::Addr> {
+        Ok(socket2::Socket::local_addr(self)?
             .as_socket()
-            .expect("net stream doesn't has local socket")
-            .into()
+            .ok_or::<io::Error>(io::ErrorKind::NotFound.into())?
+            .into())
     }
 
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {

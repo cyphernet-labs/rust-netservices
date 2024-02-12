@@ -312,7 +312,7 @@ impl<S: NetSession> NetTransport<S> {
     pub fn is_outbound(&self) -> bool { self.link_direction() == Direction::Outbound }
     pub fn link_direction(&self) -> Direction { self.link_direction }
 
-    pub fn local_addr(&self) -> <S::Connection as NetConnection>::Addr {
+    pub fn local_addr(&self) -> io::Result<<S::Connection as NetConnection>::Addr> {
         self.session.as_connection().local_addr()
     }
 
@@ -497,7 +497,7 @@ impl<S: NetSession> Write for NetTransport<S> {
 
     fn flush(&mut self) -> io::Result<()> {
         let res = self.flush_buffer();
-        self.session.flush().and_then(|_| res)
+        self.session.flush().and(res)
     }
 }
 
