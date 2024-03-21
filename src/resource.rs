@@ -112,7 +112,6 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
     /// specific transport layer and are automatically injected into the
     /// new sessions constructed by this listener before they are inserted into
     /// the [`reactor`] and notifications are delivered to [`reactor::Handler`].
-    /// The injection is made by calling [`NetSession::accept`] method.
     pub fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self> {
         let listener = L::bind(addr)?;
         listener.set_nonblocking(true)?;
