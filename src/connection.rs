@@ -144,12 +144,13 @@ impl NetConnection for socket2::Socket {
     }
 
     #[cfg(feature = "nonblocking")]
-    fn connect_nonblocking(addr: Self::Addr, timeout: Duration) -> io::Result<Self> {
+    fn connect_nonblocking(addr: Self::Addr, _timeout: Duration) -> io::Result<Self> {
         let addr = addr.to_socket_addrs()?.next().ok_or(io::ErrorKind::AddrNotAvailable)?;
         let socket =
             socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
         socket.set_nonblocking(true)?;
-        match socket2::Socket::connect_timeout(&socket, &addr.into(), timeout) {
+
+        match socket2::Socket::connect(&socket, &addr.into()) {
             Ok(()) => {
                 #[cfg(feature = "log")]
                 log::debug!(target: "netservices", "Connected to {}", addr);
