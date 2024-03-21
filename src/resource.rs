@@ -199,14 +199,6 @@ pub enum TransportState {
     Terminated,
 }
 
-/// Error indicating that method [`NetTransport::set_resource_id`] was called more than once.
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Display, Error)]
-#[display("an attempt to re-assign resource id to {new} for net transport {current}.")]
-pub struct ResIdReassigned {
-    current: ResourceId,
-    new: ResourceId,
-}
-
 /// Net transport is an adaptor around specific [`NetSession`] (implementing
 /// session management, including optional handshake, encoding etc) to be used
 /// as a transport resource in a [`reactor::Reactor`].
