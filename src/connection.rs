@@ -149,7 +149,8 @@ impl NetConnection for socket2::Socket {
         let socket =
             socket2::Socket::new(socket2::Domain::for_address(addr), socket2::Type::STREAM, None)?;
         socket.set_nonblocking(true)?;
-        match socket2::Socket::connect_timeout(&socket, &addr.into(), timeout) {
+        // TODO: Support timeouts
+        match socket2::Socket::connect(&socket, &addr.into()) {
             Ok(()) => {
                 #[cfg(feature = "log")]
                 log::debug!(target: "netservices", "Connected to {}", addr);
