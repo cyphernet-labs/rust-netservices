@@ -30,7 +30,7 @@ log_crate = { package = "log", version = "0.4.17" }
 [features]
 default = ["reactor", "socket2"]
 all = ["reactor", "nonblocking", "eidolon", "mio", "log"]
-eidolon = ["cyphernet/eidolon"]
+eidolon = ["cyphernet/eidolon", "cyphernet/x25519"]
 reactor = ["io-reactor", "nonblocking"]
 nonblocking = ["socket2"]
 log = ["log_crate", "io-reactor/log"]
