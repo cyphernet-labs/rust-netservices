@@ -196,7 +196,7 @@ checksum = "f3b7eb4404b8195a9abb6356f4ac07d8ba267045c8d6d220ac4dc992e6cc75df"
 [[package]]
 name = "cypheraddr"
 version = "0.3.0"
-source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#2db9a908df4a3200f6972b5b50c77eedc176c9ff"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#f49d780424b9dc73d96cb4a74655cb4584827c54"
 dependencies = [
  "amplify",
  "base32",
@@ -207,7 +207,7 @@ dependencies = [
 [[package]]
 name = "cyphergraphy"
 version = "0.3.0"
-source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#2db9a908df4a3200f6972b5b50c77eedc176c9ff"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#f49d780424b9dc73d96cb4a74655cb4584827c54"
 dependencies = [
  "amplify",
  "ec25519",
@@ -218,7 +218,7 @@ dependencies = [
 [[package]]
 name = "cyphernet"
 version = "0.5.0"
-source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#2db9a908df4a3200f6972b5b50c77eedc176c9ff"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#f49d780424b9dc73d96cb4a74655cb4584827c54"
 dependencies = [
  "cypheraddr",
  "cyphergraphy",
@@ -286,7 +286,7 @@ dependencies = [
 [[package]]
 name = "eidolon-auth"
 version = "0.2.0"
-source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#2db9a908df4a3200f6972b5b50c77eedc176c9ff"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#f49d780424b9dc73d96cb4a74655cb4584827c54"
 dependencies = [
  "amplify",
  "cyphergraphy",
@@ -409,7 +409,7 @@ dependencies = [
 [[package]]
 name = "noise-framework"
 version = "0.3.0"
-source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#2db9a908df4a3200f6972b5b50c77eedc176c9ff"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#f49d780424b9dc73d96cb4a74655cb4584827c54"
 dependencies = [
  "amplify",
  "chacha20poly1305",
@@ -542,7 +542,7 @@ dependencies = [
 [[package]]
 name = "socks5-client"
 version = "0.4.0"
-source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#2db9a908df4a3200f6972b5b50c77eedc176c9ff"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#f49d780424b9dc73d96cb4a74655cb4584827c54"
 dependencies = [
  "amplify",
  "cypheraddr",
