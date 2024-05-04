@@ -57,6 +57,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrayvec"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
+
+[[package]]
 name = "ascii"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -75,18 +81,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23ce669cd6c8588f79e15cf450314f9638f967fc5770ff1c7c1deb0925ea7cfa"
 
 [[package]]
-name = "bitcoin-internals"
-version = "0.2.0"
+name = "bitcoin-io"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9425c3bf7089c983facbae04de54513cce73b41c7f9ff8c845b54e7bc64ebbfb"
+checksum = "340e09e8399c7bd8912f495af6aa58bea0c9214773417ffaa8f6460f93aaee56"
 
 [[package]]
 name = "bitcoin_hashes"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1930a4dabfebb8d7d9992db18ebe3ae2876f0a305fab206fd168df931ede293b"
+checksum = "bb18c03d0db0247e147a21a6faafd5a7eb851c743db062de72018b6b7e8e4d16"
 dependencies = [
- "bitcoin-internals",
+ "bitcoin-io",
  "hex-conservative",
 ]
 
@@ -190,8 +196,7 @@ checksum = "f3b7eb4404b8195a9abb6356f4ac07d8ba267045c8d6d220ac4dc992e6cc75df"
 [[package]]
 name = "cypheraddr"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e64c60d980ec55006d2a1229923a5fa73046de824455569cccb6cb2e4a64ae31"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#2db9a908df4a3200f6972b5b50c77eedc176c9ff"
 dependencies = [
  "amplify",
  "base32",
@@ -201,9 +206,8 @@ dependencies = [
 
 [[package]]
 name = "cyphergraphy"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c8e45921460ef188da680742fd641f9b2a85d0de6bce12ce26e64c0f4913b41"
+version = "0.3.0"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#2db9a908df4a3200f6972b5b50c77eedc176c9ff"
 dependencies = [
  "amplify",
  "ec25519",
@@ -213,9 +217,8 @@ dependencies = [
 
 [[package]]
 name = "cyphernet"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f8be7cc6e24cfea2c126bddaaddfd3c3054865b4cd52882eae9dfea6ee8aac1"
+version = "0.5.0"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#2db9a908df4a3200f6972b5b50c77eedc176c9ff"
 dependencies = [
  "cypheraddr",
  "cyphergraphy",
@@ -283,8 +286,7 @@ dependencies = [
 [[package]]
 name = "eidolon-auth"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a764411b1ee8bcacb5203d24e9f0b2d192be62b23ea1c16d0e3462e103f3ffc"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#2db9a908df4a3200f6972b5b50c77eedc176c9ff"
 dependencies = [
  "amplify",
  "cyphergraphy",
@@ -313,9 +315,12 @@ dependencies = [
 
 [[package]]
 name = "hex-conservative"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30ed443af458ccb6d81c1e7e661545f94d3176752fb1df2f543b902a1e0f51e2"
+checksum = "e1aa273bf451e37ed35ced41c71a5e2a4e29064afb104158f2514bcd71c2c986"
+dependencies = [
+ "arrayvec",
+]
 
 [[package]]
 name = "inout"
@@ -404,8 +409,7 @@ dependencies = [
 [[package]]
 name = "noise-framework"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1bff54756fd54be6b45e160390d5ec3462331c2bf2aae26df78b4833e1206bb"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#2db9a908df4a3200f6972b5b50c77eedc176c9ff"
 dependencies = [
  "amplify",
  "chacha20poly1305",
@@ -537,9 +541,8 @@ dependencies = [
 
 [[package]]
 name = "socks5-client"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0c27f4545b26cb6e14990e7477c38a8b493b2e8738166fa2a1f5f174ef3fa5f"
+version = "0.4.0"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=v0.5#2db9a908df4a3200f6972b5b50c77eedc176c9ff"
 dependencies = [
  "amplify",
  "cypheraddr",
