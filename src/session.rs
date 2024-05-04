@@ -444,6 +444,10 @@ where S::Artifact: IntoInit<M::Init>
     type Connection = S::Connection;
     type Artifact = ProtocolArtifact<M, S>;
 
+    fn is_established(&self) -> bool {
+        self.state.is_complete()
+    }
+
     fn run_handshake(&mut self) -> io::Result<()> {
         #[cfg(feature = "log")]
         log::debug!(target: M::NAME, "Starting handshake protocol {}", M::NAME);
@@ -659,5 +663,9 @@ mod impl_socks5 {
         fn artifact(&self) -> Option<Self::Artifact> { Some(()) }
 
         fn is_init(&self) -> bool { true }
+
+        fn is_complete(&self) -> bool {
+            matches!(self, Socks5::Active(_))
+        }
     }
 }
