@@ -41,7 +41,7 @@ use std::time::Duration;
 use std::{fmt, io, net};
 
 use reactor::poller::IoType;
-use reactor::{Io, Resource, ResourceId, WriteAtomic, WriteError};
+use reactor::{Io, Resource, WriteAtomic, WriteError};
 
 use crate::{Direction, NetConnection, NetListener, NetSession, READ_BUFFER_SIZE};
 
