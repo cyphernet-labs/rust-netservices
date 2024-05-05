@@ -318,7 +318,13 @@ where S::Artifact: IntoInit<M::Init>
                 self.state.init(init_data);
 
                 return true;
+            } else {
+                #[cfg(feature = "log")]
+                log::trace!(target: M::NAME, "State initialized, but no artifact present (handshake is not complete)");
             }
+        } else {
+            #[cfg(feature = "log")]
+            log::trace!(target: M::NAME, "Init event - but already initialized");
         }
         false
     }
@@ -328,7 +334,13 @@ impl<M: NetStateMachine, S: NetSession> io::Read for NetProtocol<M, S>
 where S::Artifact: IntoInit<M::Init>
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        #[cfg(feature = "log")]
+        log::trace!(target: M::NAME, "Reading event");
+
         if self.state.is_complete() || !self.session.is_established() {
+            #[cfg(feature = "log")]
+            log::trace!(target: M::NAME, "Passing reading to inner not yet established session");
+
             return self.session.read(buf);
         }
 
@@ -350,10 +362,10 @@ where S::Artifact: IntoInit<M::Init>
                 io::Error::new(io::ErrorKind::ConnectionAborted, HandshakeError::with(err))
             })?;
 
-            #[cfg(feature = "log")]
-            log::trace!(target: M::NAME, "Sending handshake act: {output:02x?}");
-
             if !output.is_empty() {
+                #[cfg(feature = "log")]
+                log::trace!(target: M::NAME, "Sending handshake act on read: {output:02x?}");
+
                 self.session.write_all(&output)?;
             }
         }
@@ -366,13 +378,22 @@ impl<M: NetStateMachine, S: NetSession> io::Write for NetProtocol<M, S>
 where S::Artifact: IntoInit<M::Init>
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        #[cfg(feature = "log")]
+        log::trace!(target: M::NAME, "Writing event (state_complete={}, session_established={})", self.state.is_complete(), self.session.is_established());
+
         if self.state.is_complete() || !self.session.is_established() {
+            #[cfg(feature = "log")]
+            log::trace!(target: M::NAME, "Passing writing to inner session");
+
             return self.session.write(buf);
         }
 
         self.init();
 
         if self.state.next_read_len() == 0 {
+            #[cfg(feature = "log")]
+            log::trace!(target: M::NAME, "Starting handshake protocol");
+
             #[allow(unused_variables)]
             let act = self.state.advance(&[]).map_err(|err| {
                 #[cfg(feature = "log")]
@@ -383,7 +404,7 @@ where S::Artifact: IntoInit<M::Init>
 
             if !act.is_empty() {
                 #[cfg(feature = "log")]
-                log::trace!(target: M::NAME, "Sending handshake act: {act:02x?}");
+                log::trace!(target: M::NAME, "Sending handshake act on write: {act:02x?}");
 
                 self.session.write_all(&act)?;
             }
