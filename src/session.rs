@@ -444,8 +444,6 @@ where S::Artifact: IntoInit<M::Init>
     type Connection = S::Connection;
     type Artifact = ProtocolArtifact<M, S>;
 
-    fn is_established(&self) -> bool { self.state.is_complete() && self.artifact().is_some() }
-
     fn run_handshake(&mut self) -> io::Result<()> {
         #[cfg(feature = "log")]
         log::debug!(target: M::NAME, "Starting handshake protocol {}", M::NAME);
@@ -641,6 +639,9 @@ mod impl_noise {
 }
 
 mod impl_socks5 {
+    use cyphernet::addr::Host;
+    #[cfg(not(feature = "eidolon"))]
+    use cyphernet::addr::{HostName, NetAddr};
     use cyphernet::proxy::socks5;
     use cyphernet::proxy::socks5::Socks5;
 
@@ -649,7 +650,7 @@ mod impl_socks5 {
     impl NetStateMachine for Socks5 {
         const NAME: &'static str = "socks5";
         type Init = ZeroInit;
-        type Artifact = ();
+        type Artifact = NetAddr<HostName>;
         type Error = socks5::Error;
 
         fn init(&mut self, _: Self::Init) {}
@@ -658,10 +659,14 @@ mod impl_socks5 {
 
         fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error> { self.advance(input) }
 
-        fn artifact(&self) -> Option<Self::Artifact> { Some(()) }
+        fn artifact(&self) -> Option<Self::Artifact> {
+            match self {
+                Socks5::Initial(addr, false) if !addr.requires_proxy() => Some(addr.clone()),
+                Socks5::Active(addr) => Some(addr.clone()),
+                _ => None,
+            }
+        }
 
         fn is_init(&self) -> bool { true }
-
-        fn is_complete(&self) -> bool { matches!(self, Socks5::Active(_)) && self.artifact().is_some() }
     }
 }
