@@ -444,7 +444,7 @@ where S::Artifact: IntoInit<M::Init>
     type Connection = S::Connection;
     type Artifact = ProtocolArtifact<M, S>;
 
-    fn is_established(&self) -> bool { self.state.is_complete() }
+    fn is_established(&self) -> bool { self.state.is_complete() && self.artifact().is_some() }
 
     fn run_handshake(&mut self) -> io::Result<()> {
         #[cfg(feature = "log")]
@@ -662,6 +662,6 @@ mod impl_socks5 {
 
         fn is_init(&self) -> bool { true }
 
-        fn is_complete(&self) -> bool { matches!(self, Socks5::Active(_)) }
+        fn is_complete(&self) -> bool { matches!(self, Socks5::Active(_)) && self.artifact().is_some() }
     }
 }
