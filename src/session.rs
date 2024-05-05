@@ -407,12 +407,19 @@ where S::Artifact: IntoInit<M::Init>
                 log::trace!(target: M::NAME, "Sending handshake act on write: {act:02x?}");
 
                 self.session.write_all(&act)?;
-            }
+            } else {
+                #[cfg(feature = "log")]
+                log::trace!(target: M::NAME, "Handshake complete, passing data to inner session");
 
-            return Err(io::ErrorKind::Interrupted.into());
+                return self.session.write(buf);
+            }
         }
 
-        self.session.write(buf)
+        if buf.is_empty() {
+            Ok(0)
+        } else {
+            Err(io::ErrorKind::Interrupted.into())
+        }
     }
 
     fn flush(&mut self) -> io::Result<()> { self.session.flush() }
