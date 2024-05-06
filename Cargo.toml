@@ -15,7 +15,7 @@ readme = "README.md"
 [dependencies]
 amplify = "4.6.0"
 io-reactor = { version = "0.5.1", optional = true }
-cyphernet = { version = "0.5.0", features = ["ed25519", "pem", "multibase", "noise_sha2", "noise_x25519", "noise-framework", "mixnets", "dns"] }
+cyphernet = { version = "0.5.2", features = ["ed25519", "pem", "multibase", "noise_sha2", "noise_x25519", "noise-framework", "mixnets", "dns"] }
 mio = { version = "0.8.11", optional = true }
 socket2 = { version = "0.5.7", optional = true, features = ["all"] }
 libc = "0.2.154"
@@ -23,7 +23,7 @@ log_crate = { package = "log", version = "0.4.17", optional = true }
 rand = "0.8.5" # Used in SplitIo shared secret
 
 [dev-dependencies]
-cyphernet = { version = "0.5.0", features = ["ed25519"] }
+cyphernet = { version = "0.5.1", features = ["ed25519"] }
 bitcoin_hashes = "0.14.0"
 log_crate = { package = "log", version = "0.4.17" }
 
@@ -36,13 +36,6 @@ nonblocking = ["socket2"]
 log = ["log_crate", "io-reactor/log"]
 
 [package.metadata.docs.rs]
-all-features = true
+all-features = false
+features = []
 rustc-args = ["--cfg", "docsrs"]
-
-[patch.crates-io]
-cypheraddr = { git = "https://github.com/cyphernet-dao/rust-cyphernet", branch = "v0.5" }
-cyphergraphy = { git = "https://github.com/cyphernet-dao/rust-cyphernet", branch = "v0.5" }
-eidolon-auth = { git = "https://github.com/cyphernet-dao/rust-cyphernet", branch = "v0.5" }
-socks5-client = { git = "https://github.com/cyphernet-dao/rust-cyphernet", branch = "v0.5" }
-noise-framework = { git = "https://github.com/cyphernet-dao/rust-cyphernet", branch = "v0.5" }
-cyphernet = { git = "https://github.com/cyphernet-dao/rust-cyphernet", branch = "v0.5" }
