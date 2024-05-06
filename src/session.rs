@@ -318,7 +318,13 @@ where S::Artifact: IntoInit<M::Init>
                 self.state.init(init_data);
 
                 return true;
+            } else {
+                #[cfg(feature = "log")]
+                log::trace!(target: M::NAME, "State initialized, but no artifact present (handshake is not complete)");
             }
+        } else {
+            #[cfg(feature = "log")]
+            log::trace!(target: M::NAME, "Init event - but already initialized");
         }
         false
     }
@@ -328,7 +334,13 @@ impl<M: NetStateMachine, S: NetSession> io::Read for NetProtocol<M, S>
 where S::Artifact: IntoInit<M::Init>
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        #[cfg(feature = "log")]
+        log::trace!(target: M::NAME, "Reading event");
+
         if self.state.is_complete() || !self.session.is_established() {
+            #[cfg(feature = "log")]
+            log::trace!(target: M::NAME, "Passing reading to inner not yet established session");
+
             return self.session.read(buf);
         }
 
@@ -350,10 +362,10 @@ where S::Artifact: IntoInit<M::Init>
                 io::Error::new(io::ErrorKind::ConnectionAborted, HandshakeError::with(err))
             })?;
 
-            #[cfg(feature = "log")]
-            log::trace!(target: M::NAME, "Sending handshake act: {output:02x?}");
-
             if !output.is_empty() {
+                #[cfg(feature = "log")]
+                log::trace!(target: M::NAME, "Sending handshake act on read: {output:02x?}");
+
                 self.session.write_all(&output)?;
             }
         }
@@ -366,13 +378,22 @@ impl<M: NetStateMachine, S: NetSession> io::Write for NetProtocol<M, S>
 where S::Artifact: IntoInit<M::Init>
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        #[cfg(feature = "log")]
+        log::trace!(target: M::NAME, "Writing event (state_complete={}, session_established={})", self.state.is_complete(), self.session.is_established());
+
         if self.state.is_complete() || !self.session.is_established() {
+            #[cfg(feature = "log")]
+            log::trace!(target: M::NAME, "Passing writing to inner session");
+
             return self.session.write(buf);
         }
 
         self.init();
 
         if self.state.next_read_len() == 0 {
+            #[cfg(feature = "log")]
+            log::trace!(target: M::NAME, "Starting handshake protocol");
+
             #[allow(unused_variables)]
             let act = self.state.advance(&[]).map_err(|err| {
                 #[cfg(feature = "log")]
@@ -383,15 +404,22 @@ where S::Artifact: IntoInit<M::Init>
 
             if !act.is_empty() {
                 #[cfg(feature = "log")]
-                log::trace!(target: M::NAME, "Sending handshake act: {act:02x?}");
+                log::trace!(target: M::NAME, "Sending handshake act on write: {act:02x?}");
 
                 self.session.write_all(&act)?;
-            }
+            } else {
+                #[cfg(feature = "log")]
+                log::trace!(target: M::NAME, "Handshake complete, passing data to inner session");
 
-            return Err(io::ErrorKind::Interrupted.into());
+                return self.session.write(buf);
+            }
         }
 
-        self.session.write(buf)
+        if buf.is_empty() {
+            Ok(0)
+        } else {
+            Err(io::ErrorKind::Interrupted.into())
+        }
     }
 
     fn flush(&mut self) -> io::Result<()> { self.session.flush() }
@@ -639,6 +667,9 @@ mod impl_noise {
 }
 
 mod impl_socks5 {
+    use cyphernet::addr::Host;
+    #[cfg(not(feature = "eidolon"))]
+    use cyphernet::addr::{HostName, NetAddr};
     use cyphernet::proxy::socks5;
     use cyphernet::proxy::socks5::Socks5;
 
@@ -647,7 +678,7 @@ mod impl_socks5 {
     impl NetStateMachine for Socks5 {
         const NAME: &'static str = "socks5";
         type Init = ZeroInit;
-        type Artifact = ();
+        type Artifact = NetAddr<HostName>;
         type Error = socks5::Error;
 
         fn init(&mut self, _: Self::Init) {}
@@ -656,7 +687,13 @@ mod impl_socks5 {
 
         fn advance(&mut self, input: &[u8]) -> Result<Vec<u8>, Self::Error> { self.advance(input) }
 
-        fn artifact(&self) -> Option<Self::Artifact> { Some(()) }
+        fn artifact(&self) -> Option<Self::Artifact> {
+            match self {
+                Socks5::Initial(addr, false) if !addr.requires_proxy() => Some(addr.clone()),
+                Socks5::Active(addr) => Some(addr.clone()),
+                _ => None,
+            }
+        }
 
         fn is_init(&self) -> bool { true }
     }

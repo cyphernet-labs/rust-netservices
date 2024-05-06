@@ -41,7 +41,7 @@ use std::time::Duration;
 use std::{fmt, io, net};
 
 use reactor::poller::IoType;
-use reactor::{Io, Resource, ResourceId, WriteAtomic, WriteError};
+use reactor::{Io, Resource, WriteAtomic, WriteError};
 
 use crate::{Direction, NetConnection, NetListener, NetSession, READ_BUFFER_SIZE};
 
@@ -112,7 +112,6 @@ impl<L: NetListener<Stream = S::Connection>, S: NetSession> NetAccept<S, L> {
     /// specific transport layer and are automatically injected into the
     /// new sessions constructed by this listener before they are inserted into
     /// the [`reactor`] and notifications are delivered to [`reactor::Handler`].
-    /// The injection is made by calling [`NetSession::accept`] method.
     pub fn bind(addr: &impl ToSocketAddrs) -> io::Result<Self> {
         let listener = L::bind(addr)?;
         listener.set_nonblocking(true)?;
@@ -197,14 +196,6 @@ pub enum TransportState {
     /// authentication problem etc. Reading and writing from the resource in
     /// this state will result in an error ([`io::Error`]).
     Terminated,
-}
-
-/// Error indicating that method [`NetTransport::set_resource_id`] was called more than once.
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Display, Error)]
-#[display("an attempt to re-assign resource id to {new} for net transport {current}.")]
-pub struct ResIdReassigned {
-    current: ResourceId,
-    new: ResourceId,
 }
 
 /// Net transport is an adaptor around specific [`NetSession`] (implementing
