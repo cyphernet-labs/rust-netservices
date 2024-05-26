@@ -23,6 +23,7 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::io;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::os::fd::IntoRawFd;
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
@@ -62,6 +63,8 @@ pub trait NetConnection: NetStream + AsRawFd + Debug {
     fn remote_addr(&self) -> io::Result<Self::Addr>;
     fn local_addr(&self) -> io::Result<Self::Addr>;
 
+    #[cfg(feature = "nonblocking")]
+    fn set_tcp_keepalive(&mut self, keepalive: &socket2::TcpKeepalive) -> io::Result<()>;
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()>;
     fn set_write_timeout(&mut self, dur: Option<Duration>) -> io::Result<()>;
     fn read_timeout(&self) -> io::Result<Option<Duration>>;
@@ -108,6 +111,14 @@ impl NetConnection for TcpStream {
 
     fn local_addr(&self) -> io::Result<Self::Addr> { Ok(TcpStream::local_addr(self)?.into()) }
 
+    #[cfg(feature = "nonblocking")]
+    fn set_tcp_keepalive(&mut self, keepalive: &socket2::TcpKeepalive) -> io::Result<()> {
+        use std::os::fd::FromRawFd;
+        let socket = unsafe { socket2::Socket::from_raw_fd(self.as_raw_fd()) };
+        socket.set_tcp_keepalive(keepalive)?;
+        let _ = socket.into_raw_fd(); // preventing from closing the socket
+        Ok(())
+    }
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
         TcpStream::set_read_timeout(self, dur)
     }
@@ -238,6 +249,11 @@ impl NetConnection for socket2::Socket {
             .as_socket()
             .ok_or::<io::Error>(io::ErrorKind::NotFound.into())?
             .into())
+    }
+
+    #[cfg(feature = "nonblocking")]
+    fn set_tcp_keepalive(&mut self, keepalive: &socket2::TcpKeepalive) -> io::Result<()> {
+        socket2::Socket::set_tcp_keepalive(self, keepalive)
     }
 
     fn set_read_timeout(&mut self, dur: Option<Duration>) -> io::Result<()> {
