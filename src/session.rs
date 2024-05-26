@@ -47,19 +47,19 @@ pub type NoiseSession<E, D, S> = NetProtocol<NoiseState<E, D>, S>;
 pub type Socks5Session<S> = NetProtocol<socks5::Socks5, S>;
 
 #[cfg(feature = "eidolon")]
-pub type CypherSession<I, D> =
-    EidolonSession<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
+pub type CypherSession<I, D, T = TcpStream> =
+    EidolonSession<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<T>>>;
 
 #[cfg(feature = "eidolon")]
 pub type EidolonReader<S> = NetReader<S>;
 #[cfg(feature = "eidolon")]
 pub type EidolonWriter<I, S> = NetWriter<EidolonRuntime<I>, S>;
 #[cfg(feature = "eidolon")]
-pub type CypherReader<D> =
-    EidolonReader<NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
+pub type CypherReader<D, T = TcpStream> =
+    EidolonReader<NoiseSession<x25519::PrivateKey, D, Socks5Session<T>>>;
 #[cfg(feature = "eidolon")]
-pub type CypherWriter<I, D> =
-    EidolonWriter<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
+pub type CypherWriter<I, D, T = TcpStream> =
+    EidolonWriter<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<T>>>;
 
 #[cfg(feature = "eidolon")]
 impl<I: EcSign, D: Digest> CypherSession<I, D> {
