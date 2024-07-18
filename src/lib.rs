@@ -44,7 +44,7 @@ pub use connection::{Address, AsConnection, NetConnection, NetStream};
 pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
 #[cfg(feature = "io-reactor")]
-pub use resource::{ListenerEvent, NetAccept, NetTransport, SessionEvent};
+pub use resource::{ImpossibleResource, ListenerEvent, NetAccept, NetTransport, SessionEvent};
 pub use session::{NetProtocol, NetSession, NetStateMachine};
 pub use split::{NetReader, NetWriter, SplitIo, SplitIoError, TcpReader, TcpWriter};
 
