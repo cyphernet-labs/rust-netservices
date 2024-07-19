@@ -39,3 +39,6 @@ log = ["log_crate", "io-reactor/log"]
 all-features = false
 features = []
 rustc-args = ["--cfg", "docsrs"]
+
+[patch.crates-io]
+io-reactor = { git = "https://github.com/rust-amplify/io-reactor", branch = "terminate" }
