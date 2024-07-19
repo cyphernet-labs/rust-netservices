@@ -38,6 +38,7 @@ mod split;
 #[cfg(feature = "io-reactor")]
 pub mod resource;
 pub mod client;
+pub mod rpc_pub;
 
 pub const READ_BUFFER_SIZE: usize = u16::MAX as usize;
 
@@ -47,6 +48,7 @@ pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
 #[cfg(feature = "io-reactor")]
 pub use resource::{ImpossibleResource, ListenerEvent, NetAccept, NetTransport, SessionEvent};
+pub use rpc_pub::{RpcPubDelegate, RpcPubId, RpcPubService};
 pub use session::{NetProtocol, NetSession, NetStateMachine};
 pub use split::{NetReader, NetWriter, SplitIo, SplitIoError, TcpReader, TcpWriter};
 

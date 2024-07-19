@@ -19,9 +19,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! A client for client-server communications.
+//!
+//! Supports both request-reply RPC and publish-subscribe, which operate in overlay mode.
+
 use std::any::Any;
 use std::collections::VecDeque;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::os::fd::RawFd;
 use std::time::Duration;
 use std::{io, mem};
@@ -36,9 +41,12 @@ use crate::{Direction, ImpossibleResource, NetSession, NetTransport, SessionEven
 ///
 /// When a user of the library calls [`Client`] method the actual command is passed to the
 /// [`ClientCommand`] using this array.
+///
+/// Generic parameter `E` defines extra data used by more custom implementations of clients, like
+/// RPC, PubSub etc.
 #[derive(Debug)]
-pub enum ClientCommand {
-    Send(Vec<u8>),
+pub enum ClientCommand<E: Send + Debug = ()> {
+    Send(Vec<u8>, E),
     Terminate,
 }
 
@@ -50,14 +58,14 @@ pub enum OnDisconnect {
 
 /// The set of callbacks used by the client to notify the business logic about events happening
 /// inside the reactor.
-pub trait ClientDelegate<C, S: NetSession>: Send {
+pub trait ClientDelegate<A, S: NetSession, E: Send + Debug>: Send {
     /// The reply type which must be parsable from a byte blob.
     type Reply: TryFrom<Vec<u8>>;
 
     /// Asks the delegate to construct a connection to the remote server and return it as a form of
     /// [`NetSession`] to be registered and managed by the reactor and [`ClientService`] inside of
     /// it.
-    fn connect(&self, remote: &C) -> S;
+    fn connect(&self, remote: &A) -> S;
 
     /// Notifies about the successful establishment of the session with the server. The `attempt`
     /// argument specifies the number of the connection attempt which has succeeded, if a
@@ -70,30 +78,36 @@ pub trait ClientDelegate<C, S: NetSession>: Send {
     fn on_disconnect(&self, err: io::Error, attempt: usize) -> OnDisconnect;
 
     /// Callback for processing the message received from the server.
-    fn on_reply(&self, reply: Self::Reply);
+    fn on_reply(&mut self, reply: Self::Reply);
 
     /// Callback for processing invalid message received from the server which can't be parsed into
     /// [`Self::Reply`] type.
-    fn on_reply_unparsable(&self, data: <Self::Reply as TryFrom<Vec<u8>>>::Error);
+    // TODO: Make it just an error
+    fn on_reply_unparsable(&self, err: <Self::Reply as TryFrom<Vec<u8>>>::Error);
 
     /// Callback for processing reactor [`Error`]s.
     fn on_error(&self, err: Error<ImpossibleResource, NetTransport<S>>);
+
+    fn before_send(&mut self, data: Vec<u8>, _extra: E) -> Vec<u8> { data }
 }
 
-pub struct ClientService<C: Send, S: NetSession, D: ClientDelegate<C, S>> {
+pub struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug> {
     delegate: D,
-    remote: C,
+    remote: A,
     connection_id: Option<ResourceId>,
     connection_fd: Option<RawFd>,
     attempting: bool,
     attempts: usize,
     data_stack: Vec<Vec<u8>>,
     action_queue: VecDeque<Action<ImpossibleResource, NetTransport<S>>>,
+    _phantom: PhantomData<E>,
 }
 
-impl<C: Send, S: NetSession, D: ClientDelegate<C, S>> ClientService<C, S, D> {
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug>
+    ClientService<A, S, D, E>
+{
     #[inline]
-    pub fn new(delegate: D, remote: C) -> Self {
+    pub fn new(delegate: D, remote: A) -> Self {
         Self {
             delegate,
             remote,
@@ -103,6 +117,7 @@ impl<C: Send, S: NetSession, D: ClientDelegate<C, S>> ClientService<C, S, D> {
             attempting: false,
             data_stack: empty!(),
             action_queue: VecDeque::from(vec![Action::SetTimer(Duration::from_millis(0))]),
+            _phantom: PhantomData,
         }
     }
 
@@ -128,10 +143,12 @@ impl<C: Send, S: NetSession, D: ClientDelegate<C, S>> ClientService<C, S, D> {
     fn terminate(&mut self) { self.action_queue.push_back(Action::Terminate); }
 }
 
-impl<C: Send, S: NetSession, D: ClientDelegate<C, S>> reactor::Handler for ClientService<C, S, D> {
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug> reactor::Handler
+    for ClientService<A, S, D, E>
+{
     type Listener = ImpossibleResource;
     type Transport = NetTransport<S>;
-    type Command = ClientCommand;
+    type Command = ClientCommand<E>;
 
     fn tick(&mut self, time: Timestamp) {
         #[cfg(feature = "log")]
@@ -191,7 +208,8 @@ impl<C: Send, S: NetSession, D: ClientDelegate<C, S>> reactor::Handler for Clien
 
     fn handle_command(&mut self, cmd: Self::Command) {
         match cmd {
-            ClientCommand::Send(data) => {
+            ClientCommand::Send(data, extra) => {
+                let data = self.delegate.before_send(data, extra);
                 if let Some(id) = self.connection_id {
                     self.action_queue.push_back(Action::Send(id, data));
                 } else {
@@ -221,7 +239,9 @@ impl<C: Send, S: NetSession, D: ClientDelegate<C, S>> reactor::Handler for Clien
     }
 }
 
-impl<C: Send, S: NetSession, D: ClientDelegate<C, S>> Iterator for ClientService<C, S, D> {
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug> Iterator
+    for ClientService<A, S, D, E>
+{
     type Item = Action<ImpossibleResource, NetTransport<S>>;
 
     fn next(&mut self) -> Option<Self::Item> { self.action_queue.pop_front() }
@@ -229,22 +249,20 @@ impl<C: Send, S: NetSession, D: ClientDelegate<C, S>> Iterator for ClientService
 
 /// The client runtime containing reactor thread managing connection to the remote server and the
 /// use of the server APIs.
-pub struct Client {
-    reactor: Reactor<ClientCommand, popol::Poller>,
+pub struct Client<E: Send + Debug = ()> {
+    reactor: Reactor<ClientCommand<E>, popol::Poller>,
 }
 
-impl Client {
-    pub fn new<C: Send + 'static, S: NetSession + 'static, D: ClientDelegate<C, S> + 'static>(
+impl<E> Client<E>
+where E: Send + Debug + 'static
+{
+    pub fn new<A: Send + 'static, S: NetSession + 'static, D: ClientDelegate<A, S, E> + 'static>(
         delegate: D,
-        remote: C,
+        remote: A,
     ) -> io::Result<Self> {
-        let service = ClientService::<C, S, D>::new(delegate, remote);
+        let service = ClientService::<A, S, D, E>::new(delegate, remote);
         let reactor = Reactor::named(service, popol::Poller::new(), s!("client"))?;
         Ok(Self { reactor })
-    }
-
-    pub fn send(&self, data: impl Into<Vec<u8>>) -> io::Result<()> {
-        self.reactor.controller().cmd(ClientCommand::Send(data.into()))
     }
 
     pub fn terminate(self) -> Result<(), Box<dyn Any + Send>> {
@@ -254,5 +272,11 @@ impl Client {
             .map_err(|err| Box::new(err) as Box<dyn Any + Send>)?;
         self.reactor.join()?;
         Ok(())
+    }
+}
+
+impl Client {
+    pub fn send(&self, data: impl Into<Vec<u8>>) -> io::Result<()> {
+        self.reactor.controller().cmd(ClientCommand::Send(data.into(), ()))
     }
 }
