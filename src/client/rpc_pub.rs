@@ -180,11 +180,11 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, Cb>
 
 /// The client runtime containing reactor thread managing connection to the remote server and the
 /// use of the server APIs.
-pub struct RpcPubClient {
-    inner: Client<Cb>,
+pub struct RpcPubClient<Req: Into<Vec<u8>>> {
+    inner: Client<Req, Cb>,
 }
 
-impl RpcPubClient {
+impl<Req: Into<Vec<u8>>> RpcPubClient<Req> {
     pub fn new<A: Send + 'static, S: NetSession + 'static, D: RpcPubDelegate<A, S> + 'static>(
         delegate: D,
         remote: A,
@@ -194,9 +194,7 @@ impl RpcPubClient {
         Ok(Self { inner: client })
     }
 
-    pub fn send(&mut self, data: impl Into<Vec<u8>>, cb: Cb) -> io::Result<()> {
-        self.inner.send_extra(data, cb)
-    }
+    pub fn send(&mut self, data: Req, cb: Cb) -> io::Result<()> { self.inner.send_extra(data, cb) }
 
     pub fn terminate(self) -> Result<(), Box<dyn Any + Send>> { self.inner.terminate() }
 }

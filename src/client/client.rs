@@ -249,11 +249,12 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug> Iterat
 
 /// The client runtime containing reactor thread managing connection to the remote server and the
 /// use of the server APIs.
-pub struct Client<E: Send + Debug = ()> {
+pub struct Client<Req: Into<Vec<u8>>, E: Send + Debug = ()> {
     reactor: Reactor<ClientCommand<E>, popol::Poller>,
+    _phantom: PhantomData<Req>,
 }
 
-impl<E> Client<E>
+impl<Req: Into<Vec<u8>>, E> Client<Req, E>
 where E: Send + Debug + 'static
 {
     pub fn new<A: Send + 'static, S: NetSession + 'static, D: ClientDelegate<A, S, E> + 'static>(
@@ -262,7 +263,10 @@ where E: Send + Debug + 'static
     ) -> io::Result<Self> {
         let service = ClientService::<A, S, D, E>::new(delegate, remote);
         let reactor = Reactor::named(service, popol::Poller::new(), s!("client"))?;
-        Ok(Self { reactor })
+        Ok(Self {
+            reactor,
+            _phantom: PhantomData,
+        })
     }
 
     pub fn terminate(self) -> Result<(), Box<dyn Any + Send>> {
@@ -274,11 +278,11 @@ where E: Send + Debug + 'static
         Ok(())
     }
 
-    pub(super) fn send_extra(&self, data: impl Into<Vec<u8>>, extra: E) -> io::Result<()> {
+    pub(super) fn send_extra(&self, data: Req, extra: E) -> io::Result<()> {
         self.reactor.controller().cmd(ClientCommand::Send(data.into(), extra))
     }
 }
 
-impl Client {
-    pub fn send(&self, data: impl Into<Vec<u8>>) -> io::Result<()> { self.send_extra(data, ()) }
+impl<Req: Into<Vec<u8>>> Client<Req> {
+    pub fn send(&self, data: Req) -> io::Result<()> { self.send_extra(data, ()) }
 }
