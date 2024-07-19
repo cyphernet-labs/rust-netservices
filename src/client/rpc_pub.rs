@@ -25,10 +25,7 @@ use std::io;
 use std::io::Error;
 use std::marker::PhantomData;
 
-use reactor::poller::popol;
-use reactor::Reactor;
-
-use super::{ClientCommand, ClientDelegate, ClientService, OnDisconnect};
+use super::{Client, ClientDelegate, OnDisconnect};
 use crate::{ImpossibleResource, NetSession, NetTransport};
 
 pub type Cb = fn(Vec<u8>);
@@ -184,7 +181,7 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, Cb>
 /// The client runtime containing reactor thread managing connection to the remote server and the
 /// use of the server APIs.
 pub struct RpcPubClient {
-    reactor: Reactor<ClientCommand<Cb>, popol::Poller>,
+    inner: Client<Cb>,
 }
 
 impl RpcPubClient {
@@ -193,21 +190,13 @@ impl RpcPubClient {
         remote: A,
     ) -> io::Result<Self> {
         let rpc_pub_service = RpcPubService::new(delegate);
-        let service = ClientService::<A, S, _, _>::new(rpc_pub_service, remote);
-        let reactor = Reactor::named(service, popol::Poller::new(), s!("client"))?;
-        Ok(Self { reactor })
+        let client = Client::new(rpc_pub_service, remote)?;
+        Ok(Self { inner: client })
     }
 
-    pub fn send(&mut self, data: impl Into<Vec<u8>>, cb: fn(Vec<u8>)) -> io::Result<()> {
-        self.reactor.controller().cmd(ClientCommand::Send(data.into(), cb))
+    pub fn send(&mut self, data: impl Into<Vec<u8>>, cb: Cb) -> io::Result<()> {
+        self.inner.send_extra(data, cb)
     }
 
-    pub fn terminate(self) -> Result<(), Box<dyn Any + Send>> {
-        self.reactor
-            .controller()
-            .cmd(ClientCommand::Terminate)
-            .map_err(|err| Box::new(err) as Box<dyn Any + Send>)?;
-        self.reactor.join()?;
-        Ok(())
-    }
+    pub fn terminate(self) -> Result<(), Box<dyn Any + Send>> { self.inner.terminate() }
 }

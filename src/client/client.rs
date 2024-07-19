@@ -58,7 +58,7 @@ pub enum OnDisconnect {
 
 /// The set of callbacks used by the client to notify the business logic about events happening
 /// inside the reactor.
-pub trait ClientDelegate<A, S: NetSession, E: Send + Debug>: Send {
+pub trait ClientDelegate<A, S: NetSession, E: Send + Debug = ()>: Send {
     /// The reply type which must be parsable from a byte blob.
     type Reply: TryFrom<Vec<u8>>;
 
@@ -273,10 +273,12 @@ where E: Send + Debug + 'static
         self.reactor.join()?;
         Ok(())
     }
+
+    pub(super) fn send_extra(&self, data: impl Into<Vec<u8>>, extra: E) -> io::Result<()> {
+        self.reactor.controller().cmd(ClientCommand::Send(data.into(), extra))
+    }
 }
 
 impl Client {
-    pub fn send(&self, data: impl Into<Vec<u8>>) -> io::Result<()> {
-        self.reactor.controller().cmd(ClientCommand::Send(data.into(), ()))
-    }
+    pub fn send(&self, data: impl Into<Vec<u8>>) -> io::Result<()> { self.send_extra(data, ()) }
 }
