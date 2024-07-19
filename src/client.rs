@@ -154,6 +154,7 @@ impl<C: Send, S: NetSession, D: ClientDelegate<C, S>> reactor::Handler for Clien
     fn handle_transport_event(&mut self, id: ResourceId, event: SessionEvent<S>, time: Timestamp) {
         match event {
             SessionEvent::Established(fd, artifact) => {
+                #[cfg(feature = "log")]
                 log::debug!(target: "netservices-client", "established connection to server (fd={fd})");
                 self.connection_fd = Some(fd);
                 self.delegate.on_established(artifact, self.attempts);
@@ -166,6 +167,7 @@ impl<C: Send, S: NetSession, D: ClientDelegate<C, S>> reactor::Handler for Clien
                 self.connection_id = None;
                 self.connection_fd = None;
                 self.attempts += 1;
+                #[cfg(feature = "log")]
                 log::debug!(target: "netservices-client", "disconnected from the server for the {} time", self.attempts);
                 if self.delegate.on_disconnect(err, self.attempts) == OnDisconnect::Reconnect {
                     self.connect();
@@ -177,6 +179,7 @@ impl<C: Send, S: NetSession, D: ClientDelegate<C, S>> reactor::Handler for Clien
     }
 
     fn handle_registered(&mut self, fd: RawFd, id: ResourceId, ty: ResourceType) {
+        #[cfg(feature = "log")]
         log::trace!(target: "netservices-client", "handled registration of connection with fd={fd}, id={id} on attempt {}", self.attempts);
         debug_assert_eq!(ty, ResourceType::Transport);
         debug_assert_eq!(self.connection_fd, Some(fd));
@@ -210,6 +213,7 @@ impl<C: Send, S: NetSession, D: ClientDelegate<C, S>> reactor::Handler for Clien
     }
 
     fn handover_transport(&mut self, id: ResourceId, transport: Self::Transport) {
+        #[cfg(feature = "log")]
         log::trace!(target: "netservices-client", "transport {} has been disconnected and handover (id={id})", transport.display());
         self.connection_id = None;
         self.connection_fd = None;
