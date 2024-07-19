@@ -37,7 +37,7 @@ mod split;
 
 #[cfg(feature = "io-reactor")]
 pub mod resource;
-mod client;
+pub mod client;
 
 pub const READ_BUFFER_SIZE: usize = u16::MAX as usize;
 
@@ -48,6 +48,7 @@ pub use listener::NetListener;
 pub use resource::{ImpossibleResource, ListenerEvent, NetAccept, NetTransport, SessionEvent};
 pub use session::{NetProtocol, NetSession, NetStateMachine};
 pub use split::{NetReader, NetWriter, SplitIo, SplitIoError, TcpReader, TcpWriter};
+pub use client::{Client, ClientDelegate};
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub enum Direction {
