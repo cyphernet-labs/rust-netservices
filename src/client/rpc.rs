@@ -193,7 +193,7 @@ impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ClientDelegate<A, S, RpcCb<D:
         }
     }
 
-    fn on_reply_unparsable(&self, err: ParseReplyError) {
+    fn on_reply_unparsable(&mut self, err: ParseReplyError) {
         #[cfg(feature = "log")]
         log::error!(target: "netservices-client", "received unparsable server message. Parse error: {err}");
 

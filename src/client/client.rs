@@ -125,7 +125,7 @@ pub trait ClientDelegate<A, S: NetSession, E: Send = ()>: ConnectionDelegate<A, 
 
     /// Callback for processing invalid message received from the server which can't be parsed into
     /// [`Self::Reply`] type.
-    fn on_reply_unparsable(&self, err: <Self::Reply as TryFrom<Vec<u8>>>::Error);
+    fn on_reply_unparsable(&mut self, err: <Self::Reply as TryFrom<Vec<u8>>>::Error);
 }
 
 /// Handler for the client-server connection reactor on the client side. Manages state of the server
