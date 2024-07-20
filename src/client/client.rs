@@ -316,6 +316,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handl
 
         self.connection_id = Some(id);
 
+        #[cfg(feature = "log")]
         log::trace!(target: "netservices-client", "scheduling sending {} buffered messages to the server", self.data_stack.len());
         let mut data_stack = vec![];
         mem::swap(&mut data_stack, &mut self.data_stack);
