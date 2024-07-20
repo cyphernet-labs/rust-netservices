@@ -19,11 +19,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod client;
+pub mod tunnel;
+mod server;
 pub mod rpc;
-pub mod rpc_pub;
 pub mod pub_sub;
-
-pub use client::{Client, ClientCommand, ClientDelegate, ConnectionDelegate, OnDisconnect};
-pub use rpc::{RpcClient, RpcDelegate};
-pub use rpc_pub::{RpcPubClient, RpcPubDelegate, RpcPubId, CLIENT_MSG_ID_PUB, CLIENT_MSG_ID_RPC};
+pub mod rpc_pub;

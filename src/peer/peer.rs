@@ -18,12 +18,3 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-mod client;
-pub mod rpc;
-pub mod rpc_pub;
-pub mod pub_sub;
-
-pub use client::{Client, ClientCommand, ClientDelegate, ConnectionDelegate, OnDisconnect};
-pub use rpc::{RpcClient, RpcDelegate};
-pub use rpc_pub::{RpcPubClient, RpcPubDelegate, RpcPubId, CLIENT_MSG_ID_PUB, CLIENT_MSG_ID_RPC};

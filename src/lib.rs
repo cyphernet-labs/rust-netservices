@@ -27,26 +27,30 @@ extern crate amplify;
 extern crate log_crate as log;
 
 pub mod frame;
-#[cfg(feature = "reactor")]
-pub mod tunnel;
 
 mod connection;
 mod listener;
 pub mod session;
 mod split;
 
-#[cfg(feature = "io-reactor")]
+#[cfg(feature = "reactor")]
 pub mod resource;
-#[cfg(feature = "io-reactor")]
+#[cfg(feature = "reactor")]
 pub mod client;
+#[cfg(feature = "reactor")]
+pub mod server;
+#[cfg(feature = "reactor")]
+pub mod peer;
 
 pub const READ_BUFFER_SIZE: usize = u16::MAX as usize;
 
 pub use connection::{Address, AsConnection, NetConnection, NetStream};
 pub use frame::{Frame, Marshaller};
 pub use listener::NetListener;
-#[cfg(feature = "io-reactor")]
+#[cfg(feature = "reactor")]
 pub use resource::{ImpossibleResource, ListenerEvent, NetAccept, NetTransport, SessionEvent};
+#[cfg(feature = "reactor")]
+pub use server::tunnel;
 pub use session::{NetProtocol, NetSession, NetStateMachine};
 pub use split::{NetReader, NetWriter, SplitIo, SplitIoError, TcpReader, TcpWriter};
 
