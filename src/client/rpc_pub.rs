@@ -27,7 +27,7 @@ use std::marker::PhantomData;
 use super::{Client, ClientDelegate, ConnectionDelegate, OnDisconnect};
 use crate::{ImpossibleResource, NetSession, NetTransport};
 
-pub type Cb<Rep> = fn(Rep);
+pub type Cb<Rep> = Box<dyn FnOnce(Rep) + Send>;
 
 pub const CLIENT_MSG_ID_RPC: u8 = 0x01u8;
 pub const CLIENT_MSG_ID_PUB: u8 = 0x10u8;
@@ -230,8 +230,8 @@ impl<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> RpcPubClient<Req, Rep>
         Ok(Self { inner: client })
     }
 
-    pub fn send(&mut self, data: Req, cb: Cb<Rep>) -> io::Result<()> {
-        self.inner.send_extra(data, cb)
+    pub fn send(&mut self, data: Req, cb: impl FnOnce(Rep) + Send + 'static) -> io::Result<()> {
+        self.inner.send_extra(data, Box::new(cb))
     }
 
     pub fn terminate(self) -> Result<(), Box<dyn Any + Send>> { self.inner.terminate() }

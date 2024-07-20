@@ -25,7 +25,7 @@
 
 use std::any::Any;
 use std::collections::VecDeque;
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Formatter};
 use std::marker::PhantomData;
 use std::os::fd::RawFd;
 use std::time::Duration;
@@ -44,10 +44,20 @@ use crate::{Direction, ImpossibleResource, NetSession, NetTransport, SessionEven
 ///
 /// Generic parameter `E` defines extra data used by more custom implementations of clients, like
 /// RPC, PubSub etc.
-#[derive(Debug)]
-pub enum ClientCommand<E: Send + Debug = ()> {
+pub enum ClientCommand<E: Send = ()> {
     Send(Vec<u8>, E),
     Terminate,
+}
+
+impl<E: Send> Debug for ClientCommand<E> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ClientCommand::Send(data, _) => {
+                f.debug_tuple("ClientCommand::Send").field(data).finish()
+            }
+            ClientCommand::Terminate => f.debug_tuple("ClientCommand::Terminate").finish(),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -78,7 +88,7 @@ pub trait ConnectionDelegate<A, S: NetSession>: Send {
 
 /// The set of callbacks used by the client to notify the business logic about events happening
 /// inside the reactor.
-pub trait ClientDelegate<A, S: NetSession, E: Send + Debug = ()>: ConnectionDelegate<A, S> {
+pub trait ClientDelegate<A, S: NetSession, E: Send = ()>: ConnectionDelegate<A, S> {
     /// The reply type which must be parsable from a byte blob.
     type Reply: TryFrom<Vec<u8>>;
 
@@ -92,7 +102,7 @@ pub trait ClientDelegate<A, S: NetSession, E: Send + Debug = ()>: ConnectionDele
     fn on_reply_unparsable(&self, err: <Self::Reply as TryFrom<Vec<u8>>>::Error);
 }
 
-pub struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug> {
+pub struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> {
     delegate: D,
     remote: A,
     connection_id: Option<ResourceId>,
@@ -104,9 +114,7 @@ pub struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: 
     _phantom: PhantomData<E>,
 }
 
-impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug>
-    ClientService<A, S, D, E>
-{
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> ClientService<A, S, D, E> {
     #[inline]
     pub fn new(delegate: D, remote: A) -> Self {
         Self {
@@ -144,7 +152,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug>
     fn terminate(&mut self) { self.action_queue.push_back(Action::Terminate); }
 }
 
-impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug> reactor::Handler
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> reactor::Handler
     for ClientService<A, S, D, E>
 {
     type Listener = ImpossibleResource;
@@ -240,7 +248,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug> reacto
     }
 }
 
-impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug> Iterator
+impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send> Iterator
     for ClientService<A, S, D, E>
 {
     type Item = Action<ImpossibleResource, NetTransport<S>>;
@@ -250,13 +258,13 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug> Iterat
 
 /// The client runtime containing reactor thread managing connection to the remote server and the
 /// use of the server APIs.
-pub struct Client<Req: Into<Vec<u8>>, E: Send + Debug = ()> {
+pub struct Client<Req: Into<Vec<u8>>, E: Send = ()> {
     reactor: Reactor<ClientCommand<E>, popol::Poller>,
     _phantom: PhantomData<Req>,
 }
 
 impl<Req: Into<Vec<u8>>, E> Client<Req, E>
-where E: Send + Debug + 'static
+where E: Send + 'static
 {
     pub fn new<A: Send + 'static, S: NetSession + 'static, D: ClientDelegate<A, S, E> + 'static>(
         delegate: D,
