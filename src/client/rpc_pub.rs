@@ -22,13 +22,11 @@
 //! Client-server RPC protocol allowing asynchronous delivery of server-client messages which are
 //! not replies to any specific client request. Combines properties of classic RPC and PubSub.
 
-// TODO: Provide mechanism for detecting and reacting on RPC reply timeouts
-
 use std::any::Any;
 use std::io;
 
 use super::{Client, ClientDelegate, ConnectionDelegate, OnDisconnect, RpcDelegate};
-use crate::client::rpc::{Cb, RpcReply, RpcService};
+use crate::client::rpc::{RpcCb, RpcReply, RpcService};
 use crate::{ImpossibleResource, NetSession, NetTransport};
 
 /// Tag byte signifying RPC server reply.
@@ -167,12 +165,12 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ConnectionDelegate<A, S>
     }
 }
 
-impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, Cb<D::Reply>>
+impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, RpcCb<D::Reply>>
     for RpcPubService<A, S, D>
 {
     type Reply = RpcPubMsg;
 
-    fn before_send(&mut self, data: Vec<u8>, cb: Cb<D::Reply>) -> Vec<u8> {
+    fn before_send(&mut self, data: Vec<u8>, cb: RpcCb<D::Reply>) -> Vec<u8> {
         self.inner.before_send(data, cb)
     }
 
@@ -210,7 +208,7 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, Cb<D:
 /// The client runtime containing reactor thread managing connection to the remote server and the
 /// use of the server APIs.
 pub struct RpcPubClient<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> {
-    inner: Client<Req, Cb<Rep>>,
+    inner: Client<Req, RpcCb<Rep>>,
 }
 
 impl<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> RpcPubClient<Req, Rep> {
@@ -226,7 +224,7 @@ impl<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> RpcPubClient<Req, Rep>
         remote: A,
     ) -> io::Result<Self> {
         let rpc_pub_service = RpcPubService::new(delegate);
-        let client = Client::<Req, Cb<Rep>>::new(rpc_pub_service, remote)?;
+        let client = Client::<Req, RpcCb<Rep>>::new(rpc_pub_service, remote)?;
         Ok(Self { inner: client })
     }
 

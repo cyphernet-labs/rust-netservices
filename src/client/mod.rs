@@ -22,7 +22,6 @@
 mod client;
 pub mod rpc;
 pub mod rpc_pub;
-pub mod pub_sub;
 
 pub use client::{Client, ClientCommand, ClientDelegate, ConnectionDelegate, OnDisconnect};
 pub use rpc::{RpcClient, RpcDelegate};

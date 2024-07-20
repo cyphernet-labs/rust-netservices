@@ -34,13 +34,12 @@ use crate::{ImpossibleResource, NetSession, NetTransport};
 
 /// RPC callback type, which is a function closure taking single argument - sever reply message. The
 /// closure must be sendable between threads and is called in the context of the reactor thread.
-pub type Cb<Rep> = Box<dyn FnOnce(Rep) + Send>;
+pub type RpcCb<Rep> = Box<dyn FnOnce(Rep) + Send>;
 
 /// Server RPC reply.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct RpcReply {
-    /// Message id, representing its type and indicating related RPC request or Pub topic
-    /// subscription.
+    /// Message id, representing related RPC request.
     pub id: u64,
     /// Unparsed message data.
     pub payload: Vec<u8>,
@@ -117,7 +116,7 @@ pub(super) struct RpcService<A: Send, S: NetSession, D: RpcDelegate<A, S>> {
     /// The first unused id for RPC request-reply pairs.
     last_id: u64,
     /// RPC reply callbacks, mapped from the RPC id used in the request message.
-    callbacks: HashMap<u64, Cb<D::Reply>>,
+    callbacks: HashMap<u64, RpcCb<D::Reply>>,
     _phantom: PhantomData<(A, S)>,
 }
 
@@ -150,12 +149,12 @@ impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ConnectionDelegate<A, S>
     }
 }
 
-impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ClientDelegate<A, S, Cb<D::Reply>>
+impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ClientDelegate<A, S, RpcCb<D::Reply>>
     for RpcService<A, S, D>
 {
     type Reply = RpcReply;
 
-    fn before_send(&mut self, data: Vec<u8>, cb: Cb<D::Reply>) -> Vec<u8> {
+    fn before_send(&mut self, data: Vec<u8>, cb: RpcCb<D::Reply>) -> Vec<u8> {
         let id = self.last_id;
         #[cfg(feature = "log")]
         log::trace!(target: "netservices-client", "sending RPC request to the server (RPC id={id})");
@@ -205,7 +204,7 @@ impl<A: Send, S: NetSession, D: RpcDelegate<A, S>> ClientDelegate<A, S, Cb<D::Re
 /// The client runtime containing reactor thread managing connection to the remote server and the
 /// use of the server APIs.
 pub struct RpcClient<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> {
-    inner: Client<Req, Cb<Rep>>,
+    inner: Client<Req, RpcCb<Rep>>,
 }
 
 impl<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> RpcClient<Req, Rep> {
@@ -221,7 +220,7 @@ impl<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> RpcClient<Req, Rep> {
         remote: A,
     ) -> io::Result<Self> {
         let rpc_service = RpcService::new(delegate);
-        let client = Client::<Req, Cb<Rep>>::new(rpc_service, remote)?;
+        let client = Client::<Req, RpcCb<Rep>>::new(rpc_service, remote)?;
         Ok(Self { inner: client })
     }
 

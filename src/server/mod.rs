@@ -22,5 +22,4 @@
 pub mod tunnel;
 mod server;
 pub mod rpc;
-pub mod pub_sub;
 pub mod rpc_pub;
