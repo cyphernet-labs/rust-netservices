@@ -22,5 +22,7 @@
 mod client;
 pub mod rpc_pub;
 
-pub use client::{Client, ClientCommand, ClientDelegate, ClientService, OnDisconnect};
+pub use client::{
+    Client, ClientCommand, ClientDelegate, ClientService, ConnectionDelegate, OnDisconnect,
+};
 pub use rpc_pub::{RpcPubDelegate, RpcPubId, RpcPubService};

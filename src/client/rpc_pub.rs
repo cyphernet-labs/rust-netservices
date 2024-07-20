@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::io;
 use std::marker::PhantomData;
 
-use super::{Client, ClientDelegate, OnDisconnect};
+use super::{Client, ClientDelegate, ConnectionDelegate, OnDisconnect};
 use crate::{ImpossibleResource, NetSession, NetTransport};
 
 pub type Cb<Rep> = fn(Rep);
@@ -114,28 +114,10 @@ pub enum MsgError {
     MismatchingReply(u64, Vec<u8>),
 }
 
-pub trait RpcPubDelegate<A: Send, S: NetSession>: Send {
+pub trait RpcPubDelegate<A: Send, S: NetSession>: ConnectionDelegate<A, S> {
     /// The reply type which must be parsable from a byte blob.
     type Reply: TryFrom<Vec<u8>, Error: std::error::Error>;
     type PubMsg: TryFrom<Vec<u8>, Error: std::error::Error>;
-
-    /// Asks the delegate to construct a connection to the remote server and return it as a form of
-    /// [`NetSession`] to be registered and managed by the reactor and [`ClientService`] inside of
-    /// it.
-    fn connect(&self, remote: &A) -> S;
-
-    /// Notifies about the successful establishment of the session with the server. The `attempt`
-    /// argument specifies the number of the connection attempt which has succeeded, if a
-    /// reconnection or failed connection had happened.
-    fn on_established(&self, artifact: S::Artifact, attempt: usize);
-
-    /// Notifies about failed connection to the server. As a response, the client business logic can
-    /// ask to re-establish connection by returning [`OnDisconnect::Reconnect`]. Otherwise, the
-    /// reactor will terminate.
-    fn on_disconnect(&self, err: io::Error, attempt: usize) -> OnDisconnect;
-
-    /// Callback for processing reactor [`reactor::Error`]s.
-    fn on_io_error(&self, err: reactor::Error<ImpossibleResource, NetTransport<S>>);
 
     /// Callback for processing invalid message received from the server which can't be parsed into
     /// [`Self::Reply`] type.
@@ -144,6 +126,7 @@ pub trait RpcPubDelegate<A: Send, S: NetSession>: Send {
     fn on_msg_pub(&self, id: u16, msg: Self::PubMsg);
 
     fn on_reply_timed_out(&self, id: u64);
+
     /// Callback for processing the message received from the server.
     fn on_reply(&mut self, reply: Self::Reply);
 }
@@ -166,11 +149,9 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> RpcPubService<A, S, D> {
     }
 }
 
-impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, Cb<D::Reply>>
+impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ConnectionDelegate<A, S>
     for RpcPubService<A, S, D>
 {
-    type Reply = Msg;
-
     fn connect(&self, remote: &A) -> S { self.delegate.connect(remote) }
 
     fn on_established(&self, artifact: S::Artifact, attempt: usize) {
@@ -179,6 +160,28 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, Cb<D:
 
     fn on_disconnect(&self, err: io::Error, attempt: usize) -> OnDisconnect {
         self.delegate.on_disconnect(err, attempt)
+    }
+
+    fn on_io_error(&self, err: reactor::Error<ImpossibleResource, NetTransport<S>>) {
+        self.delegate.on_io_error(err)
+    }
+}
+
+impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, Cb<D::Reply>>
+    for RpcPubService<A, S, D>
+{
+    type Reply = Msg;
+
+    fn before_send(&mut self, data: Vec<u8>, cb: Cb<D::Reply>) -> Vec<u8> {
+        let id = self.last_id;
+        let mut req = Vec::with_capacity(data.len() + 9);
+        let check = self.callbacks.insert(id, cb);
+        debug_assert!(check.is_none());
+        req.push(CLIENT_MSG_ID_RPC);
+        req.extend(id.to_le_bytes());
+        req.extend(data);
+        self.last_id += 1;
+        req
     }
 
     fn on_reply(&mut self, msg: Msg) {
@@ -204,22 +207,6 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, Cb<D:
 
     fn on_reply_unparsable(&self, err: <Self::Reply as TryFrom<Vec<u8>>>::Error) {
         self.delegate.on_msg_error(MsgError::UnparsableMsg(err.to_string()))
-    }
-
-    fn on_error(&self, err: reactor::Error<ImpossibleResource, NetTransport<S>>) {
-        self.delegate.on_io_error(err)
-    }
-
-    fn before_send(&mut self, data: Vec<u8>, cb: Cb<D::Reply>) -> Vec<u8> {
-        let id = self.last_id;
-        let mut req = Vec::with_capacity(data.len() + 9);
-        let check = self.callbacks.insert(id, cb);
-        debug_assert!(check.is_none());
-        req.push(CLIENT_MSG_ID_RPC);
-        req.extend(id.to_le_bytes());
-        req.extend(data);
-        self.last_id += 1;
-        req
     }
 }
 

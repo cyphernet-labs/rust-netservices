@@ -56,12 +56,7 @@ pub enum OnDisconnect {
     Reconnect,
 }
 
-/// The set of callbacks used by the client to notify the business logic about events happening
-/// inside the reactor.
-pub trait ClientDelegate<A, S: NetSession, E: Send + Debug = ()>: Send {
-    /// The reply type which must be parsable from a byte blob.
-    type Reply: TryFrom<Vec<u8>>;
-
+pub trait ConnectionDelegate<A, S: NetSession>: Send {
     /// Asks the delegate to construct a connection to the remote server and return it as a form of
     /// [`NetSession`] to be registered and managed by the reactor and [`ClientService`] inside of
     /// it.
@@ -77,18 +72,24 @@ pub trait ClientDelegate<A, S: NetSession, E: Send + Debug = ()>: Send {
     /// reactor will terminate.
     fn on_disconnect(&self, err: io::Error, attempt: usize) -> OnDisconnect;
 
+    /// Callback for processing reactor [`Error`]s.
+    fn on_io_error(&self, err: Error<ImpossibleResource, NetTransport<S>>);
+}
+
+/// The set of callbacks used by the client to notify the business logic about events happening
+/// inside the reactor.
+pub trait ClientDelegate<A, S: NetSession, E: Send + Debug = ()>: ConnectionDelegate<A, S> {
+    /// The reply type which must be parsable from a byte blob.
+    type Reply: TryFrom<Vec<u8>>;
+
+    fn before_send(&mut self, data: Vec<u8>, _extra: E) -> Vec<u8> { data }
+
     /// Callback for processing the message received from the server.
     fn on_reply(&mut self, reply: Self::Reply);
 
     /// Callback for processing invalid message received from the server which can't be parsed into
     /// [`Self::Reply`] type.
-    // TODO: Make it just an error
     fn on_reply_unparsable(&self, err: <Self::Reply as TryFrom<Vec<u8>>>::Error);
-
-    /// Callback for processing reactor [`Error`]s.
-    fn on_error(&self, err: Error<ImpossibleResource, NetTransport<S>>);
-
-    fn before_send(&mut self, data: Vec<u8>, _extra: E) -> Vec<u8> { data }
 }
 
 pub struct ClientService<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug> {
@@ -223,7 +224,7 @@ impl<A: Send, S: NetSession, D: ClientDelegate<A, S, E>, E: Send + Debug> reacto
     }
 
     fn handle_error(&mut self, err: Error<Self::Listener, Self::Transport>) {
-        self.delegate.on_error(err)
+        self.delegate.on_io_error(err)
     }
 
     fn handover_listener(&mut self, _: ResourceId, _: Self::Listener) {
