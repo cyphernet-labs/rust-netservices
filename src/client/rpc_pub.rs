@@ -25,16 +25,11 @@
 // TODO: Provide mechanism for detecting and reacting on RPC reply timeouts
 
 use std::any::Any;
-use std::collections::HashMap;
 use std::io;
-use std::marker::PhantomData;
 
-use super::{Client, ClientDelegate, ConnectionDelegate, OnDisconnect};
+use super::{Client, ClientDelegate, ConnectionDelegate, OnDisconnect, RpcDelegate};
+use crate::client::rpc::{Cb, RpcReply, RpcService};
 use crate::{ImpossibleResource, NetSession, NetTransport};
-
-/// RPC callback type, which is a function closure taking single argument - sever reply message. The
-/// closure must be sendable between threads and is called in the context of the reactor thread.
-pub type Cb<Rep> = Box<dyn FnOnce(Rep) + Send>;
 
 /// Tag byte signifying RPC server reply.
 pub const CLIENT_MSG_ID_RPC: u8 = 0x01u8;
@@ -52,7 +47,7 @@ pub enum RpcPubId {
 
 /// Server message, which may be an RPC reply of Pub message.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub struct Msg {
+pub struct RpcPubMsg {
     /// Message id, representing its type and indicating related RPC request or Pub topic
     /// subscription.
     pub id: RpcPubId,
@@ -60,10 +55,10 @@ pub struct Msg {
     pub payload: Vec<u8>,
 }
 
-/// Errors parsing server message [`Msg`] from the raw bytes received from the server.
+/// Errors parsing server message [`RpcPubMsg`] from the raw bytes received from the server.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Display, Error)]
 #[display(doc_comments)]
-pub enum ParseMsgErr {
+pub enum ParseRpcPubError {
     /// the received message is empty and lacks RPCPub identifier.
     Empty,
 
@@ -74,17 +69,17 @@ pub enum ParseMsgErr {
     InvalidTag(u8),
 }
 
-impl TryFrom<Vec<u8>> for Msg {
-    type Error = ParseMsgErr;
+impl TryFrom<Vec<u8>> for RpcPubMsg {
+    type Error = ParseRpcPubError;
 
     fn try_from(data: Vec<u8>) -> Result<Self, Self::Error> {
         let Some(tag) = data.get(0) else {
-            return Err(ParseMsgErr::Empty);
+            return Err(ParseRpcPubError::Empty);
         };
         let mut data = &data[1..];
         let id = match *tag {
-            CLIENT_MSG_ID_RPC if data.len() < 8 => return Err(ParseMsgErr::NoId),
-            CLIENT_MSG_ID_PUB if data.len() < 2 => return Err(ParseMsgErr::NoId),
+            CLIENT_MSG_ID_RPC if data.len() < 8 => return Err(ParseRpcPubError::NoId),
+            CLIENT_MSG_ID_PUB if data.len() < 2 => return Err(ParseRpcPubError::NoId),
             CLIENT_MSG_ID_RPC => {
                 let mut id = [0u8; 8];
                 id.copy_from_slice(&data[0..8]);
@@ -97,15 +92,15 @@ impl TryFrom<Vec<u8>> for Msg {
                 data = &data[2..];
                 RpcPubId::Pub(u16::from_le_bytes(id))
             }
-            wrong => return Err(ParseMsgErr::InvalidTag(wrong)),
+            wrong => return Err(ParseRpcPubError::InvalidTag(wrong)),
         };
         let payload = data.to_vec();
-        Ok(Msg { id, payload })
+        Ok(RpcPubMsg { id, payload })
     }
 }
 
-impl From<Msg> for Vec<u8> {
-    fn from(msg: Msg) -> Self {
+impl From<RpcPubMsg> for Vec<u8> {
+    fn from(msg: RpcPubMsg) -> Self {
         let mut data = Vec::with_capacity(msg.payload.len() + 9);
         match msg.id {
             RpcPubId::Rpc(id) => {
@@ -125,52 +120,31 @@ impl From<Msg> for Vec<u8> {
 /// Error processing servr message.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Display, Error)]
 #[display(doc_comments)]
-pub enum MsgError {
+pub enum RpcPubError {
     /// server message can't be parsed due to {0}
-    UnparsableMsg(String),
-    /// server RPC reply message with id {0} can't be parsed due to {1}
-    UnparsableReply(u64, String),
+    UnparsableMsg(ParseRpcPubError),
     /// server Pub message with topic {0} can't be parsed due to {1}
     UnparsablePub(u16, String),
-    /// server RPC reply with id {0} doesn't match any previous RPC request.
-    MismatchingReply(u64, Vec<u8>),
 }
 
 /// Set of callbacks used by the RPC+Pub client to notify business logic about server messages.
-pub trait RpcPubDelegate<A: Send, S: NetSession>: ConnectionDelegate<A, S> {
-    /// The RPC reply type which must be parsable from a byte blob.
-    type Reply: TryFrom<Vec<u8>, Error: std::error::Error>;
+pub trait RpcPubDelegate<A: Send, S: NetSession>: RpcDelegate<A, S> {
     /// Pub server message type which must be parsable from a byte blob.
     type PubMsg: TryFrom<Vec<u8>, Error: std::error::Error>;
 
-    /// Callback for processing invalid message received from the server which can't be parsed into
-    /// [`Msg`] type.
-    fn on_msg_error(&self, err: MsgError);
-
     /// Callback on receiving RPC reply.
     fn on_msg_pub(&self, id: u16, msg: Self::PubMsg);
-
-    /// Callback for processing the message received from the server.
-    fn on_reply(&mut self, reply: Self::Reply);
 }
 
 /// Service handing RPC and Pub message processing.
 struct RpcPubService<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> {
-    delegate: D,
-    /// The first unused id for RPC request-reply pairs.
-    last_id: u64,
-    /// RPC reply callbacks, mapped from the RPC id used in the request message.
-    callbacks: HashMap<u64, Cb<D::Reply>>,
-    _phantom: PhantomData<(A, S)>,
+    inner: RpcService<A, S, D>,
 }
 
 impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> RpcPubService<A, S, D> {
     pub fn new(delegate: D) -> Self {
         RpcPubService {
-            delegate,
-            last_id: 0,
-            callbacks: empty!(),
-            _phantom: PhantomData,
+            inner: RpcService::new(delegate),
         }
     }
 }
@@ -178,88 +152,58 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> RpcPubService<A, S, D> {
 impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ConnectionDelegate<A, S>
     for RpcPubService<A, S, D>
 {
-    fn connect(&self, remote: &A) -> S { self.delegate.connect(remote) }
+    fn connect(&self, remote: &A) -> S { self.inner.connect(remote) }
 
     fn on_established(&self, artifact: S::Artifact, attempt: usize) {
-        self.delegate.on_established(artifact, attempt)
+        self.inner.on_established(artifact, attempt)
     }
 
     fn on_disconnect(&self, err: io::Error, attempt: usize) -> OnDisconnect {
-        self.delegate.on_disconnect(err, attempt)
+        self.inner.on_disconnect(err, attempt)
     }
 
     fn on_io_error(&self, err: reactor::Error<ImpossibleResource, NetTransport<S>>) {
-        self.delegate.on_io_error(err)
+        self.inner.on_io_error(err)
     }
 }
 
 impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, Cb<D::Reply>>
     for RpcPubService<A, S, D>
 {
-    type Reply = Msg;
+    type Reply = RpcPubMsg;
 
     fn before_send(&mut self, data: Vec<u8>, cb: Cb<D::Reply>) -> Vec<u8> {
-        let id = self.last_id;
-        #[cfg(feature = "log")]
-        log::trace!(target: "netservices-client", "sending RPC request to the server (RPC id={id})");
-
-        let mut req = Vec::with_capacity(data.len() + 9);
-        let check = self.callbacks.insert(id, cb);
-        debug_assert!(check.is_none());
-        req.push(CLIENT_MSG_ID_RPC);
-        req.extend(id.to_le_bytes());
-        req.extend(data);
-        self.last_id += 1;
-        req
+        self.inner.before_send(data, cb)
     }
 
-    fn on_reply(&mut self, msg: Msg) {
+    fn on_reply(&mut self, msg: RpcPubMsg) {
         match msg.id {
-            RpcPubId::Rpc(id) => {
-                if let Some(cb) = self.callbacks.remove(&id) {
-                    match D::Reply::try_from(msg.payload) {
-                        Ok(reply) => {
-                            #[cfg(feature = "log")]
-                            log::trace!(target: "netservices-client", "received RPC reply for the request with RPC id={id}. Calling callback.");
-
-                            cb(reply)
-                        }
-                        Err(e) => {
-                            #[cfg(feature = "log")]
-                            log::error!(target: "netservices-client", "received unparsable RPC reply for the request with RPC id={id}. Parse error: {e}");
-
-                            self.delegate.on_msg_error(MsgError::UnparsableReply(id, e.to_string()))
-                        }
-                    }
-                } else {
-                    #[cfg(feature = "log")]
-                    log::error!(target: "netservices-client", "received RPC reply from the server with no matching callback (RPC id={id})");
-
-                    self.delegate.on_msg_error(MsgError::MismatchingReply(id, msg.payload));
-                }
-            }
+            RpcPubId::Rpc(id) => self.inner.on_reply(RpcReply {
+                id,
+                payload: msg.payload,
+            }),
             RpcPubId::Pub(id) => match D::PubMsg::try_from(msg.payload) {
                 Ok(msg_pub) => {
                     #[cfg(feature = "log")]
                     log::trace!(target: "netservices-client", "received Pub message with Pub id={id}. Notifying the delegate.");
 
-                    self.delegate.on_msg_pub(id, msg_pub)
+                    self.inner.delegate.on_msg_pub(id, msg_pub)
                 }
                 Err(e) => {
                     #[cfg(feature = "log")]
                     log::error!(target: "netservices-client", "received unparsable Pub message from the server with Pub id={id}. Parse error: {e}");
 
-                    self.delegate.on_msg_error(MsgError::UnparsablePub(id, e.to_string()))
+                    self.inner.delegate.on_msg_error(RpcPubError::UnparsablePub(id, e.to_string()))
                 }
             },
         }
     }
 
-    fn on_reply_unparsable(&self, err: <Self::Reply as TryFrom<Vec<u8>>>::Error) {
+    fn on_reply_unparsable(&self, err: ParseRpcPubError) {
         #[cfg(feature = "log")]
         log::error!(target: "netservices-client", "received unparsable server message. Parse error: {err}");
 
-        self.delegate.on_msg_error(MsgError::UnparsableMsg(err.to_string()))
+        self.inner.delegate.on_msg_error(RpcPubError::UnparsableMsg(err))
     }
 }
 

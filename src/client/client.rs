@@ -23,9 +23,8 @@
 //!
 //! Supports exchanging of requests and replies in asynchronous mode.
 //!
-//! For specific applications, please check [`super::RpcClient`], [`super::RpcDuplexClient`],
-//! [`super::PubSubClient`] ans [`super::RpcPubClient`] implementing and enforcing specific
-//! client-server protocols.
+//! For specific applications, please check [`super::RpcClient`], [`super::PubSubClient`] and
+//! [`super::RpcPubClient`] implementing and enforcing specific client-server protocols.
 
 use std::any::Any;
 use std::collections::VecDeque;
