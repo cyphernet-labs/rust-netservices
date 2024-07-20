@@ -19,6 +19,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Client-server RPC protocol allowing asynchronous delivery of server-client messages which are
+//! not replies to any specific client request. Combines properties of classic RPC and PubSub.
+
+// TODO: Provide mechanism for detecting and reacting on RPC reply timeouts
+
 use std::any::Any;
 use std::collections::HashMap;
 use std::io;
@@ -27,23 +32,35 @@ use std::marker::PhantomData;
 use super::{Client, ClientDelegate, ConnectionDelegate, OnDisconnect};
 use crate::{ImpossibleResource, NetSession, NetTransport};
 
+/// RPC callback type, which is a function closure taking single argument - sever reply message. The
+/// closure must be sendable between threads and is called in the context of the reactor thread.
 pub type Cb<Rep> = Box<dyn FnOnce(Rep) + Send>;
 
+/// Tag byte signifying RPC server reply.
 pub const CLIENT_MSG_ID_RPC: u8 = 0x01u8;
+/// Tag byte signifying Pub server message.
 pub const CLIENT_MSG_ID_PUB: u8 = 0x10u8;
 
+/// Tagged message id type, distinguishing RPC server replies from Pub server messages.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum RpcPubId {
+    /// RPC message id.
     Rpc(u64),
+    /// Pub message id.
     Pub(u16),
 }
 
+/// Server message, which may be an RPC reply of Pub message.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Msg {
+    /// Message id, representing its type and indicating related RPC request or Pub topic
+    /// subscription.
     pub id: RpcPubId,
+    /// Unparsed message data.
     pub payload: Vec<u8>,
 }
 
+/// Errors parsing server message [`Msg`] from the raw bytes received from the server.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Display, Error)]
 #[display(doc_comments)]
 pub enum ParseMsgErr {
@@ -105,35 +122,44 @@ impl From<Msg> for Vec<u8> {
     }
 }
 
+/// Error processing servr message.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Display, Error)]
 #[display(doc_comments)]
 pub enum MsgError {
+    /// server message can't be parsed due to {0}
     UnparsableMsg(String),
+    /// server RPC reply message with id {0} can't be parsed due to {1}
     UnparsableReply(u64, String),
-    UnparsablePub(String),
+    /// server Pub message with topic {0} can't be parsed due to {1}
+    UnparsablePub(u16, String),
+    /// server RPC reply with id {0} doesn't match any previous RPC request.
     MismatchingReply(u64, Vec<u8>),
 }
 
+/// Set of callbacks used by the RPC+Pub client to notify business logic about server messages.
 pub trait RpcPubDelegate<A: Send, S: NetSession>: ConnectionDelegate<A, S> {
-    /// The reply type which must be parsable from a byte blob.
+    /// The RPC reply type which must be parsable from a byte blob.
     type Reply: TryFrom<Vec<u8>, Error: std::error::Error>;
+    /// Pub server message type which must be parsable from a byte blob.
     type PubMsg: TryFrom<Vec<u8>, Error: std::error::Error>;
 
     /// Callback for processing invalid message received from the server which can't be parsed into
-    /// [`Self::Reply`] type.
+    /// [`Msg`] type.
     fn on_msg_error(&self, err: MsgError);
 
+    /// Callback on receiving RPC reply.
     fn on_msg_pub(&self, id: u16, msg: Self::PubMsg);
-
-    fn on_reply_timed_out(&self, id: u64);
 
     /// Callback for processing the message received from the server.
     fn on_reply(&mut self, reply: Self::Reply);
 }
 
-pub struct RpcPubService<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> {
+/// Service handing RPC and Pub message processing.
+struct RpcPubService<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> {
     delegate: D,
+    /// The first unused id for RPC request-reply pairs.
     last_id: u64,
+    /// RPC reply callbacks, mapped from the RPC id used in the request message.
     callbacks: HashMap<u64, Cb<D::Reply>>,
     _phantom: PhantomData<(A, S)>,
 }
@@ -174,6 +200,9 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, Cb<D:
 
     fn before_send(&mut self, data: Vec<u8>, cb: Cb<D::Reply>) -> Vec<u8> {
         let id = self.last_id;
+        #[cfg(feature = "log")]
+        log::trace!(target: "netservices-client", "sending RPC request to the server (RPC id={id})");
+
         let mut req = Vec::with_capacity(data.len() + 9);
         let check = self.callbacks.insert(id, cb);
         debug_assert!(check.is_none());
@@ -189,23 +218,47 @@ impl<A: Send, S: NetSession, D: RpcPubDelegate<A, S>> ClientDelegate<A, S, Cb<D:
             RpcPubId::Rpc(id) => {
                 if let Some(cb) = self.callbacks.remove(&id) {
                     match D::Reply::try_from(msg.payload) {
-                        Ok(reply) => cb(reply),
+                        Ok(reply) => {
+                            #[cfg(feature = "log")]
+                            log::trace!(target: "netservices-client", "received RPC reply for the request with RPC id={id}. Calling callback.");
+
+                            cb(reply)
+                        }
                         Err(e) => {
+                            #[cfg(feature = "log")]
+                            log::error!(target: "netservices-client", "received unparsable RPC reply for the request with RPC id={id}. Parse error: {e}");
+
                             self.delegate.on_msg_error(MsgError::UnparsableReply(id, e.to_string()))
                         }
                     }
                 } else {
+                    #[cfg(feature = "log")]
+                    log::error!(target: "netservices-client", "received RPC reply from the server with no matching callback (RPC id={id})");
+
                     self.delegate.on_msg_error(MsgError::MismatchingReply(id, msg.payload));
                 }
             }
             RpcPubId::Pub(id) => match D::PubMsg::try_from(msg.payload) {
-                Ok(msg_pub) => self.delegate.on_msg_pub(id, msg_pub),
-                Err(e) => self.delegate.on_msg_error(MsgError::UnparsablePub(e.to_string())),
+                Ok(msg_pub) => {
+                    #[cfg(feature = "log")]
+                    log::trace!(target: "netservices-client", "received Pub message with Pub id={id}. Notifying the delegate.");
+
+                    self.delegate.on_msg_pub(id, msg_pub)
+                }
+                Err(e) => {
+                    #[cfg(feature = "log")]
+                    log::error!(target: "netservices-client", "received unparsable Pub message from the server with Pub id={id}. Parse error: {e}");
+
+                    self.delegate.on_msg_error(MsgError::UnparsablePub(id, e.to_string()))
+                }
             },
         }
     }
 
     fn on_reply_unparsable(&self, err: <Self::Reply as TryFrom<Vec<u8>>>::Error) {
+        #[cfg(feature = "log")]
+        log::error!(target: "netservices-client", "received unparsable server message. Parse error: {err}");
+
         self.delegate.on_msg_error(MsgError::UnparsableMsg(err.to_string()))
     }
 }
@@ -217,6 +270,9 @@ pub struct RpcPubClient<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> {
 }
 
 impl<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> RpcPubClient<Req, Rep> {
+    /// Constructs new client for RPC+Pub protocol. Takes service callback delegate and remote
+    /// server address. Will attempt to connect to the server automatically once the reactor thread
+    /// has started.
     pub fn new<
         A: Send + 'static,
         S: NetSession + 'static,
@@ -230,9 +286,12 @@ impl<Req: Into<Vec<u8>>, Rep: TryFrom<Vec<u8>> + 'static> RpcPubClient<Req, Rep>
         Ok(Self { inner: client })
     }
 
-    pub fn send(&mut self, data: Req, cb: impl FnOnce(Rep) + Send + 'static) -> io::Result<()> {
-        self.inner.send_extra(data, Box::new(cb))
+    /// Sends a new RPC request to the server. The second argument is a closure which will be called
+    /// back upon receiving reply from the server.
+    pub fn send(&mut self, req: Req, cb: impl FnOnce(Rep) + Send + 'static) -> io::Result<()> {
+        self.inner.send_extra(req, Box::new(cb))
     }
 
+    /// Terminates the client, disconnecting from the server and stopping the reactor thread.
     pub fn terminate(self) -> Result<(), Box<dyn Any + Send>> { self.inner.terminate() }
 }

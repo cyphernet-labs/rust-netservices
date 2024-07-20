@@ -37,6 +37,7 @@ mod split;
 
 #[cfg(feature = "io-reactor")]
 pub mod resource;
+#[cfg(feature = "io-reactor")]
 pub mod client;
 
 pub const READ_BUFFER_SIZE: usize = u16::MAX as usize;
