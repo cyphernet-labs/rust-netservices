@@ -44,6 +44,9 @@ pub enum NodeCtl {
     Terminate,
 }
 
+// TODO: Do a proper metrics measurements
+// TODO: Consider collecting metrics using Marshaller; move (dis)connection counting to business
+//       logic
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct Metrics {
     pub bytes_sent: usize,
