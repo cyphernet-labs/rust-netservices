@@ -22,6 +22,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::os::fd::{AsRawFd, RawFd};
+use std::sync::Arc;
 use std::{io, net};
 
 use cyphernet::addr::Addr;
@@ -31,6 +32,7 @@ use reactor::{Action, Error, Reactor, Resource, ResourceId, ResourceType, Timest
 use super::{DisconnectReason, Inbound, Outbound, Remote, RemoteId, Remotes};
 use crate::{
     Direction, ListenerEvent, NetAccept, NetConnection, NetListener, NetSession, NetTransport,
+    SessionEvent,
 };
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -65,7 +67,16 @@ pub trait NodeController<
     fn accept(&mut self, remote: A, connection: S::Connection)
         -> Result<S, impl std::error::Error>;
 
+    fn on_listening(&mut self, socket: net::SocketAddr);
+
+    fn on_disconnected(&mut self, id: I, direction: Direction, reason: &DisconnectReason);
+
+    /// Called when a listener get disconnected and handed over by the reactor
+    fn on_unbound(&mut self, listener: NetAccept<S, L>);
+
     fn on_tick(&mut self, time: Timestamp, metrics: &HashMap<I, Metrics>);
+
+    fn on_command(&mut self, cmd: NodeCtl);
 
     fn on_timer(&mut self);
 
@@ -165,6 +176,24 @@ impl<
             },
         }
     }
+
+    fn cleanup(&mut self, res_id: ResourceId, fd: RawFd) {
+        if self.inbound.remove(&fd).is_some() {
+            #[cfg(feature = "log")]
+            log::debug!(target: "wire", "Cleaning up inbound peer state with id={res_id} (fd={fd})");
+        } else if let Some(outbound) = self.outbound.remove(&fd) {
+            #[cfg(feature = "log")]
+            log::debug!(target: "wire", "Cleaning up outbound peer state with id={res_id} (fd={fd})");
+            self.controller.on_disconnected(
+                outbound.id,
+                Direction::Outbound,
+                &DisconnectReason::connection(),
+            );
+        } else {
+            #[cfg(feature = "log")]
+            log::warn!(target: "wire", "Tried to cleanup unknown peer with id={res_id} (fd={fd})");
+        }
+    }
 }
 
 impl<
@@ -192,20 +221,20 @@ impl<
             ListenerEvent::Accepted(connection) => {
                 let Ok(remote) = connection.remote_addr() else {
                     #[cfg(feature = "log")]
-                    log::warn!(target: "wire", "Accepted connection doesn't have remote address; dropping..");
+                    log::warn!(target: "wire", "Accepted connection doesn't have remote address; dropping");
                     drop(connection);
 
                     return;
                 };
                 let fd = connection.as_raw_fd();
                 #[cfg(feature = "log")]
-                log::debug!(target: "wire", "Inbound connection from {remote} (fd={fd})..");
+                log::debug!(target: "wire", "Inbound connection from {remote} (fd={fd})");
 
                 // If the service doesn't want to accept this connection,
                 // we drop the connection here, which disconnects the socket.
                 if !self.controller.should_accept(&remote) {
                     #[cfg(feature = "log")]
-                    log::debug!(target: "wire", "Rejecting inbound connection from {remote} (fd={fd})..");
+                    log::debug!(target: "wire", "Rejecting inbound connection from {remote} (fd={fd})");
                     drop(connection);
 
                     return;
@@ -227,7 +256,8 @@ impl<
                         return;
                     }
                 };
-                log::debug!(target: "wire", "Accepted inbound connection from {remote} (fd={fd})..");
+                #[cfg(feature = "log")]
+                log::debug!(target: "wire", "Accepted inbound connection from {remote} (fd={fd})");
 
                 self.inbound.insert(fd, Inbound {
                     res_id: None,
@@ -248,18 +278,130 @@ impl<
         event: <Self::Transport as Resource>::Event,
         time: Timestamp,
     ) {
-        todo!()
+        match event {
+            SessionEvent::Established(_, _) => todo!(),
+            SessionEvent::Data(_) => todo!(),
+            SessionEvent::Terminated(err) => {
+                self.disconnect(id, DisconnectReason::Connection(Arc::new(err)));
+            }
+        }
     }
 
-    fn handle_registered(&mut self, fd: RawFd, id: ResourceId, ty: ResourceType) { todo!() }
+    fn handle_registered(&mut self, fd: RawFd, id: ResourceId, ty: ResourceType) {
+        match ty {
+            ResourceType::Listener => {
+                if let Some(local_addr) = self.listening.remove(&fd) {
+                    self.controller.on_listening(local_addr);
+                }
+            }
+            ResourceType::Transport => {
+                if let Some(outbound) = self.outbound.get_mut(&fd) {
+                    #[cfg(feature = "log")]
+                    log::debug!(target: "wire", "Outbound remote resource registered for {} with id={id} (fd={fd})", outbound.id);
+                    outbound.res_id = Some(id);
+                } else if let Some(inbound) = self.inbound.get_mut(&fd) {
+                    #[cfg(feature = "log")]
+                    log::debug!(target: "wire", "Inbound remote resource registered with id={id} (fd={fd})");
+                    inbound.res_id = Some(id);
+                } else {
+                    #[cfg(feature = "log")]
+                    log::warn!(target: "wire", "Unknown remote registered with id={id} (fd={fd})");
+                }
+            }
+        }
+    }
 
-    fn handle_command(&mut self, cmd: Self::Command) { todo!() }
+    fn handle_command(&mut self, cmd: Self::Command) { self.controller.on_command(cmd) }
 
-    fn handle_error(&mut self, err: Error<Self::Listener, Self::Transport>) { todo!() }
+    fn handle_error(&mut self, err: Error<Self::Listener, Self::Transport>) {
+        match err {
+            Error::Poll(err) => {
+                // TODO: This should be a fatal error, there's nothing we can do here.
+                #[cfg(feature = "log")]
+                log::error!(target: "wire", "Can't poll connections: {err}");
+            }
+            Error::ListenerDisconnect(id, _) => {
+                // TODO: This should be a fatal error, there's nothing we can do here.
+                #[cfg(feature = "log")]
+                log::error!(target: "wire", "Listener {id} disconnected");
+            }
+            Error::TransportDisconnect(id, transport) => {
+                let fd = transport.as_raw_fd();
+                #[cfg(feature = "log")]
+                log::error!(target: "wire", "Remote id={id} (fd={fd}) disconnected");
 
-    fn handover_listener(&mut self, id: ResourceId, listener: Self::Listener) { todo!() }
+                // We're dropping the transport (and underlying network connection) here.
+                drop(transport);
 
-    fn handover_transport(&mut self, id: ResourceId, transport: Self::Transport) { todo!() }
+                // The remote transport is already disconnected and removed from the reactor;
+                // therefore there is no need to initiate a disconnection. We simply remove
+                // the remote from the map.
+                match self.remotes.remove(&id) {
+                    Some(mut remote) => {
+                        if let Some(id) = remote.id() {
+                            self.controller.on_disconnected(
+                                id,
+                                remote.direction(),
+                                &DisconnectReason::connection(),
+                            );
+                        } else {
+                            #[cfg(feature = "log")]
+                            log::debug!(target: "wire", "Inbound disconnection before handshake; ignoring")
+                        }
+                    }
+                    None => self.cleanup(id, fd),
+                }
+            }
+        }
+    }
+
+    fn handover_listener(&mut self, res_id: ResourceId, listener: Self::Listener) {
+        #[cfg(feature = "log")]
+        log::debug!(target: "wire", "Listener was unbound with id={res_id} (fd={})", listener.as_raw_fd());
+        self.controller.on_unbound(listener)
+    }
+
+    fn handover_transport(&mut self, res_id: ResourceId, transport: Self::Transport) {
+        let fd = transport.as_raw_fd();
+
+        match self.remotes.entry(res_id) {
+            Entry::Occupied(entry) => {
+                match entry.get() {
+                    Remote::Disconnecting {
+                        id,
+                        reason,
+                        direction,
+                        ..
+                    } => {
+                        #[cfg(feature = "log")]
+                        log::debug!(target: "wire", "Transport handover for disconnecting remote with id={res_id} (fd={fd})");
+
+                        // Disconnect TCP stream.
+                        drop(transport);
+
+                        // If there is no NID, the service is not aware of the peer.
+                        if let Some(id) = id {
+                            // In the case of a conflicting connection, there will be two resources
+                            // for the peer. However, at the service level, there is only one, and
+                            // it is identified by NID.
+                            //
+                            // Therefore, we specify which of the connections we're closing by
+                            // passing the `link`.
+                            self.controller.on_disconnected(*id, *direction, reason);
+                        }
+                        entry.remove();
+                    }
+                    Remote::Connected { id, .. } => {
+                        panic!(
+                            "Unexpected handover of connected remote {} with id={res_id} (fd={fd})",
+                            id
+                        );
+                    }
+                }
+            }
+            Entry::Vacant(_) => self.cleanup(res_id, fd),
+        }
+    }
 }
 
 impl<

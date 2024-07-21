@@ -54,6 +54,18 @@ pub enum DisconnectReason {
     Command,
 }
 
+impl DisconnectReason {
+    pub fn is_dial_err(&self) -> bool { matches!(self, Self::Dial(_)) }
+
+    pub fn is_connection_err(&self) -> bool { matches!(self, Self::Connection(_)) }
+
+    pub fn connection() -> Self {
+        DisconnectReason::Connection(Arc::new(std::io::Error::from(
+            std::io::ErrorKind::ConnectionReset,
+        )))
+    }
+}
+
 /// The initial state of an outbound peer before handshake is completed.
 /// The initial state of an inbound remote before handshake is completed.
 #[derive(Debug)]
