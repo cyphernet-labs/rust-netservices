@@ -51,7 +51,7 @@ pub use listener::NetListener;
 pub use resource::{ImpossibleResource, ListenerEvent, NetAccept, NetTransport, SessionEvent};
 #[cfg(feature = "reactor")]
 pub use server::tunnel;
-pub use session::{NetProtocol, NetSession, NetStateMachine};
+pub use session::{Artifact, NetProtocol, NetSession, NetStateMachine, NodeId};
 pub use split::{NetReader, NetWriter, SplitIo, SplitIoError, TcpReader, TcpWriter};
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display)]

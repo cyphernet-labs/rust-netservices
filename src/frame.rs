@@ -23,7 +23,7 @@ use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 
 pub trait Frame: Send + Sized {
-    type Error: std::error::Error + Sync + Send;
+    type Error: std::error::Error + Sync + Send + 'static;
 
     /// Reads frame from the stream.
     ///

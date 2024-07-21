@@ -30,9 +30,9 @@ use cyphernet::addr::Addr;
 use reactor::poller::popol;
 use reactor::{Action, Error, Reactor, Resource, ResourceId, ResourceType, Timestamp};
 
-use super::{DisconnectReason, Inbound, NodeId, Outbound, Remote, Remotes};
+use super::{DisconnectReason, Inbound, Outbound, Remote, Remotes};
 use crate::{
-    Direction, Frame, ListenerEvent, NetAccept, NetConnection, NetListener, NetSession,
+    Artifact, Direction, Frame, ListenerEvent, NetAccept, NetConnection, NetListener, NetSession,
     NetTransport, SessionEvent,
 };
 
@@ -50,12 +50,8 @@ pub struct Metrics {
     pub disconnects: usize,
 }
 
-pub trait NodeController<
-    A: Addr + Send,
-    I: NodeId,
-    S: NetSession,
-    L: NetListener<Stream = S::Connection>,
->: Send
+pub trait NodeController<A: Addr + Send, S: NetSession, L: NetListener<Stream = S::Connection>>:
+    Send
 {
     type Frame: Frame;
 
@@ -77,14 +73,29 @@ pub trait NodeController<
 
     fn on_listener_failure(&mut self, res_id: ResourceId, err: io::Error, time: Timestamp);
 
-    fn on_established(&mut self, id: I, addr: A, direction: Direction, time: Timestamp);
+    fn on_established(
+        &mut self,
+        remote_id: <S::Artifact as Artifact>::NodeId,
+        addr: A,
+        direction: Direction,
+        time: Timestamp,
+    );
 
-    fn on_disconnected(&mut self, id: I, direction: Direction, reason: &DisconnectReason);
+    fn on_disconnected(
+        &mut self,
+        remote_id: <S::Artifact as Artifact>::NodeId,
+        direction: Direction,
+        reason: &DisconnectReason,
+    );
 
     /// Called when a listener get disconnected and handed over by the reactor
     fn on_unbound(&mut self, listener: NetAccept<S, L>);
 
-    fn on_tick(&mut self, time: Timestamp, metrics: &HashMap<I, Metrics>);
+    fn on_tick(
+        &mut self,
+        time: Timestamp,
+        metrics: &HashMap<<S::Artifact as Artifact>::NodeId, Metrics>,
+    );
 
     fn on_command(&mut self, cmd: NodeCtl);
 
@@ -95,37 +106,38 @@ pub trait NodeController<
 
     /// Called on failure of frame parsing, before disconnecting the remote and calling
     /// [`on_disconnect`].
-    fn on_frame_unparsable(&mut self, err: <Self::Frame as Frame>::Error);
+    fn on_frame_unparsable(&mut self, err: &<Self::Frame as Frame>::Error);
 }
 
 struct NodeService<
-    I: NodeId,
     S: NetSession,
     L: NetListener<Stream = S::Connection>,
-    C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L>,
+    C: NodeController<<S::Connection as NetConnection>::Addr, S, L>,
 > {
     /// Id of this node.
-    local_id: I,
+    local_id: <S::Artifact as Artifact>::NodeId,
     /// Server message processor implementing server business logic.
     controller: C,
     listening: HashMap<RawFd, net::SocketAddr>,
     inbound: HashMap<RawFd, Inbound<<S::Connection as NetConnection>::Addr>>,
-    outbound: HashMap<RawFd, Outbound<<S::Connection as NetConnection>::Addr, I>>,
-    remotes: Remotes<<S::Connection as NetConnection>::Addr, I>,
-    metrics: HashMap<I, Metrics>,
+    outbound: HashMap<
+        RawFd,
+        Outbound<<S::Connection as NetConnection>::Addr, <S::Artifact as Artifact>::NodeId>,
+    >,
+    remotes: Remotes<<S::Connection as NetConnection>::Addr, <S::Artifact as Artifact>::NodeId>,
+    metrics: HashMap<<S::Artifact as Artifact>::NodeId, Metrics>,
     /// Buffer for the actions which has to be delivered to the reactor when it calls the
     /// [`NodeService`] as an iterator.
     actions: VecDeque<Action<NetAccept<S, L>, NetTransport<S>>>,
 }
 
 impl<
-        I: NodeId,
         S: NetSession,
         L: NetListener<Stream = S::Connection>,
-        C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L>,
-    > NodeService<I, S, L, C>
+        C: NodeController<<S::Connection as NetConnection>::Addr, S, L>,
+    > NodeService<S, L, C>
 {
-    pub fn new(node_id: I, controller: C) -> Self {
+    pub fn new(node_id: <S::Artifact as Artifact>::NodeId, controller: C) -> Self {
         NodeService {
             local_id: node_id,
             controller,
@@ -147,7 +159,7 @@ impl<
         &mut self,
         res_id: ResourceId,
         reason: DisconnectReason,
-    ) -> Option<(I, Direction)> {
+    ) -> Option<(<S::Artifact as Artifact>::NodeId, Direction)> {
         match self.remotes.entry(res_id) {
             Entry::Vacant(_) => {
                 // Connecting remote with no session.
@@ -217,11 +229,10 @@ impl<
 }
 
 impl<
-        I: NodeId,
         S: NetSession,
         L: NetListener<Stream = S::Connection>,
-        C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L>,
-    > reactor::Handler for NodeService<I, S, L, C>
+        C: NodeController<<S::Connection as NetConnection>::Addr, S, L>,
+    > reactor::Handler for NodeService<S, L, C>
 {
     type Listener = NetAccept<S, L>;
     type Transport = NetTransport<S>;
@@ -302,9 +313,11 @@ impl<
         match event {
             SessionEvent::Established(fd, artifact) => {
                 // SAFETY: With the NoiseXK protocol, there is always a remote static key.
-                let remote_id = artifact.remote_id();
+                let remote_id = artifact
+                    .remote_id()
+                    .expect("remote node ID must be known when the session is established");
                 // Make sure we don't try to connect to ourselves by mistake.
-                if &remote_id == self.local_id {
+                if remote_id == self.local_id {
                     #[cfg(feature = "log")]
                     log::error!(target: "wire", "Self-connection detected, disconnecting");
                     self.disconnect(res_id, DisconnectReason::SelfConnection);
@@ -463,7 +476,7 @@ impl<
                                 #[cfg(feature = "log")]
                                 log::debug!(target: "wire", "Dropping read buffer for {remote_id} with {} bytes", marshaller.read_queue_len());
                             }
-                            self.controller.on_frame_unparsable(err);
+                            self.controller.on_frame_unparsable(&err);
                             self.disconnect(res_id, DisconnectReason::Framing(Arc::new(err)));
                             break;
                         }
@@ -594,11 +607,10 @@ impl<
 }
 
 impl<
-        I: NodeId,
         S: NetSession,
         L: NetListener<Stream = S::Connection>,
-        C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L>,
-    > Iterator for NodeService<I, S, L, C>
+        C: NodeController<<S::Connection as NetConnection>::Addr, S, L>,
+    > Iterator for NodeService<S, L, C>
 {
     type Item = Action<NetAccept<S, L>, NetTransport<S>>;
 
@@ -622,15 +634,18 @@ impl Node {
     /// server address. Will attempt to connect to the server automatically once the reactor thread
     /// has started.
     pub fn new<
-        I: NodeId + 'static,
         S: NetSession + 'static,
         L: NetListener<Stream = S::Connection> + 'static,
-        C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L> + 'static,
+        C: NodeController<<S::Connection as NetConnection>::Addr, S, L> + 'static,
     >(
-        note_id: I,
+        note_id: <S::Artifact as Artifact>::NodeId,
         delegate: C,
+        listen: impl IntoIterator<Item = NetAccept<S, L>>,
     ) -> io::Result<Self> {
-        let service = NodeService::<I, S, L, C>::new(note_id, delegate);
+        let mut service = NodeService::<S, L, C>::new(note_id, delegate);
+        for socket in listen {
+            service.listen(socket);
+        }
         let reactor = Reactor::named(service, popol::Poller::new(), s!("node-reactor"))?;
         Ok(Self { reactor })
     }

@@ -23,4 +23,4 @@ mod node;
 mod remotes;
 
 pub use node::{Metrics, Node, NodeController};
-pub use remotes::{DisconnectReason, Inbound, NodeId, Outbound, Remote, Remotes};
+pub use remotes::{DisconnectReason, Inbound, Outbound, Remote, Remotes};

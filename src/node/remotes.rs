@@ -20,16 +20,13 @@
 // limitations under the License.
 
 use std::collections::{hash_map, HashMap};
-use std::fmt::{self, Debug, Display};
-use std::hash::Hash;
+use std::fmt::{self, Debug};
 use std::sync::Arc;
 
 use cyphernet::addr::Addr;
 use reactor::ResourceId;
 
-use crate::{Direction, Marshaller};
-
-pub trait NodeId: Copy + Eq + Ord + Hash + Send + Display {}
+use crate::{Direction, Marshaller, NodeId};
 
 /// Disconnect reason.
 #[derive(Clone, Debug, Display)]
