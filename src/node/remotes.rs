@@ -29,7 +29,7 @@ use reactor::ResourceId;
 
 use crate::{Direction, Marshaller};
 
-pub trait RemoteId: Copy + Eq + Ord + Hash + Send + Display {}
+pub trait NodeId: Copy + Eq + Ord + Hash + Send + Display {}
 
 /// Disconnect reason.
 #[derive(Clone, Debug, Display)]
@@ -69,13 +69,13 @@ impl DisconnectReason {
 /// The initial state of an outbound peer before handshake is completed.
 /// The initial state of an inbound remote before handshake is completed.
 #[derive(Debug)]
-pub struct Outbound<A: Addr, I: RemoteId> {
+pub struct Outbound<A: Addr, I: NodeId> {
     /// Resource ID, if registered.
     pub res_id: Option<ResourceId>,
     /// Remote address.
     pub addr: A,
     /// Remote identity
-    pub node_id: I,
+    pub remote_id: I,
 }
 
 /// The initial state of an inbound remote before handshake is completed.
@@ -88,7 +88,7 @@ pub struct Inbound<A: Addr> {
 }
 
 #[derive(Clone)]
-pub enum Remote<A: Addr, I: RemoteId> {
+pub enum Remote<A: Addr, I: NodeId> {
     /// The state after handshake is completed. Remotes in this state are handled by the underlying
     /// processor.
     Connected {
@@ -100,13 +100,13 @@ pub enum Remote<A: Addr, I: RemoteId> {
     /// The peer was scheduled for disconnection. Once the transport is handed over
     /// by the reactor, we can consider it disconnected.
     Disconnecting {
-        id: Option<I>,
+        remote_id: Option<I>,
         reason: DisconnectReason,
         direction: Direction,
     },
 }
 
-impl<A: Addr + Debug, I: RemoteId> Debug for Remote<A, I> {
+impl<A: Addr + Debug, I: NodeId> Debug for Remote<A, I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Connected {
@@ -120,14 +120,18 @@ impl<A: Addr + Debug, I: RemoteId> Debug for Remote<A, I> {
     }
 }
 
-impl<A: Addr, I: RemoteId> Remote<A, I> {
+impl<A: Addr, I: NodeId> Remote<A, I> {
     /// Return the remote id, if any.
     pub fn remote_id(&self) -> Option<I> {
         match self {
-            Self::Connected { remote_id: id, .. } | Self::Disconnecting { id: Some(id), .. } => {
-                Some(*id)
-            }
-            Self::Disconnecting { id: None, .. } => None,
+            Self::Connected { remote_id, .. }
+            | Self::Disconnecting {
+                remote_id: Some(remote_id),
+                ..
+            } => Some(*remote_id),
+            Self::Disconnecting {
+                remote_id: None, ..
+            } => None,
         }
     }
 
@@ -158,13 +162,13 @@ impl<A: Addr, I: RemoteId> Remote<A, I> {
 
 /// Holds connected remotes.
 #[derive(Clone, Debug)]
-pub struct Remotes<A: Addr, I: RemoteId>(HashMap<ResourceId, Remote<A, I>>);
+pub struct Remotes<A: Addr, I: NodeId>(HashMap<ResourceId, Remote<A, I>>);
 
-impl<A: Addr, I: RemoteId> Default for Remotes<A, I> {
+impl<A: Addr, I: NodeId> Default for Remotes<A, I> {
     fn default() -> Self { Self(empty!()) }
 }
 
-impl<A: Addr, I: RemoteId> Remotes<A, I> {
+impl<A: Addr, I: NodeId> Remotes<A, I> {
     pub fn get_mut(&mut self, res_id: &ResourceId) -> Option<&mut Remote<A, I>> {
         self.0.get_mut(res_id)
     }
