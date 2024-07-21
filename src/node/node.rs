@@ -19,6 +19,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::any::Any;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
@@ -37,7 +38,11 @@ use crate::{
 };
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub enum NodeCtl {}
+pub enum NodeCtl {
+    /// Close all connections, unbind listeners, stop the reactor loop and complete the reactor
+    /// thread.
+    Terminate,
+}
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct Metrics {
@@ -225,6 +230,17 @@ impl<
             #[cfg(feature = "log")]
             log::warn!(target: "wire", "Tried to cleanup unknown remote with id={res_id} (fd={fd})");
         }
+    }
+
+    /// Adds terminate action to the action queue, such that on the next reactor event loop run it
+    /// will receive it and perform the termination procedure.
+    fn terminate(&mut self) {
+        #[cfg(feature = "log")]
+        log::info!(target: "wire", "Scheduling to terminate the reactor and client service");
+
+        // TODO: Add correct termination: close all connections and unbind listeners
+
+        self.actions.push_back(Action::Terminate);
     }
 }
 
@@ -513,7 +529,12 @@ impl<
         }
     }
 
-    fn handle_command(&mut self, cmd: Self::Command) { self.controller.on_command(cmd) }
+    fn handle_command(&mut self, cmd: NodeCtl) {
+        self.controller.on_command(cmd);
+        if cmd == NodeCtl::Terminate {
+            self.terminate();
+        }
+    }
 
     fn handle_error(&mut self, err: Error<Self::Listener, Self::Transport>) {
         match err {
@@ -648,5 +669,16 @@ impl Node {
         }
         let reactor = Reactor::named(service, popol::Poller::new(), s!("node-reactor"))?;
         Ok(Self { reactor })
+    }
+
+    /// Terminates the node, closing all connections, unbinding listeners and stopping the reactor
+    /// thread.
+    pub fn terminate(self) -> Result<(), Box<dyn Any + Send>> {
+        self.reactor
+            .controller()
+            .cmd(NodeCtl::Terminate)
+            .map_err(|err| Box::new(err) as Box<dyn Any + Send>)?;
+        self.reactor.join()?;
+        Ok(())
     }
 }
