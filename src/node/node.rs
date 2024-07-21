@@ -25,11 +25,10 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::{io, net};
 
 use cyphernet::addr::Addr;
-use cyphernet::EcPk;
 use reactor::poller::popol;
 use reactor::{Action, Error, Reactor, Resource, ResourceId, ResourceType, Timestamp};
 
-use super::{DisconnectReason, Inbound, Outbound, Remote, Remotes};
+use super::{DisconnectReason, Inbound, Outbound, Remote, RemoteId, Remotes};
 use crate::{
     Direction, ListenerEvent, NetAccept, NetConnection, NetListener, NetSession, NetTransport,
 };
@@ -50,7 +49,7 @@ pub struct Metrics {
 
 pub trait NodeController<
     A: Addr + Send,
-    I: EcPk,
+    I: RemoteId,
     S: NetSession,
     L: NetListener<Stream = S::Connection>,
 >: Send
@@ -80,7 +79,7 @@ pub trait NodeController<
 }
 
 struct NodeService<
-    I: EcPk,
+    I: RemoteId,
     S: NetSession,
     L: NetListener<Stream = S::Connection>,
     C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L>,
@@ -98,7 +97,7 @@ struct NodeService<
 }
 
 impl<
-        I: EcPk,
+        I: RemoteId,
         S: NetSession,
         L: NetListener<Stream = S::Connection>,
         C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L>,
@@ -169,7 +168,7 @@ impl<
 }
 
 impl<
-        I: EcPk,
+        I: RemoteId,
         S: NetSession,
         L: NetListener<Stream = S::Connection>,
         C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L>,
@@ -264,7 +263,7 @@ impl<
 }
 
 impl<
-        I: EcPk,
+        I: RemoteId,
         S: NetSession,
         L: NetListener<Stream = S::Connection>,
         C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L>,
@@ -291,7 +290,7 @@ impl Node {
     /// server address. Will attempt to connect to the server automatically once the reactor thread
     /// has started.
     pub fn new<
-        I: EcPk + 'static,
+        I: RemoteId + 'static,
         S: NetSession + 'static,
         L: NetListener<Stream = S::Connection> + 'static,
         C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L> + 'static,
