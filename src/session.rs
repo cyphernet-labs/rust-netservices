@@ -47,36 +47,35 @@ pub type NoiseSession<E, D, S> = NetProtocol<NoiseState<E, D>, S>;
 pub type Socks5Session<S> = NetProtocol<socks5::Socks5, S>;
 
 #[cfg(feature = "eidolon")]
-pub type CypherSession<I, D> =
-    EidolonSession<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
+pub type CypherSession<I, D, T> =
+    EidolonSession<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<T>>>;
 
 #[cfg(feature = "eidolon")]
 pub type EidolonReader<S> = NetReader<S>;
 #[cfg(feature = "eidolon")]
 pub type EidolonWriter<I, S> = NetWriter<EidolonRuntime<I>, S>;
 #[cfg(feature = "eidolon")]
-pub type CypherReader<D> =
-    EidolonReader<NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
+pub type CypherReader<D, T> = EidolonReader<NoiseSession<x25519::PrivateKey, D, Socks5Session<T>>>;
 #[cfg(feature = "eidolon")]
-pub type CypherWriter<I, D> =
-    EidolonWriter<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<TcpStream>>>;
+pub type CypherWriter<I, D, T> =
+    EidolonWriter<I, NoiseSession<x25519::PrivateKey, D, Socks5Session<T>>>;
 
 #[cfg(feature = "eidolon")]
-impl<I: EcSign, D: Digest> CypherSession<I, D> {
+impl<I: EcSign, D: Digest, T: NetSession> CypherSession<I, D, T> {
     #[cfg(feature = "reactor")]
     pub fn connect_nonblocking<const HASHLEN: usize>(
         remote_addr: NetAddr<HostName>,
         cert: Cert<I::Sig>,
         allowed_ids: Vec<I::Pk>,
         signer: I,
-        proxy_addr: NetAddr<InetHost>,
+        proxy_addr: <T::Connection as NetConnection>::Addr,
         force_proxy: bool,
         timeout: Duration,
     ) -> io::Result<Self> {
         let connection = if force_proxy {
-            TcpStream::connect_nonblocking(proxy_addr, timeout)?
+            T::Connection::connect_nonblocking(proxy_addr, timeout)?
         } else {
-            TcpStream::connect_nonblocking(remote_addr.connection_addr(proxy_addr), timeout)?
+            T::Connection::connect_nonblocking(remote_addr.connection_addr(proxy_addr), timeout)?
         };
         Ok(Self::with_config::<HASHLEN>(
             remote_addr,
@@ -164,7 +163,7 @@ impl<I: EcSign, D: Digest> CypherSession<I, D> {
 
     fn with_config<const HASHLEN: usize>(
         remote_addr: NetAddr<HostName>,
-        connection: TcpStream,
+        connection: T,
         direction: Direction,
         cert: Cert<I::Sig>,
         allowed_ids: Vec<I::Pk>,
