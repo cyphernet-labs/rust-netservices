@@ -20,8 +20,8 @@
 // limitations under the License.
 
 use std::collections::{hash_map, HashMap};
-use std::fmt;
-use std::fmt::{Debug, Display};
+use std::fmt::{self, Debug, Display};
+use std::hash::Hash;
 use std::sync::Arc;
 
 use cyphernet::addr::Addr;
@@ -29,7 +29,7 @@ use reactor::ResourceId;
 
 use crate::{Direction, Marshaller};
 
-pub trait RemoteId: Copy + Eq + Ord + Send + Display {}
+pub trait RemoteId: Copy + Eq + Ord + Hash + Send + Display {}
 
 /// Disconnect reason.
 #[derive(Clone, Debug, Display)]
@@ -41,8 +41,8 @@ pub enum DisconnectReason {
     /// Error with an underlying established connection. Sometimes, reconnecting
     /// after such an error is possible.
     Connection(Arc<dyn std::error::Error + Sync + Send>),
-    /// Session error.
-    Session(Arc<dyn std::error::Error + Sync + Send>),
+    /// Message framing error.
+    Framing(Arc<dyn std::error::Error + Sync + Send>),
     /// Session conflicts with existing session.
     #[display("conflict")]
     Conflict,
@@ -75,7 +75,7 @@ pub struct Outbound<A: Addr, I: RemoteId> {
     /// Remote address.
     pub addr: A,
     /// Remote identity
-    pub id: I,
+    pub node_id: I,
 }
 
 /// The initial state of an inbound remote before handshake is completed.
@@ -93,8 +93,8 @@ pub enum Remote<A: Addr, I: RemoteId> {
     /// processor.
     Connected {
         addr: A,
-        id: I,
-        inbox: Marshaller,
+        remote_id: I,
+        marshaller: Marshaller,
         direction: Direction,
     },
     /// The peer was scheduled for disconnection. Once the transport is handed over
@@ -111,7 +111,7 @@ impl<A: Addr + Debug, I: RemoteId> Debug for Remote<A, I> {
         match self {
             Self::Connected {
                 addr,
-                id,
+                remote_id: id,
                 direction,
                 ..
             } => write!(f, "Connected({direction}, {addr:?}, {id})"),
@@ -122,9 +122,11 @@ impl<A: Addr + Debug, I: RemoteId> Debug for Remote<A, I> {
 
 impl<A: Addr, I: RemoteId> Remote<A, I> {
     /// Return the remote id, if any.
-    pub fn id(&self) -> Option<I> {
+    pub fn remote_id(&self) -> Option<I> {
         match self {
-            Self::Connected { id, .. } | Self::Disconnecting { id: Some(id), .. } => Some(*id),
+            Self::Connected { remote_id: id, .. } | Self::Disconnecting { id: Some(id), .. } => {
+                Some(*id)
+            }
             Self::Disconnecting { id: None, .. } => None,
         }
     }
@@ -148,8 +150,8 @@ impl<A: Addr, I: RemoteId> Remote<A, I> {
         Self::Connected {
             direction,
             addr,
-            id,
-            inbox: Marshaller::default(),
+            remote_id: id,
+            marshaller: Marshaller::default(),
         }
     }
 }
@@ -183,20 +185,24 @@ impl<A: Addr, I: RemoteId> Remotes<A, I> {
     pub fn lookup(&self, id: &I) -> Option<(ResourceId, &Remote<A, I>)> {
         self.0
             .iter()
-            .find(|(_, remote)| remote.id() == Some(*id))
+            .find(|(_, remote)| remote.remote_id() == Some(*id))
             .map(|(res_id, remote)| (*res_id, remote))
     }
 
     pub fn lookup_mut(&mut self, id: &I) -> Option<(ResourceId, &mut Remote<A, I>)> {
         self.0
             .iter_mut()
-            .find(|(_, remote)| remote.id() == Some(*id))
+            .find(|(_, remote)| remote.remote_id() == Some(*id))
             .map(|(res_id, remote)| (*res_id, remote))
     }
 
     pub fn active(&self) -> impl Iterator<Item = (ResourceId, &I, Direction)> {
         self.0.iter().filter_map(|(res_id, remote)| match remote {
-            Remote::Connected { id, direction, .. } => Some((*res_id, id, *direction)),
+            Remote::Connected {
+                remote_id: id,
+                direction,
+                ..
+            } => Some((*res_id, id, *direction)),
             Remote::Disconnecting { .. } => None,
         })
     }

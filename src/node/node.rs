@@ -21,6 +21,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
+use std::io::Write;
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::Arc;
 use std::{io, net};
@@ -31,8 +32,8 @@ use reactor::{Action, Error, Reactor, Resource, ResourceId, ResourceType, Timest
 
 use super::{DisconnectReason, Inbound, Outbound, Remote, RemoteId, Remotes};
 use crate::{
-    Direction, ListenerEvent, NetAccept, NetConnection, NetListener, NetSession, NetTransport,
-    SessionEvent,
+    Direction, Frame, ListenerEvent, NetAccept, NetConnection, NetListener, NetSession,
+    NetTransport, SessionEvent,
 };
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -56,18 +57,27 @@ pub trait NodeController<
     L: NetListener<Stream = S::Connection>,
 >: Send
 {
-    type Request: TryFrom<Vec<u8>, Error: std::error::Error>;
-    type Reply: Into<Vec<u8>>;
+    type Frame: Frame;
 
+    // TODO: Replace with passing sender object
     fn extract_actions(
         &mut self,
     ) -> impl IntoIterator<Item = Action<NetAccept<S, L>, NetTransport<S>>>;
 
-    fn should_accept(&mut self, remote: &A) -> bool;
-    fn accept(&mut self, remote: A, connection: S::Connection)
-        -> Result<S, impl std::error::Error>;
+    fn should_accept(&mut self, remote: &A, time: Timestamp) -> bool;
+
+    fn accept(
+        &mut self,
+        remote: A,
+        connection: S::Connection,
+        time: Timestamp,
+    ) -> Result<S, impl std::error::Error>;
 
     fn on_listening(&mut self, socket: net::SocketAddr);
+
+    fn on_listener_failure(&mut self, res_id: ResourceId, err: io::Error, time: Timestamp);
+
+    fn on_established(&mut self, id: I, addr: A, direction: Direction, time: Timestamp);
 
     fn on_disconnected(&mut self, id: I, direction: Direction, reason: &DisconnectReason);
 
@@ -80,13 +90,12 @@ pub trait NodeController<
 
     fn on_timer(&mut self);
 
-    fn on_request(&mut self, req: Self::Request, sender: impl Fn(Self::Reply));
+    // TODO: Pass sender
+    fn on_frame(&mut self, req: Self::Frame);
 
-    fn on_request_unparsable(
-        &mut self,
-        err: <Self::Request as TryFrom<Vec<u8>>>::Error,
-        sender: impl Fn(Self::Reply),
-    );
+    /// Called on failure of frame parsing, before disconnecting the remote and calling
+    /// [`on_disconnect`].
+    fn on_frame_unparsable(&mut self, err: <Self::Frame as Frame>::Error);
 }
 
 struct NodeService<
@@ -95,6 +104,8 @@ struct NodeService<
     L: NetListener<Stream = S::Connection>,
     C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L>,
 > {
+    /// Id of this node.
+    local_id: I,
     /// Server message processor implementing server business logic.
     controller: C,
     listening: HashMap<RawFd, net::SocketAddr>,
@@ -114,8 +125,9 @@ impl<
         C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L>,
     > NodeService<I, S, L, C>
 {
-    pub fn new(controller: C) -> Self {
+    pub fn new(id: I, controller: C) -> Self {
         NodeService {
+            local_id: id,
             controller,
             listening: empty!(),
             inbound: empty!(),
@@ -148,7 +160,7 @@ impl<
                 self.outbound
                     .values()
                     .find(|o| o.res_id == Some(res_id))
-                    .map(|o| (o.id.clone(), Direction::Outbound))
+                    .map(|o| (o.node_id.clone(), Direction::Outbound))
             }
             Entry::Occupied(mut entry) => match entry.get() {
                 Remote::Disconnecting { id, direction, .. } => {
@@ -157,7 +169,11 @@ impl<
 
                     id.as_ref().map(|n| (n.clone(), *direction))
                 }
-                Remote::Connected { id, direction, .. } => {
+                Remote::Connected {
+                    remote_id: id,
+                    direction,
+                    ..
+                } => {
                     #[cfg(feature = "log")]
                     log::debug!(target: "wire", "Disconnecting remote with id={res_id}: {reason}");
 
@@ -180,18 +196,18 @@ impl<
     fn cleanup(&mut self, res_id: ResourceId, fd: RawFd) {
         if self.inbound.remove(&fd).is_some() {
             #[cfg(feature = "log")]
-            log::debug!(target: "wire", "Cleaning up inbound peer state with id={res_id} (fd={fd})");
+            log::debug!(target: "wire", "Cleaning up inbound remote state with id={res_id} (fd={fd})");
         } else if let Some(outbound) = self.outbound.remove(&fd) {
             #[cfg(feature = "log")]
-            log::debug!(target: "wire", "Cleaning up outbound peer state with id={res_id} (fd={fd})");
+            log::debug!(target: "wire", "Cleaning up outbound remote state with id={res_id} (fd={fd})");
             self.controller.on_disconnected(
-                outbound.id,
+                outbound.node_id,
                 Direction::Outbound,
                 &DisconnectReason::connection(),
             );
         } else {
             #[cfg(feature = "log")]
-            log::warn!(target: "wire", "Tried to cleanup unknown peer with id={res_id} (fd={fd})");
+            log::warn!(target: "wire", "Tried to cleanup unknown remote with id={res_id} (fd={fd})");
         }
     }
 }
@@ -213,9 +229,9 @@ impl<
 
     fn handle_listener_event(
         &mut self,
-        _: ResourceId,
+        res_id: ResourceId,
         event: <Self::Listener as Resource>::Event,
-        _: Timestamp,
+        time: Timestamp,
     ) {
         match event {
             ListenerEvent::Accepted(connection) => {
@@ -232,7 +248,7 @@ impl<
 
                 // If the service doesn't want to accept this connection,
                 // we drop the connection here, which disconnects the socket.
-                if !self.controller.should_accept(&remote) {
+                if !self.controller.should_accept(&remote, time) {
                     #[cfg(feature = "log")]
                     log::debug!(target: "wire", "Rejecting inbound connection from {remote} (fd={fd})");
                     drop(connection);
@@ -240,7 +256,7 @@ impl<
                     return;
                 }
 
-                let session = match self.controller.accept(remote.clone(), connection) {
+                let session = match self.controller.accept(remote.clone(), connection, time) {
                     Ok(s) => s,
                     Err(e) => {
                         #[cfg(feature = "log")]
@@ -268,21 +284,189 @@ impl<
             ListenerEvent::Failure(err) => {
                 #[cfg(feature = "log")]
                 log::error!(target: "wire", "Error listening for inbound connections: {err}");
+                self.controller.on_listener_failure(res_id, err, time);
             }
         }
     }
 
     fn handle_transport_event(
         &mut self,
-        id: ResourceId,
+        res_id: ResourceId,
         event: <Self::Transport as Resource>::Event,
         time: Timestamp,
     ) {
         match event {
-            SessionEvent::Established(_, _) => todo!(),
-            SessionEvent::Data(_) => todo!(),
+            SessionEvent::Established(fd, artifact) => {
+                // SAFETY: With the NoiseXK protocol, there is always a remote static key.
+                let remote_id = artifact.remote_id();
+                // Make sure we don't try to connect to ourselves by mistake.
+                if &remote_id == self.local_id {
+                    #[cfg(feature = "log")]
+                    log::error!(target: "wire", "Self-connection detected, disconnecting");
+                    self.disconnect(res_id, DisconnectReason::SelfConnection);
+
+                    return;
+                }
+                let (addr, direction) = if let Some(remote) = self.inbound.remove(&fd) {
+                    self.metrics.entry(remote_id).or_default().inbound_connection_attempts += 1;
+                    (remote.addr, Direction::Inbound)
+                } else if let Some(remote) = self.outbound.remove(&fd) {
+                    assert_eq!(remote_id, remote.node_id);
+                    (remote.addr, Direction::Outbound)
+                } else {
+                    #[cfg(feature = "log")]
+                    log::error!(target: "wire", "Session for {remote_id} (id={res_id}) not found");
+                    return;
+                };
+                #[cfg(feature = "log")]
+                log::debug!(
+                    target: "wire",
+                    "Session established with {remote_id} (id={res_id}, fd={fd}, {direction})",
+                );
+
+                // Connections to close.
+                let mut disconnect = Vec::new();
+
+                // Handle conflicting connections.
+                // This is typical when nodes have mutually configured their nodes to connect to
+                // each other on startup. We handle this by deterministically choosing one node
+                // whos outbound connection is the one that is kept. The other connections are
+                // dropped.
+                {
+                    // Whether we have precedence in case of conflicting connections.
+                    // Having precedence means that our outbound connection will win over
+                    // the other node's outbound connection.
+                    let precedence = self.local_id > remote_id;
+
+                    // Pre-existing connections that conflict with this newly established session.
+                    // Note that we can't know whether a connection is conflicting before we get the
+                    // remote static key.
+                    let mut conflicting = Vec::new();
+
+                    // Active sessions with the same NID but a different Resource ID are
+                    // conflicting.
+                    conflicting.extend(
+                        self.remotes
+                            .active()
+                            .filter(|(c_id, d, _)| **d == remote_id && *c_id != res_id)
+                            .map(|(c_id, _, direction)| (c_id, direction)),
+                    );
+
+                    // Outbound connection attempts with the same remote key but a different file
+                    // descriptor are conflicting.
+                    conflicting.extend(self.outbound.iter().filter_map(|(c_fd, other)| {
+                        if other.node_id == remote_id && *c_fd != fd {
+                            other.res_id.map(|c_id| (c_id, Direction::Outbound))
+                        } else {
+                            None
+                        }
+                    }));
+
+                    for (c_id, c_link) in conflicting {
+                        // If we have precedence, the inbound connection is closed.
+                        // In the case where both connections are inbound or outbound,
+                        // we close the newer connection, ie. the one with the higher
+                        // resource id.
+                        let close = match (direction, c_link) {
+                            (Direction::Inbound, Direction::Outbound) => {
+                                if precedence {
+                                    res_id
+                                } else {
+                                    c_id
+                                }
+                            }
+                            (Direction::Outbound, Direction::Inbound) => {
+                                if precedence {
+                                    c_id
+                                } else {
+                                    res_id
+                                }
+                            }
+                            (Direction::Inbound, Direction::Inbound) => res_id.max(c_id),
+                            (Direction::Outbound, Direction::Outbound) => res_id.max(c_id),
+                        };
+
+                        #[cfg(feature = "log")]
+                        log::warn!(
+                            target: "wire", "Established session (id={res_id}) conflicts with existing session for {remote_id} (id={c_id})"
+                        );
+                        disconnect.push(close);
+                    }
+                }
+                for conflicting_id in &disconnect {
+                    #[cfg(feature = "log")]
+                    log::warn!(
+                        target: "wire", "Closing conflicting session (id={conflicting_id}) with {remote_id}.."
+                    );
+                    // Disconnect and return the associated NID of the remote, if available.
+                    if let Some((remote_id, link)) =
+                        self.disconnect(*conflicting_id, DisconnectReason::Conflict)
+                    {
+                        // We disconnect the session eagerly because otherwise we will get the new
+                        // `connected` event before the `disconnect`, resulting in a duplicate
+                        // connection.
+                        self.controller.on_disconnected(
+                            remote_id,
+                            link,
+                            &DisconnectReason::Conflict,
+                        );
+                    }
+                }
+                if !disconnect.contains(&res_id) {
+                    self.remotes
+                        .insert(res_id, Remote::connected(remote_id, addr.clone(), direction));
+                    self.controller.on_established(remote_id, addr, direction, time);
+                }
+            }
+            SessionEvent::Data(data) => {
+                let Some(Remote::Connected {
+                    remote_id,
+                    marshaller,
+                    ..
+                }) = self.remotes.get_mut(&res_id)
+                else {
+                    #[cfg(feature = "log")]
+                    log::warn!(target: "wire", "Dropping message from unconnected remote (id={res_id})");
+                    return;
+                };
+
+                let metrics = self.metrics.entry(*remote_id).or_default();
+                metrics.bytes_received += data.len();
+
+                if let Err(err) = marshaller.write_all(&data) {
+                    #[cfg(feature = "log")]
+                    log::error!(target: "wire", "Unable to process messages fast enough for remote {res_id}; disconnecting");
+                    self.disconnect(res_id, DisconnectReason::Framing(Arc::new(err)));
+
+                    return;
+                }
+
+                loop {
+                    match marshaller.pop::<C::Frame>() {
+                        Ok(Some(frame)) => {
+                            self.controller.on_frame(frame);
+                        }
+                        Ok(None) => {
+                            // Buffer is empty, or frame isn't complete.
+                            break;
+                        }
+                        Err(err) => {
+                            #[cfg(feature = "log")]
+                            log::error!(target: "wire", "Invalid gossip message from {remote_id}: {err}");
+
+                            if marshaller.read_queue_len() != 0 {
+                                #[cfg(feature = "log")]
+                                log::debug!(target: "wire", "Dropping read buffer for {remote_id} with {} bytes", marshaller.read_queue_len());
+                            }
+                            self.controller.on_frame_unparsable(err);
+                            self.disconnect(res_id, DisconnectReason::Framing(Arc::new(err)));
+                            break;
+                        }
+                    }
+                }
+            }
             SessionEvent::Terminated(err) => {
-                self.disconnect(id, DisconnectReason::Connection(Arc::new(err)));
+                self.disconnect(res_id, DisconnectReason::Connection(Arc::new(err)));
             }
         }
     }
@@ -297,7 +481,7 @@ impl<
             ResourceType::Transport => {
                 if let Some(outbound) = self.outbound.get_mut(&fd) {
                     #[cfg(feature = "log")]
-                    log::debug!(target: "wire", "Outbound remote resource registered for {} with id={id} (fd={fd})", outbound.id);
+                    log::debug!(target: "wire", "Outbound remote resource registered for {} with id={id} (fd={fd})", outbound.node_id);
                     outbound.res_id = Some(id);
                 } else if let Some(inbound) = self.inbound.get_mut(&fd) {
                     #[cfg(feature = "log")]
@@ -337,8 +521,8 @@ impl<
                 // therefore there is no need to initiate a disconnection. We simply remove
                 // the remote from the map.
                 match self.remotes.remove(&id) {
-                    Some(mut remote) => {
-                        if let Some(id) = remote.id() {
+                    Some(remote) => {
+                        if let Some(id) = remote.remote_id() {
                             self.controller.on_disconnected(
                                 id,
                                 remote.direction(),
@@ -379,10 +563,10 @@ impl<
                         // Disconnect TCP stream.
                         drop(transport);
 
-                        // If there is no NID, the service is not aware of the peer.
+                        // If there is no NID, the service is not aware of the remote.
                         if let Some(id) = id {
                             // In the case of a conflicting connection, there will be two resources
-                            // for the peer. However, at the service level, there is only one, and
+                            // for the remote. However, at the service level, there is only one, and
                             // it is identified by NID.
                             //
                             // Therefore, we specify which of the connections we're closing by
@@ -391,7 +575,7 @@ impl<
                         }
                         entry.remove();
                     }
-                    Remote::Connected { id, .. } => {
+                    Remote::Connected { remote_id: id, .. } => {
                         panic!(
                             "Unexpected handover of connected remote {} with id={res_id} (fd={fd})",
                             id
@@ -414,6 +598,7 @@ impl<
     type Item = Action<NetAccept<S, L>, NetTransport<S>>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // TODO: Remove once sender refactoring is complete
         self.actions.extend(self.controller.extract_actions());
         self.actions.pop_front()
     }
@@ -437,9 +622,10 @@ impl Node {
         L: NetListener<Stream = S::Connection> + 'static,
         C: NodeController<<S::Connection as NetConnection>::Addr, I, S, L> + 'static,
     >(
+        id: I,
         delegate: C,
     ) -> io::Result<Self> {
-        let service = NodeService::<I, S, L, C>::new(delegate);
+        let service = NodeService::<I, S, L, C>::new(id, delegate);
         let reactor = Reactor::named(service, popol::Poller::new(), s!("node-reactor"))?;
         Ok(Self { reactor })
     }
