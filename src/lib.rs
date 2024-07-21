@@ -40,7 +40,7 @@ pub mod client;
 #[cfg(feature = "reactor")]
 pub mod server;
 #[cfg(feature = "reactor")]
-pub mod peer;
+pub mod node;
 
 pub const READ_BUFFER_SIZE: usize = u16::MAX as usize;
 
@@ -54,7 +54,8 @@ pub use server::tunnel;
 pub use session::{NetProtocol, NetSession, NetStateMachine};
 pub use split::{NetReader, NetWriter, SplitIo, SplitIoError, TcpReader, TcpWriter};
 
-#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug, Display)]
+#[display("lowercase")]
 pub enum Direction {
     Inbound,
     Outbound,

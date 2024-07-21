@@ -19,4 +19,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod peer;
+mod node;
+mod remotes;
+
+pub use node::{Metrics, Node, NodeController};
+pub use remotes::{DisconnectReason, Inbound, Outbound, Remote, Remotes};
