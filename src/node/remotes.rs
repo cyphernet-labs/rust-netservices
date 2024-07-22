@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Written in 2022-2024 by
+//     Alexis Sellier <cloudhead@radicle.xyz>
 //     Dr. Maxim Orlovsky <orlovsky@cyphernet.org>
 //
 // Copyright 2022-2024 Cyphernet Labs, IDCS, Switzerland
