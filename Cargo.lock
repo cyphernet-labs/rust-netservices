@@ -196,8 +196,7 @@ checksum = "f3b7eb4404b8195a9abb6356f4ac07d8ba267045c8d6d220ac4dc992e6cc75df"
 [[package]]
 name = "cypheraddr"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba5c54d2ad4ab9941383519471b75d12abc1a7b4779265e233168f2703a730d9"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=master#f42396139a6321615dd651bc09073052add14a05"
 dependencies = [
  "amplify",
  "base32",
@@ -208,8 +207,7 @@ dependencies = [
 [[package]]
 name = "cyphergraphy"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b67c16c8ef5ddcdab57aab83fd8e770540ea3682ccdae09642c63575b0da2184"
+source = "git+https://github.com/cyphernet-dao/rust-cyphernet?branch=master#f42396139a6321615dd651bc09073052add14a05"
 dependencies = [
  "amplify",
  "ec25519",
@@ -344,8 +342,7 @@ dependencies = [
 [[package]]
 name = "io-reactor"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77d78c3e630f04a61ec86ba171c0bbd161434a7f2e8e4a67728320d4ce7c6c79"
+source = "git+https://github.com/rust-amplify/io-reactor?branch=terminate#2f4a8a6d83b67a2e68906c27ca3aead47394db21"
 dependencies = [
  "amplify",
  "crossbeam-channel",
